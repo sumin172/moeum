@@ -4,7 +4,8 @@ spring:
       ddl-auto: none
     open-in-view: false
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration
   threads:
     virtual:
       enabled: true
