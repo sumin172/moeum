@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gradle --version)",
+      "Bash(where java *)",
+      "Bash(java -version)",
+      "Bash(where docker *)",
+      "Bash(docker --version)",
+      "Bash(curl -L \"https://services.gradle.org/distributions/gradle-8.12.1-bin.zip\" -o /tmp/gradle.zip)",
+      "Bash(cd /tmp)",
+      "Bash(unzip -q gradle.zip)",
+      "Bash(JAVA_HOME=\"D:/Dev/Tool/java21\" /tmp/gradle-8.12.1/bin/gradle wrapper --gradle-version 8.12.1)",
+      "Read(//c/Users/mas/.claude/**)",
+      "Bash(xargs head *)"
+    ]
+  }
+}

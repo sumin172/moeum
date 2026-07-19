@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: moeum-postgres
+    environment:
+      POSTGRES_DB: moeum
+      POSTGRES_USER: moeum
+      POSTGRES_PASSWORD: moeum
+    ports:
+      - "5432:5432"
+    volumes:
+      - moeum-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moeum"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+volumes:
+  moeum-postgres-data:

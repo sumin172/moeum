@@ -1,0 +1,20 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  flyway:
+    enabled: false
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8080
+  tomcat:
+    connection-timeout: 15s
+    keep-alive-timeout: 5s
+
+logging:
+  level:
+    com.moeum: DEBUG
