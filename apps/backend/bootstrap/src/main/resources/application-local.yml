@@ -13,3 +13,9 @@ spring:
       max-lifetime: 1800000
       connection-timeout: 10000
       pool-name: Moeum-HikariPool
+
+moeum:
+  jwt:
+    # 로컬 개발 전용 시크릿. 운영 환경에서는 환경변수/시크릿 매니저로 주입한다.
+    secret: local-dev-only-jwt-secret-key-must-be-32-bytes-min
+    expiration-seconds: 3600
