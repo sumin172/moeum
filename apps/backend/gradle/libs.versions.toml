@@ -3,16 +3,23 @@ kotlin = "2.1.20"
 spring-boot = "3.4.3"
 spring-dependency-management = "1.1.7"
 archunit = "1.4.2"
+jjwt = "0.13.0"
 
 [libraries]
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
 spring-boot-starter-data-jpa = { module = "org.springframework.boot:spring-boot-starter-data-jpa" }
+spring-boot-starter-security = { module = "org.springframework.boot:spring-boot-starter-security" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+spring-security-test = { module = "org.springframework.security:spring-security-test" }
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect" }
 postgresql = { module = "org.postgresql:postgresql" }
 flyway-core = { module = "org.flywaydb:flyway-core" }
 flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql" }
 archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
+jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
+jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
+jakarta-servlet-api = { module = "jakarta.servlet:jakarta.servlet-api" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
