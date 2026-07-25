@@ -46,9 +46,12 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 | 일기 생성 초안 | Claude Haiku 4.5 | 하루 1회, 한국어 품질 |
 | Insight 생성 | Claude Sonnet 4.6 | 주·월 1회, 품질 우선 |
 
-**비용 제어 원칙**
-- 대화 반응: 최근 8~10개 메시지만 컨텍스트로 사용
-- 응답 토큰 상한: 일상 반응 150 토큰
+**비용 제어 원칙 (2026-07-25 갱신)**
+- 대화 반응: 고정된 "최근 N개" 대신 해당 ConversationDay(하루)의 전체 메시지를 컨텍스트로 사용 — LLM API가 무상태라 컨텍스트를 매번 재전송해야 하며, 하루 단위 자연 경계를 그대로 씀
+- 컨텍스트 재전송 비용은 프롬프트/컨텍스트 캐싱(Gemini/Claude 공통 지원)으로 완화 — 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
+- 유저당 일일 메시지/토큰 quota를 하드 캡으로 둠(요금제와 무관, 어뷰징·버그로 인한 비용 폭주 방지 — Stage 6 요금제별 Rate Limit과는 별개의 안전장치)
+- 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 함
+- 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축)
 - 시스템 프롬프트 최소화
 - 개발 중 전체를 Gemini 무료 티어로 처리
 
@@ -167,7 +170,7 @@ notification    → 여러 모듈의 integration event
 
 **Identity 의존 최소화**
 
-대부분의 모듈은 인증된 UserId만 필요하다. JWT 검증 후 SecurityContext에서 UserId를 꺼내면 Identity API 호출이 필요 없다. JWT claim에 userId, subscriptionTier 등 자주 쓰는 컨텍스트를 포함해 모듈 간 컴파일 의존을 줄인다.
+대부분의 모듈은 인증된 UserId만 필요하다. JWT 검증 후 SecurityContext에서 UserId를 꺼내면 Identity API 호출이 필요 없다. JWT claim에는 자주 안 바뀌고 stale해도 피해가 작은 값(userId 등)만 포함한다. 구독 등급처럼 자주 바뀌고 stale하면 매출/신뢰 문제가 되는 값은 authorities든 plain claim이든 JWT에 넣지 않고, 사용 시점에 살아있는 소스(DB/캐시)에서 조회한다 (2026-07-25 결정, subscriptionTier를 JwtClaims에서 제거함).
 
 Identity publicapi 호출이 필요한 경우만:
 - 사용자 탈퇴 여부 확인
@@ -298,15 +301,17 @@ interface InsightGenerator {
 Aggregate가 발생시키는 이벤트. 타입 안전. 모듈 외부로 직접 노출하지 않는다.
 
 ```kotlin
-sealed interface JournalDomainEvent
+sealed class JournalDomainEvent : DomainEvent()
 
 data class JournalConfirmed(
     val journalId: JournalId,
     val userId: UserId,
     val revision: Long,
     val confirmedAt: Instant
-) : JournalDomainEvent
+) : JournalDomainEvent()
 ```
+
+`DomainEvent`는 shared-kernel의 `abstract class DomainEvent`(eventId, occurredAt 자동 생성)를 상속한다. `sealed interface`가 아니라 `sealed class`를 쓰는 이유는 Kotlin에서 interface가 abstract class를 상속할 수 없기 때문이다 — `sealed class`로 exhaustiveness는 유지하면서 공통 필드 자동 생성 혜택을 그대로 받는다.
 
 ### Integration Event (모듈 간 공개 계약)
 

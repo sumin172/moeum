@@ -1,4 +1,4 @@
-package com.moeum.platform.llm
+package com.moeum.platform.llm.journal
 
 data class MomentSnapshot(
     val type: String,

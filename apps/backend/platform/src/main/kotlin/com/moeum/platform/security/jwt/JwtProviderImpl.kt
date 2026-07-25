@@ -1,6 +1,7 @@
-package com.moeum.platform.security
+package com.moeum.platform.security.jwt
 
 import com.moeum.kernel.UserId
+import com.moeum.platform.security.config.JwtProperties
 import io.jsonwebtoken.ExpiredJwtException
 import io.jsonwebtoken.JwtException
 import io.jsonwebtoken.Jwts
@@ -18,7 +19,6 @@ class JwtProviderImpl(
     override fun issue(claims: JwtClaims): String =
         Jwts.builder()
             .subject(claims.userId.value.toString())
-            .claim("subscriptionTier", claims.subscriptionTier)
             .issuedAt(Date.from(claims.issuedAt))
             .expiration(Date.from(claims.expiresAt))
             .signWith(signingKey)
@@ -39,7 +39,6 @@ class JwtProviderImpl(
 
         return JwtClaims(
             userId = UserId.of(claims.subject),
-            subscriptionTier = claims["subscriptionTier"] as? String,
             issuedAt = claims.issuedAt.toInstant(),
             expiresAt = claims.expiration.toInstant(),
         )

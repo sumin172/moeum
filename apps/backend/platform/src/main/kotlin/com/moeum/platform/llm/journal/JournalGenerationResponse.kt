@@ -1,4 +1,4 @@
-package com.moeum.platform.llm
+package com.moeum.platform.llm.journal
 
 import java.util.UUID
 
@@ -9,4 +9,6 @@ data class JournalGenerationResponse(
     val model: String,
     val provider: String,
     val promptVersion: String,
+    val inputTokens: Int,
+    val outputTokens: Int,
 )

@@ -1,4 +1,4 @@
-package com.moeum.platform.security
+package com.moeum.platform.security.jwt
 
 interface JwtProvider {
     fun issue(claims: JwtClaims): String

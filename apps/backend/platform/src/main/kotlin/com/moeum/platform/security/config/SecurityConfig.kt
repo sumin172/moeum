@@ -1,5 +1,7 @@
-package com.moeum.platform.security
+package com.moeum.platform.security.config
 
+import com.moeum.platform.security.filter.JwtAuthenticationEntryPoint
+import com.moeum.platform.security.filter.JwtAuthenticationFilter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -12,6 +14,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 class SecurityConfig(
     private val jwtAuthenticationFilter: JwtAuthenticationFilter,
+    private val jwtAuthenticationEntryPoint: JwtAuthenticationEntryPoint,
 ) {
 
     @Bean
@@ -19,6 +22,7 @@ class SecurityConfig(
         http
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .exceptionHandling { it.authenticationEntryPoint(jwtAuthenticationEntryPoint) }
             .authorizeHttpRequests { it.anyRequest().authenticated() }
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
 

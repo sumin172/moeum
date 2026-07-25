@@ -49,13 +49,18 @@ provider, model, prompt_version, generation_id, generated_at
 
 **9. 삭제 정책은 데이터 유형별로 정의한다**
 
-| 유형 | 정책 |
-|------|------|
-| 일반 UI 삭제 | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
-| 계정 탈퇴 / 영구 삭제 | 유예 기간 후 Hard Delete 또는 비가역 익명화 |
-| 재무/법적 기록 | 법적 보존 정책에 따라 별도 처리 |
+| 유형            | 정책                                     |
+|---------------|----------------------------------------|
+| 일반 UI 삭제      | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
+| 계정 탈퇴 / 영구 삭제 | 유예 기간 후 Hard Delete 또는 비가역 익명화         |
+| 재무/법적 기록      | 법적 보존 정책에 따라 별도 처리                     |
 
 "모든 것에 Soft Delete"가 아니다. 유형마다 보존 기간과 물리 삭제 정책을 정의한다.
+
+**10. JWT claim에는 자주 안 바뀌는 값만 담는다**
+- userId처럼 stale해도 피해가 작은 값만 포함한다
+- 구독 등급처럼 자주 바뀌고 stale하면 매출/신뢰 문제가 되는 값은 authorities든 plain claim이든 형태와 무관하게 JWT에 넣지 않고, 사용 시점에 살아있는 소스(DB/캐시)에서 조회한다
+- 즉시 무효화가 필요해지면(구독 취소, 강제 로그아웃 등) Token Version / Security Stamp 패턴을 후보로 고려한다 (2026-07-25 결정, subscriptionTier를 JwtClaims에서 제거함)
 
 ---
 
@@ -138,6 +143,13 @@ User Entity, Journal Entity, 도메인 enum 전체 → 각 모듈 내부에
 - ConversationResponder / JournalGenerator 인터페이스 뒤에 구현을 숨긴다
 - LLM 호출 실패는 메시지 저장 실패로 이어지지 않는다
 - LLM 장애 격리: Timeout + 제한적 Retry + Circuit Breaker
+
+**비용 제어 원칙 (2026-07-25 결정)**
+- 대화 컨텍스트는 고정된 "최근 N개 메시지" 대신 해당 ConversationDay(하루) 전체를 사용한다 — LLM API는 무상태라 매 호출마다 컨텍스트를 재전송해야 하며, 하루 단위 경계가 이미 자연스러운 컨텍스트 경계다
+- 컨텍스트 재전송 비용은 프롬프트/컨텍스트 캐싱으로 낮춘다 — 컨텍스트 자체(핵심 기록 경험)는 요금제와 무관하게 깎지 않는다
+- 유저당 일일 메시지/토큰 quota를 하드 캡으로 둔다 — 요금제 성숙도와 무관한 circuit breaker(어뷰징·버그로 인한 비용 폭주 방지), Stage 6 요금제별 Rate Limit과는 별개
+- 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 한다
+- 응답(출력) 토큰 상한과 시스템 프롬프트 최소화는 위 컨텍스트(입력) 정책과 별개 축으로 계속 유지한다
 
 ---
 

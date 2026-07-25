@@ -1,4 +1,4 @@
-package com.moeum.platform.llm
+package com.moeum.platform.llm.conversation
 
 import java.util.UUID
 
@@ -8,4 +8,6 @@ data class ConversationResponse(
     val model: String,
     val provider: String,
     val promptVersion: String,
+    val inputTokens: Int,
+    val outputTokens: Int,
 )
