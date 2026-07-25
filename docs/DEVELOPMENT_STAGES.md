@@ -69,9 +69,9 @@ insight, gamification, notification은 해당 Stage에서 모듈 추가.
 **할 것**
 
 Identity
-- 사용자 가입 / OAuth 로그인
-- UserId 생성 (내부 UUID, auth ID와 분리)
-- JWT 발급
+- 사용자 가입 / Google ID Token 검증 방식 로그인 (2026-07-25 결정, 리다이렉트 기반 OAuth2Login 아님 — 근거는 `ARCHITECTURE.md` "로그인 방식" 참고)
+- UserId 생성 (내부 UUID v7, auth ID와 분리 — RFC 9562 직접 구현, `shared-kernel/UserId.kt`)
+- JWT 발급 (`platform/security/jwt`)
 
 Conversation
 - 메시지 수신 및 저장 (occurred_at, timezone, local_date 포함)

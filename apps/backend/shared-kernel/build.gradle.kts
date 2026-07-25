@@ -8,3 +8,12 @@ kotlin {
         freeCompilerArgs.addAll("-Xjsr305=strict")
     }
 }
+
+dependencies {
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.assertj.core)
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
+}

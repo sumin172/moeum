@@ -5,6 +5,8 @@ spring-dependency-management = "1.1.7"
 archunit = "1.4.2"
 jjwt = "0.13.0"
 google-api-client = "2.8.0"
+junit-jupiter = "5.11.4"
+assertj = "3.26.3"
 
 [libraries]
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
@@ -23,6 +25,8 @@ jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
 jakarta-servlet-api = { module = "jakarta.servlet:jakarta.servlet-api" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }
 google-api-client = { module = "com.google.api-client:google-api-client", version.ref = "google-api-client" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
