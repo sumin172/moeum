@@ -1,4 +1,4 @@
-package com.moeum.platform.security
+package com.moeum.platform.security.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 

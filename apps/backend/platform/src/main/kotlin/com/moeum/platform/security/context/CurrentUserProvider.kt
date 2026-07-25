@@ -1,4 +1,4 @@
-package com.moeum.platform.security
+package com.moeum.platform.security.context
 
 import com.moeum.kernel.UserId
 import org.springframework.security.core.context.SecurityContextHolder

@@ -1,6 +1,7 @@
-package com.moeum.platform.security
+package com.moeum.platform.security.jwt
 
 import com.moeum.kernel.UserId
+import com.moeum.platform.security.config.JwtProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -21,7 +22,6 @@ class JwtProviderTest {
         val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
         val claims = JwtClaims(
             userId = userId,
-            subscriptionTier = "FREE",
             issuedAt = now,
             expiresAt = now.plusSeconds(jwtProperties.expirationSeconds),
         )
@@ -30,7 +30,6 @@ class JwtProviderTest {
         val parsed = jwtProvider.parse(token)
 
         assertThat(parsed.userId).isEqualTo(userId)
-        assertThat(parsed.subscriptionTier).isEqualTo("FREE")
         assertThat(parsed.issuedAt).isEqualTo(claims.issuedAt)
         assertThat(parsed.expiresAt).isEqualTo(claims.expiresAt)
     }

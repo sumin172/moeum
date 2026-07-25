@@ -76,9 +76,16 @@ Identity
 Conversation
 - 메시지 수신 및 저장 (occurred_at, timezone, local_date 포함)
 - ConversationDay 자동 생성 및 관리
-- AI 반응 호출 (Gemini 2.5 Flash, 최근 8개 메시지 컨텍스트)
+- AI 반응 호출 (Gemini 2.5 Flash, 해당 ConversationDay의 전체 메시지를 컨텍스트로 전달)
 - AI 응답 저장
 - 오늘 대화 조회 API
+- 유저당 일일 메시지/토큰 quota 최소 안전장치 (요금제와 무관하게 어뷰징·버그로 인한 비용 폭주 방지, Stage 6 요금제별 Rate Limit과는 별개)
+
+**AI 컨텍스트 전달 방식 (2026-07-25 결정)**
+- 고정된 "최근 N개 메시지" 대신, ConversationDay가 자연스러운 하루 단위 경계이므로 해당 날짜의 전체 메시지를 매 호출마다 전달한다.
+- LLM API는 무상태라 서버가 대화를 "기억"하지 않는다 — 매 호출마다 컨텍스트 전체를 다시 실어 보내는 것이 유일한 방법이며, 하루 대화가 길어질수록 호출당 비용이 늘어나는 트레이드오프가 있다.
+- 비용 완화는 컨텍스트를 깎는 방식이 아니라 프롬프트/컨텍스트 캐싱(Gemini/Claude 공통 지원)으로 해결한다 — 반복 재전송되는 앞부분 처리 비용을 낮추는 용도.
+- 무료 티어라도 대화 컨텍스트 품질(핵심 기록 경험)은 깎지 않는다 — 비용 통제는 quota(위)와 캐싱으로, 수익화는 Stage 6에서 Insight 같은 고비용 기능 게이팅으로 한다.
 
 **스키마 핵심**
 ```sql
@@ -96,6 +103,8 @@ conversation.messages
   generation_id     UUID NULL   -- AI 응답에만 값 있음
   model             TEXT NULL
   prompt_version    TEXT NULL
+  input_tokens      INT NULL    -- AI 응답에만 값 있음, quota 집계용
+  output_tokens     INT NULL    -- AI 응답에만 값 있음, quota 집계용
   deleted_at        TIMESTAMPTZ NULL
 
   UNIQUE (user_id, client_message_id)  -- 중복 메시지 방지
@@ -220,6 +229,8 @@ journal.generation_jobs
   provider            TEXT NULL
   model               TEXT NULL
   prompt_version      TEXT NULL
+  input_tokens        INT NULL    -- quota 집계용
+  output_tokens       INT NULL    -- quota 집계용
   generation_id       UUID NULL
   generated_at        TIMESTAMPTZ NULL
   error_code          TEXT NULL
@@ -391,8 +402,8 @@ gamification.point_ledger
 > 목표: 실제 과금과 운영 도구를 추가한다.
 
 **할 것**
-- 구독 플랜 / 결제
-- 사용량 제한 (Rate Limit)
+- 구독 플랜 / 결제 — 무료 티어의 대화 컨텍스트(핵심 기록 경험)는 깎지 않고, Insight(Claude Sonnet) 같은 고비용 기능을 유료 게이팅하는 방향으로 설계 (2026-07-25 결정)
+- 사용량 제한 (Rate Limit) — 요금제별 세분화된 제한. 유저당 최소 quota 안전장치는 Stage 1부터 이미 적용됨, 여기서는 그걸 요금제 단위로 고도화
 - 데이터 내보내기 (전체 기록 ZIP)
 - 계정 탈퇴 + 파생 데이터 연쇄 삭제
 - 관리자 도구
@@ -403,13 +414,13 @@ gamification.point_ledger
 
 ## 단계별 인프라 도입 계획
 
-| 인프라 | 기본 계획 | 조기 도입 조건 |
-|--------|----------|--------------|
-| PostgreSQL | Stage 0 | — |
-| Redis | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션) |
-| Outbox 패턴 | Stage 4 | 이벤트 유실이 업무 손실로 이어지는 시점 |
-| Read Model | Stage 5 | N+1 실측 시 |
-| Kafka | MSA 분리 시 | Outbox transport 교체 |
+| 인프라        | 기본 계획      | 조기 도입 조건               |
+|------------|------------|------------------------|
+| PostgreSQL | Stage 0    | —                      |
+| Redis      | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션)    |
+| Outbox 패턴  | Stage 4    | 이벤트 유실이 업무 손실로 이어지는 시점 |
+| Read Model | Stage 5    | N+1 실측 시               |
+| Kafka      | MSA 분리 시   | Outbox transport 교체    |
 
 ---
 
@@ -440,12 +451,14 @@ gamification.point_ledger
 
 실제 사용 흐름을 본 뒤 결정한다. 지금 확정하지 않아도 된다.
 
-| 항목 | 결정 시점 |
-|------|----------|
-| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT) | 사용자 행동 패턴 관찰 후 |
-| Insight 집계에 DRAFT 일기 포함 여부 | Insight 기능 구현 시 |
-| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시 |
-| Outbox를 Stage 2에 조기 도입할지 | 이벤트 유실 허용 여부 판단 시 |
-| Moment confidence를 제품 UI에 노출할지 | UX 설계 시 |
-| Redis 도입 여부 | 세션/캐시 실제 필요 발생 시 |
-| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지 | 검색 품질 불만 발생 시 |
+| 항목                                      | 결정 시점               |
+|-----------------------------------------|---------------------|
+| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)      | 사용자 행동 패턴 관찰 후      |
+| Insight 집계에 DRAFT 일기 포함 여부              | Insight 기능 구현 시     |
+| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시      |
+| Outbox를 Stage 2에 조기 도입할지                | 이벤트 유실 허용 여부 판단 시   |
+| Moment confidence를 제품 UI에 노출할지          | UX 설계 시             |
+| Redis 도입 여부                             | 세션/캐시 실제 필요 발생 시    |
+| 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)       | 실사용 트래픽 패턴 확인 후     |
+| 프롬프트/컨텍스트 캐싱 도입 시점                      | 실제 API 연동 시 비용 실측 후 |
+| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지   | 검색 품질 불만 발생 시       |
