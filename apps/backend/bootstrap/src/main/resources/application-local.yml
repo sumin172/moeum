@@ -19,3 +19,6 @@ moeum:
     # 로컬 개발 전용 시크릿. 운영 환경에서는 환경변수/시크릿 매니저로 주입한다.
     secret: local-dev-only-jwt-secret-key-must-be-32-bytes-min
     expiration-seconds: 3600
+  google:
+    # Google Cloud Console에서 발급받은 OAuth Client ID(콤마 구분, 웹/Android/iOS 등 여러 개 등록 가능)
+    client-ids: ${GOOGLE_OAUTH_CLIENT_IDS:116753834711-vn81v2sooa2q45d4tdg444l26mmcbeam.apps.googleusercontent.com}

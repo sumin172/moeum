@@ -1,7 +1,9 @@
 package com.moeum.platform.security.jwt
 
+import com.moeum.kernel.UserId
+
 interface JwtProvider {
-    fun issue(claims: JwtClaims): String
+    fun issue(userId: UserId): String
     fun parse(token: String): JwtClaims
 }
 

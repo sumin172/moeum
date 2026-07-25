@@ -1,5 +1,6 @@
 package com.moeum.platform.security.jwt
 
+import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.security.config.JwtProperties
 import io.jsonwebtoken.ExpiredJwtException
@@ -12,17 +13,21 @@ import java.util.Date
 @Component
 class JwtProviderImpl(
     jwtProperties: JwtProperties,
+    private val timeProvider: TimeProvider,
 ) : JwtProvider {
 
     private val signingKey = Keys.hmacShaKeyFor(jwtProperties.secret.toByteArray())
+    private val expirationSeconds = jwtProperties.expirationSeconds
 
-    override fun issue(claims: JwtClaims): String =
-        Jwts.builder()
-            .subject(claims.userId.value.toString())
-            .issuedAt(Date.from(claims.issuedAt))
-            .expiration(Date.from(claims.expiresAt))
+    override fun issue(userId: UserId): String {
+        val now = timeProvider.now()
+        return Jwts.builder()
+            .subject(userId.value.toString())
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(now.plusSeconds(expirationSeconds)))
             .signWith(signingKey)
             .compact()
+    }
 
     override fun parse(token: String): JwtClaims {
         val claims = try {
