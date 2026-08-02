@@ -21,10 +21,13 @@ dependencies {
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.data.jpa)
+    // MoeumApplication의 UserDetailsServiceAutoConfiguration 참조를 컴파일하기 위해 필요.
+    // 런타임 보안 설정 자체는 platform 모듈이 제공한다.
+    implementation(libs.spring.boot.starter.security)
     implementation(libs.kotlin.reflect)
 
     runtimeOnly(libs.postgresql)
-    implementation(libs.flyway.core)
+    implementation(libs.spring.boot.starter.flyway)
     runtimeOnly(libs.flyway.postgresql)
 
     testImplementation(libs.spring.boot.starter.test)

@@ -30,7 +30,7 @@ conversationQueryService.getMessagesForJournalGeneration(id)
 **5. UserId는 auth provider ID와 분리한다**
 - 내부 UUID를 별도 생성
 - OAuth 제공자 교체 시 UserId가 흔들리지 않아야 한다
-- UUID는 v7(RFC 9562)을 쓴다 — 저장 전 완전한 identity를 가지면서(auto-increment는 못 함) auto-increment에 준하는 B-tree 삽입 지역성을 얻는다. Kotlin stdlib의 `Uuid.generateV7()`은 2.3부터라 이 프로젝트(2.1.20)에서는 `shared-kernel/UserId.kt`에 직접 구현했다 (2026-07-25 결정, v4→v7 근거는 성능이 아니라 도메인 identity 확보가 핵심)
+- UUID는 v7(RFC 9562)을 쓴다 — 저장 전 완전한 identity를 가지면서(auto-increment는 못 함) auto-increment에 준하는 B-tree 삽입 지역성을 얻는다. Kotlin stdlib의 `Uuid.generateV7()`은 2.4에서도 `@ExperimentalUuidApi`(opt-in 필요, 미확정 API)라 `shared-kernel/UserId.kt`에 직접 구현했다 (2026-07-25 결정, v4→v7 근거는 성능이 아니라 도메인 identity 확보가 핵심)
 
 **6. 원본 기록과 AI 생성 결과는 별도 테이블로 분리한다**
 - conversation.messages (role=user) = 사용자 원본, 불변
@@ -50,11 +50,11 @@ provider, model, prompt_version, generation_id, generated_at
 
 **9. 삭제 정책은 데이터 유형별로 정의한다**
 
-| 유형            | 정책                                     |
-|---------------|----------------------------------------|
-| 일반 UI 삭제      | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
-| 계정 탈퇴 / 영구 삭제 | 유예 기간 후 Hard Delete 또는 비가역 익명화         |
-| 재무/법적 기록      | 법적 보존 정책에 따라 별도 처리                     |
+| 유형                  | 정책                                           |
+|-----------------------|------------------------------------------------|
+| 일반 UI 삭제          | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
+| 계정 탈퇴 / 영구 삭제 | 유예 기간 후 Hard Delete 또는 비가역 익명화    |
+| 재무/법적 기록        | 법적 보존 정책에 따라 별도 처리                |
 
 "모든 것에 Soft Delete"가 아니다. 유형마다 보존 기간과 물리 삭제 정책을 정의한다.
 
@@ -144,7 +144,7 @@ data class UserId(val value: UUID)
 data class Money(val amount: Long, val currency: String)
 interface TimeProvider
 abstract class DomainEvent
-data class EventEnvelope(...)
+data class EventEnvelope
 ```
 
 User Entity, Journal Entity, 도메인 enum 전체 → 각 모듈 내부에
