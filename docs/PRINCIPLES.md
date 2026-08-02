@@ -26,6 +26,8 @@ conversationQueryService.getMessagesForJournalGeneration(id)
 
 **4. 모든 사용자 입력에 timezone과 local_date를 저장한다**
 - 나중에 추가하면 과거 데이터 전부 재계산
+- Message의 timezone/local_date는 저장 시점에 한 번 계산되고 이후 절대 갱신되지 않는 값(불변 기록)
+- ConversationDay.timezone은 예외 — 메시지가 추가될 때마다 최신 관측 zone으로 갱신되는 living 값(2026-08-02 결정, 하루 마감 시점 계산 정확도를 위함). 단 ConversationDay.local_date는 이때도 절대 재계산하지 않는다 — local_date가 그 row의 정체성(UNIQUE 키)이라 timezone과 분리해서 다뤄야 충돌 위험이 없다
 
 **5. UserId는 auth provider ID와 분리한다**
 - 내부 UUID를 별도 생성
@@ -103,6 +105,7 @@ N+1은 `JOIN FETCH`, `@EntityGraph`, `@BatchSize` 같은 쿼리 기법으로 제
 
 - **JSONB**: 항상 부모와 함께 로딩하는 소규모 값 객체 (Journal 섹션, 감정 점수 등)
 - **명시적 Repository 쿼리**: 독립 생명주기가 있거나 페이지네이션이 필요한 경우
+  - 실제 사례(2026-08-02): `MessageRepository.findPage(conversationDayId, after: MessageId?, limit)` — 커서는 id(UUIDv7, 서버 발급 순 정렬)로 비교해 안정적으로 페이징하고, 반환 시엔 occurredAt(+id tie-break)으로 재정렬해 표시 순서를 맞춘다. 커서용 정렬 키(삽입 순서)와 표시용 정렬 키(사용자 체감 발화 순서)가 다를 수 있다는 걸 유의
 
 이 원칙은 도메인 특성에서 도출된 것이 아니라, 런타임 규율보다 모델 구조로 문제를 막는 것이 더 신뢰할 수 있다는 설계 철학에서 출발한다. 도메인이 달라져도 동일하게 적용한다.
 
