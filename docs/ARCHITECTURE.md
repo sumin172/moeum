@@ -27,24 +27,24 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 
 ## 기술 스택
 
-| 영역 | 선택 | 이유 |
-|------|------|------|
+| 영역  | 선택                             | 이유                          |
+|-----|--------------------------------|-----------------------------|
 | 백엔드 | Kotlin + Spring Boot + Java 21 | 도메인 표현력, 트랜잭션, JPA, 스케줄러 통합 |
-| 빌드 | Gradle Kotlin DSL | |
-| 웹 | Next.js | 아카이브 UI + 얇은 BFF |
-| 모바일 | Flutter (또는 RN+Expo) | 팀 숙련도에 따라 결정 |
-| DB | PostgreSQL | 단일 클러스터로 시작 |
-| 캐시 | Redis | 세션·Rate Limit (초기에는 생략 가능) |
-| 파일 | Object Storage | 이미지·음성 |
+| 빌드  | Gradle Kotlin DSL              |                             |
+| 웹   | Next.js                        | 아카이브 UI + 얇은 BFF            |
+| 모바일 | Flutter (또는 RN+Expo)           | 팀 숙련도에 따라 결정                |
+| DB  | PostgreSQL                     | 단일 클러스터로 시작                 |
+| 캐시  | Redis                          | 세션·Rate Limit (초기에는 생략 가능)  |
+| 파일  | Object Storage                 | 이미지·음성                      |
 
 ### AI 모델 라우팅
 
-| 용도 | 모델 | 이유 |
-|------|------|------|
-| 일상 대화 반응 | Gemini 2.5 Flash | 빈도 높음, 무료 티어로 개발 가능 |
-| Moment 추출 (배치) | Gemini 2.5 Flash | 구조화 출력, 저비용 |
-| 일기 생성 초안 | Claude Haiku 4.5 | 하루 1회, 한국어 품질 |
-| Insight 생성 | Claude Sonnet 4.6 | 주·월 1회, 품질 우선 |
+| 용도             | 모델                | 이유                  |
+|----------------|-------------------|---------------------|
+| 일상 대화 반응       | Gemini 2.5 Flash  | 빈도 높음, 무료 티어로 개발 가능 |
+| Moment 추출 (배치) | Gemini 2.5 Flash  | 구조화 출력, 저비용         |
+| 일기 생성 초안       | Claude Haiku 4.5  | 하루 1회, 한국어 품질       |
+| Insight 생성     | Claude Sonnet 4.6 | 주·월 1회, 품질 우선       |
 
 **비용 제어 원칙 (2026-07-25 갱신)**
 - 대화 반응: 고정된 "최근 N개" 대신 해당 ConversationDay(하루)의 전체 메시지를 컨텍스트로 사용 — LLM API가 무상태라 컨텍스트를 매번 재전송해야 하며, 하루 단위 자연 경계를 그대로 씀
@@ -131,14 +131,14 @@ interface ConversationJournalSourceQuery {
 
 각 데이터는 **하나의 컨텍스트만 원본 소유자**다.
 
-| 컨텍스트 | 소유 데이터 |
-|----------|------------|
-| Identity | User, Account, Device, Consent, Subscription |
-| Conversation | Message, ConversationDay, Moment, Attachment |
-| Journal | Journal, JournalRevision, JournalSection, JournalTag |
-| Insight | EmotionObservation, DailyInsight, WeeklyInsight, Pattern |
-| Gamification | Mission, Streak, Achievement, PointLedger, Reward |
-| Notification | NotificationLog, NotificationTemplate |
+| 컨텍스트         | 소유 데이터                                                   |
+|--------------|----------------------------------------------------------|
+| Identity     | User, Account, Device, Consent, Subscription             |
+| Conversation | Message, ConversationDay, Moment, Attachment             |
+| Journal      | Journal, JournalRevision, JournalSection, JournalTag     |
+| Insight      | EmotionObservation, DailyInsight, WeeklyInsight, Pattern |
+| Gamification | Mission, Streak, Achievement, PointLedger, Reward        |
+| Notification | NotificationLog, NotificationTemplate                    |
 
 **Moment 생성 책임**
 Moment는 Conversation 컨텍스트가 소유하고 생성한다.
@@ -178,6 +178,10 @@ Identity publicapi 호출이 필요한 경우만:
 - 동의 정보 조회
 
 JWT claim 구조는 `platform/security`에서 정의한다.
+
+**로그인 방식: Google ID Token 검증 (2026-07-25 결정)**
+
+리다이렉트 기반 `oauth2Login()`(서버 세션 기반, 웹 전용) 대신 ID Token 검증 방식을 택함 — 클라이언트(웹/모바일)가 Google 로그인 SDK로 직접 로그인해 ID Token을 받고, `POST /api/auth/google`로 보내면 서버가 Google 공개키로 서명 검증 후 우리 JWT를 발급한다. 웹/Flutter 모바일에 동일하게 쓸 수 있고, 별도 필터체인/콜백 핸들러 없이 REST 엔드포인트 하나로 끝난다. Client Secret 불필요(Client ID만 필요). 구현: `identity/domain/GoogleIdTokenVerifierPort` + `identity/infrastructure/google/GoogleIdTokenVerifierAdapter`(`com.google.api-client` 사용).
 
 순환 의존 금지: `conversation → journal`, `journal → conversation` 양방향 불가.
 Journal 결과를 Conversation이 알아야 한다면 이벤트로 역방향 전달.
@@ -252,17 +256,19 @@ error_code       TEXT NULL
 generation_id    UUID NULL   -- AI 응답에만 값 있음
 model            TEXT NULL
 prompt_version   TEXT NULL
+input_tokens     INT NULL    -- AI 응답에만 값 있음, quota 집계용
+output_tokens    INT NULL    -- AI 응답에만 값 있음, quota 집계용
 ```
 
 ### 4. 삭제 정책 — 데이터 유형별 정의
 
 Soft Delete를 모든 것에 일괄 적용하지 않는다.
 
-| 유형 | 정책 |
-|------|------|
-| 일반 UI 삭제 | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
-| 계정 탈퇴 / 영구 삭제 | 유예 기간(예: 30일) 후 Hard Delete 또는 비가역 익명화 |
-| PointLedger / 결제 기록 | 법적·회계 보존 정책에 따라 별도 처리 |
+| 유형                  | 정책                                     |
+|---------------------|----------------------------------------|
+| 일반 UI 삭제            | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
+| 계정 탈퇴 / 영구 삭제       | 유예 기간(예: 30일) 후 Hard Delete 또는 비가역 익명화 |
+| PointLedger / 결제 기록 | 법적·회계 보존 정책에 따라 별도 처리                  |
 
 ```sql
 deleted_at       TIMESTAMPTZ NULL   -- Soft Delete
@@ -273,19 +279,24 @@ purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 
 ## AI 추상화 인터페이스
 
+Stage 0에서 인터페이스와 DTO만 정의됨(구현체 없음). provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`로 서브패키지 분리(2026-07-25). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
+
 ```kotlin
-// platform/llm
+// platform/llm/conversation
 interface ConversationResponder {
-    suspend fun respond(context: ConversationContext): ConversationResponse
+    fun respond(request: ConversationRequest): ConversationResponse
 }
+// ConversationRequest(messages: List<LlmMessage>, systemPrompt: String?)
+// ConversationResponse(generationId, content, model, provider, promptVersion, inputTokens, outputTokens)
 
+// platform/llm/journal
 interface JournalGenerator {
-    suspend fun generate(day: ConversationDaySummary): JournalDraft
+    fun generate(request: JournalGenerationRequest): JournalGenerationResponse
 }
+// JournalGenerationRequest(moments: List<MomentSnapshot>, localDate: String)
+// JournalGenerationResponse(generationId, title, content, model, provider, promptVersion, inputTokens, outputTokens)
 
-interface InsightGenerator {
-    suspend fun analyze(period: AnalysisPeriod): InsightReport
-}
+// InsightGenerator — Stage 5에서 정의 (아직 없음)
 ```
 
 모델명과 공급자는 도메인 코드에 직접 등장하지 않는다.
@@ -375,12 +386,12 @@ contracts/events/
 
 ## 장애 허용 범위
 
-| 허용 가능 | 허용 불가 |
-|----------|----------|
-| AI 반응 지연 | 사용자 기록 유실 |
-| 일기 생성 지연 | 다른 사용자 데이터 노출 |
-| 알림 실패 | 중복 보상 지급 |
-| Insight 생성 실패 | 삭제한 데이터 재노출 |
+| 허용 가능         | 허용 불가         |
+|---------------|---------------|
+| AI 반응 지연      | 사용자 기록 유실     |
+| 일기 생성 지연      | 다른 사용자 데이터 노출 |
+| 알림 실패         | 중복 보상 지급      |
+| Insight 생성 실패 | 삭제한 데이터 재노출   |
 
 LLM 장애가 메시지 저장에 영향을 주지 않아야 한다.
 

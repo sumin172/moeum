@@ -17,13 +17,21 @@ class SecurityConfig(
     private val jwtAuthenticationEntryPoint: JwtAuthenticationEntryPoint,
 ) {
 
+    companion object {
+        // 인증 없이 열어야 하는 경로. 로그인처럼 "토큰을 아직 못 받은 상태"에서 호출돼야 하는 API만 여기 추가한다.
+        private val PUBLIC_PATHS = arrayOf("/api/auth/**")
+    }
+
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .exceptionHandling { it.authenticationEntryPoint(jwtAuthenticationEntryPoint) }
-            .authorizeHttpRequests { it.anyRequest().authenticated() }
+            .authorizeHttpRequests {
+                it.requestMatchers(*PUBLIC_PATHS).permitAll()
+                    .anyRequest().authenticated()
+            }
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter::class.java)
 
         return http.build()

@@ -30,6 +30,7 @@ conversationQueryService.getMessagesForJournalGeneration(id)
 **5. UserId는 auth provider ID와 분리한다**
 - 내부 UUID를 별도 생성
 - OAuth 제공자 교체 시 UserId가 흔들리지 않아야 한다
+- UUID는 v7(RFC 9562)을 쓴다 — 저장 전 완전한 identity를 가지면서(auto-increment는 못 함) auto-increment에 준하는 B-tree 삽입 지역성을 얻는다. Kotlin stdlib의 `Uuid.generateV7()`은 2.3부터라 이 프로젝트(2.1.20)에서는 `shared-kernel/UserId.kt`에 직접 구현했다 (2026-07-25 결정, v4→v7 근거는 성능이 아니라 도메인 identity 확보가 핵심)
 
 **6. 원본 기록과 AI 생성 결과는 별도 테이블로 분리한다**
 - conversation.messages (role=user) = 사용자 원본, 불변
@@ -104,6 +105,19 @@ N+1은 `JOIN FETCH`, `@EntityGraph`, `@BatchSize` 같은 쿼리 기법으로 제
 - **명시적 Repository 쿼리**: 독립 생명주기가 있거나 페이지네이션이 필요한 경우
 
 이 원칙은 도메인 특성에서 도출된 것이 아니라, 런타임 규율보다 모델 구조로 문제를 막는 것이 더 신뢰할 수 있다는 설계 철학에서 출발한다. 도메인이 달라져도 동일하게 적용한다.
+
+---
+
+## 패키지 구성 원칙 (2026-07-25)
+
+DDD 레이어링(`domain/application/infrastructure/interfaces`)이 항상 1차 기준이다. 그 안에서 파일 종류가 섞이기 시작하면(모델 vs 포트 인터페이스, JPA 어댑터 vs 외부 API 어댑터 vs 설정값), **다중 구현체 존재 여부와 무관하게** 역할별 서브패키지로 2차 분리한다 — 사람이 폴더만 보고 훑을 수 있어야 한다는 게 DDD 근거보다 낮지만 유효한 기준이다.
+
+적용 예:
+- `platform/security` → `config` / `jwt` / `filter` / `context`
+- `platform/llm` → `conversation` / `journal` (여기는 Gemini/Claude라는 실제 provider 축까지 겹침)
+- `identity/domain` → `model`(값객체) vs 루트(포트 인터페이스), `identity/infrastructure` → `jpa` / `google` / `config`, `identity/interfaces` → `dto` vs 루트(컨트롤러)
+
+파일이 1개뿐인 역할은 서브패키지로 안 뺀다(예: 컨트롤러 1개면 `interfaces/` 루트 유지).
 
 ---
 

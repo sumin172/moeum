@@ -1,11 +1,14 @@
 package com.moeum.platform.security.jwt
 
+import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.security.config.JwtProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 class JwtProviderTest {
@@ -14,36 +17,32 @@ class JwtProviderTest {
         secret = "test-secret-key-for-jwt-must-be-at-least-32-bytes-long",
         expirationSeconds = 3600,
     )
-    private val jwtProvider: JwtProvider = JwtProviderImpl(jwtProperties)
+
+    private class FixedTimeProvider(private val fixedNow: Instant) : TimeProvider {
+        override fun now(): Instant = fixedNow
+        override fun today(zoneId: ZoneId): LocalDate = fixedNow.atZone(zoneId).toLocalDate()
+    }
 
     @Test
     fun `발급한 토큰을 파싱하면 원래 claims를 복원한다`() {
-        val userId = UserId.generate()
         val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
-        val claims = JwtClaims(
-            userId = userId,
-            issuedAt = now,
-            expiresAt = now.plusSeconds(jwtProperties.expirationSeconds),
-        )
+        val jwtProvider: JwtProvider = JwtProviderImpl(jwtProperties, FixedTimeProvider(now))
+        val userId = UserId.generate()
 
-        val token = jwtProvider.issue(claims)
+        val token = jwtProvider.issue(userId)
         val parsed = jwtProvider.parse(token)
 
         assertThat(parsed.userId).isEqualTo(userId)
-        assertThat(parsed.issuedAt).isEqualTo(claims.issuedAt)
-        assertThat(parsed.expiresAt).isEqualTo(claims.expiresAt)
+        assertThat(parsed.issuedAt).isEqualTo(now)
+        assertThat(parsed.expiresAt).isEqualTo(now.plusSeconds(jwtProperties.expirationSeconds))
     }
 
     @Test
     fun `만료된 토큰은 파싱 시 예외를 던진다`() {
-        val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
-        val expiredClaims = JwtClaims(
-            userId = UserId.generate(),
-            issuedAt = now.minusSeconds(7200),
-            expiresAt = now.minusSeconds(3600),
-        )
+        val longAgo = Instant.now().minusSeconds(jwtProperties.expirationSeconds + 3600)
+        val jwtProvider: JwtProvider = JwtProviderImpl(jwtProperties, FixedTimeProvider(longAgo))
 
-        val expiredToken = jwtProvider.issue(expiredClaims)
+        val expiredToken = jwtProvider.issue(UserId.generate())
 
         assertThatThrownBy { jwtProvider.parse(expiredToken) }
             .isInstanceOf(InvalidJwtException::class.java)
@@ -51,13 +50,14 @@ class JwtProviderTest {
 
     @Test
     fun `서명이 다른 토큰은 파싱 시 예외를 던진다`() {
+        val now = Instant.now()
+        val jwtProvider: JwtProvider = JwtProviderImpl(jwtProperties, FixedTimeProvider(now))
         val otherProvider: JwtProvider = JwtProviderImpl(
             JwtProperties(secret = "different-secret-key-for-jwt-at-least-32-bytes!!", expirationSeconds = 3600),
+            FixedTimeProvider(now),
         )
-        val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
-        val token = otherProvider.issue(
-            JwtClaims(userId = UserId.generate(), issuedAt = now, expiresAt = now.plusSeconds(3600)),
-        )
+
+        val token = otherProvider.issue(UserId.generate())
 
         assertThatThrownBy { jwtProvider.parse(token) }
             .isInstanceOf(InvalidJwtException::class.java)
