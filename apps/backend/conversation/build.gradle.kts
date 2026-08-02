@@ -27,8 +27,8 @@ dependencies {
     implementation(project(":platform"))
 
     implementation(libs.spring.boot.starter.data.jpa)
-    // 런타임 서블릿/웹 계층은 bootstrap의 spring-boot-starter-web이 제공한다.
     compileOnly(libs.spring.boot.starter.web)
+    compileOnly(libs.spring.boot.starter.security)
 
     testImplementation(libs.spring.boot.starter.test)
 }
