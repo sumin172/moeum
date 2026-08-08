@@ -16,7 +16,6 @@ Thumbs.db
 
 # Spring Boot
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
 
 # Logs
 *.log
@@ -25,3 +24,7 @@ logs/
 # Environment
 .env
 *.env.local
+
+# 로컬 전용 수동 테스트 화면 (커밋 안 함)
+apps/backend/bootstrap/src/main/resources/static/test-ui/
+apps/backend/bootstrap/src/main/kotlin/com/moeum/devtools/
