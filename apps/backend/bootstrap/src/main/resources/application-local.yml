@@ -22,3 +22,6 @@ moeum:
   google:
     # Google Cloud Console에서 발급받은 OAuth Client ID(콤마 구분, 웹/Android/iOS 등 여러 개 등록 가능)
     client-ids: ${GOOGLE_OAUTH_CLIENT_IDS:116753834711-vn81v2sooa2q45d4tdg444l26mmcbeam.apps.googleusercontent.com}
+  gemini:
+    # Google AI Studio(aistudio.google.com)에서 발급받은 Gemini API 키. 로컬에선 환경변수로 주입.
+    api-key: ${GEMINI_API_KEY:}

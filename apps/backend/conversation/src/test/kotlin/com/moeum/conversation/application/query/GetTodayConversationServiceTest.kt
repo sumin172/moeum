@@ -6,6 +6,7 @@ import com.moeum.conversation.domain.model.ConversationDay
 import com.moeum.conversation.domain.model.ConversationDayId
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
+import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
@@ -40,9 +41,18 @@ class GetTodayConversationServiceTest {
                 ordered.takeLast(limit)
             }
         }
+        override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> =
+            messages.filter { it.conversationDayId == conversationDayId }
+                .sortedWith(compareBy({ it.occurredAt }, { it.id.value }))
         override fun save(message: Message): Message {
             messages.add(message)
             return message
+        }
+        override fun compareAndSetStatus(id: MessageId, expected: MessageResponseStatus, updated: MessageResponseStatus): Boolean {
+            val index = messages.indexOfFirst { it.id == id }
+            if (index < 0 || messages[index].responseStatus != expected) return false
+            messages[index] = messages[index].withResponseStatus(updated)
+            return true
         }
     }
 
