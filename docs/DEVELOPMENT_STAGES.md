@@ -76,7 +76,10 @@ Identity
 Conversation
 - 메시지 수신 및 저장 (occurred_at, timezone, local_date 포함)
 - ConversationDay 자동 생성 및 관리
-- AI 반응 호출 (Gemini 2.5 Flash, 해당 ConversationDay의 전체 메시지를 컨텍스트로 전달)
+- AI 반응 호출 (Gemini, 해당 ConversationDay의 전체 메시지를 컨텍스트로 전달)
+  - 모델명은 `moeum.gemini.model` 설정값(`GeminiProperties`), 기본값 `gemini-flash-latest` (2026-08-08 결정 — `gemini-2.5-flash`는 신규 API 키에 404 확인되어 폐기)
+  - `RestClient` 기반 REST 직접 호출(`GeminiConversationResponder`), 응답 저장 전까지는 트랜잭션을 걸지 않고(외부 HTTP 호출을 트랜잭션 밖에 둠), 응답 저장은 별도 `SaveGeneratedResponseService.save()`(`@Transactional`)로 분리 — 자기 자신 호출로 인한 AOP(`@Transactional`/`@Async`) 무시 문제 회피
+  - `@CircuitBreaker(name="geminiConversationClient")`(Resilience4j) 적용, 반복 실패 시 빠른 실패 + fallback에서 사용자 메시지를 FAILED로 전환(2026-08-08 실제 서킷 오픈 동작 확인)
 - AI 응답 저장
 - 오늘/전날 대화 조회 API (`GET /api/conversations/today`, 2026-08-02 결정)
   - `previousDay` 옵션으로 전날 조회, 나머지 파라미터·동작은 오늘 조회와 동일
@@ -92,7 +95,7 @@ Conversation
 - 무료 티어라도 대화 컨텍스트 품질(핵심 기록 경험)은 깎지 않는다 — 비용 통제는 quota(위)와 캐싱으로, 수익화는 Stage 6에서 Insight 같은 고비용 기능 게이팅으로 한다.
 
 **스키마 핵심**
-```sql
+```
 conversation.messages
   id                UUID PK      -- UUIDv7, 시간순 정렬 보장 → 목록 조회 페이지네이션 커서로 사용 (2026-08-02)
   conversation_day_id UUID
@@ -129,7 +132,17 @@ conversation.conversation_days
   closed_at       TIMESTAMPTZ NULL
 
   UNIQUE (user_id, local_date)  -- 하루에 하나
+
+conversation.ai_usage_daily
+  user_id         UUID
+  usage_date      DATE
+  message_count   INT     -- 유저×날짜 일일 quota 카운터, 호출 "시도" 시점에 증가(재시도 남용 방지)
+  input_tokens    BIGINT  -- 현재 미집계(항상 0), 토큰 기준 quota 도입 시 사용 예정
+  output_tokens   BIGINT  -- 현재 미집계(항상 0)
+
+  PRIMARY KEY (user_id, usage_date)
 ```
+`AiUsageRepositoryImpl.recordAttempt`는 Spring Data `@Query`/`@Modifying`이 아니라 `EntityManager.createNativeQuery`로 `INSERT ... ON CONFLICT DO UPDATE ... RETURNING message_count`를 직접 실행한다(2026-08-08 결정) — Spring Data는 `@Modifying` 쿼리의 반환값으로 `RETURNING` 결과를 받을 수 없어 원자적 증가-후-값조회를 리포지토리 메서드 시그니처만으로 표현할 수 없기 때문. 동시성 보호는 Postgres의 `ON CONFLICT` unique-index 기반 원자성에 위임하며(낙관적 락 재시도 아님), 20-스레드 동시 호출 통합테스트로 검증(`AiUsageRepositoryIntegrationTest`).
 
 **response_status 사용**
 - user 메시지 저장 시 PENDING
@@ -158,6 +171,8 @@ conversation.conversation_days
 - AI 반응 실패 시 메시지는 저장된 상태를 유지한다
 - 메시지에 local_date + timezone이 정상 저장된다
 - 동일 clientMessageId 재전송 시 중복 저장되지 않는다
+
+2026-08-08: 위 기준 모두 실기동 스모크 테스트(실제 Google 로그인 + 실제 Gemini API 키)로 충족 확인. 서킷브레이커 fallback(강제 유발), 시사·정치 등 소재 이탈 질문에 대한 `SYSTEM_INSTRUCTION` 가드레일 동작도 함께 확인. Stage 1 완료.
 
 ---
 
@@ -189,7 +204,7 @@ Journal
 
 **상태 분리 — Journal 생명주기 ≠ 생성 Job 상태**
 
-```sql
+```
 journal.journals
   lifecycle_status TEXT  -- DRAFT | CONFIRMED | OUTDATED
   -- OUTDATED: 확정 후 원본 대화가 추가된 경우
@@ -204,7 +219,7 @@ journal.generation_jobs
 AI가 PROCESSING 중에도 Journal은 DRAFT 상태를 유지할 수 있다.
 
 **스키마 핵심**
-```sql
+```
 journal.journals
   id                    UUID PK
   user_id               UUID
@@ -381,7 +396,7 @@ ConversationDayClosed 유실로 일기가 생성되지 않고 사용자가 인�
 Stage 4가 기본이지만, 이전 단계에서 유실 복구가 어렵다고 판단되면 조기 도입한다.
 단순 스케줄러 기반 폴러로 시작 (Debezium, CDC 불필요).
 
-```sql
+```
 gamification.point_ledger
   id UUID PK
   user_id UUID

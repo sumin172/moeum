@@ -27,24 +27,26 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 
 ## 기술 스택
 
-| 영역  | 선택                             | 이유                          |
-|-----|--------------------------------|-----------------------------|
+| 영역   | 선택                           | 이유                                        |
+|--------|--------------------------------|---------------------------------------------|
 | 백엔드 | Kotlin + Spring Boot + Java 21 | 도메인 표현력, 트랜잭션, JPA, 스케줄러 통합 |
-| 빌드  | Gradle Kotlin DSL              |                             |
-| 웹   | Next.js                        | 아카이브 UI + 얇은 BFF            |
-| 모바일 | Flutter (또는 RN+Expo)           | 팀 숙련도에 따라 결정                |
-| DB  | PostgreSQL                     | 단일 클러스터로 시작                 |
-| 캐시  | Redis                          | 세션·Rate Limit (초기에는 생략 가능)  |
-| 파일  | Object Storage                 | 이미지·음성                      |
+| 빌드   | Gradle Kotlin DSL              |                                             |
+| 웹     | Next.js                        | 아카이브 UI + 얇은 BFF                      |
+| 모바일 | Flutter (또는 RN+Expo)         | 팀 숙련도에 따라 결정                       |
+| DB     | PostgreSQL                     | 단일 클러스터로 시작                        |
+| 캐시   | Redis                          | 세션·Rate Limit (초기에는 생략 가능)        |
+| 파일   | Object Storage                 | 이미지·음성                                 |
 
 ### AI 모델 라우팅
 
-| 용도             | 모델                | 이유                  |
-|----------------|-------------------|---------------------|
-| 일상 대화 반응       | Gemini 2.5 Flash  | 빈도 높음, 무료 티어로 개발 가능 |
-| Moment 추출 (배치) | Gemini 2.5 Flash  | 구조화 출력, 저비용         |
-| 일기 생성 초안       | Claude Haiku 4.5  | 하루 1회, 한국어 품질       |
-| Insight 생성     | Claude Sonnet 4.6 | 주·월 1회, 품질 우선       |
+| 용도               | 모델                | 이유                             |
+|--------------------|---------------------|----------------------------------|
+| 일상 대화 반응     | Gemini Flash (계열) | 빈도 높음, 무료 티어로 개발 가능 |
+| Moment 추출 (배치) | Gemini Flash (계열) | 구조화 출력, 저비용              |
+| 일기 생성 초안     | Claude Haiku 4.5    | 하루 1회, 한국어 품질            |
+| Insight 생성       | Claude Sonnet 4.6   | 주·월 1회, 품질 우선             |
+
+모델 계열명(Flash)만 여기서 고정하고 구체 버전 alias는 설정값(`moeum.gemini.model`)으로 둔다 — Gemini 모델 alias는 구세대가 조기 폐기되는 경우가 있어(2026-08-08: `gemini-2.5-flash`가 신규 API 키에 404, `gemini-flash-latest`로 교체) 문서에 특정 버전을 못박지 않는다.
 
 **비용 제어 원칙 (2026-07-25 갱신)**
 - 대화 반응: 고정된 "최근 N개" 대신 해당 ConversationDay(하루)의 전체 메시지를 컨텍스트로 사용 — LLM API가 무상태라 컨텍스트를 매번 재전송해야 하며, 하루 단위 자연 경계를 그대로 씀
@@ -131,7 +133,7 @@ interface ConversationJournalSourceQuery {
 
 각 데이터는 **하나의 컨텍스트만 원본 소유자**다.
 
-| 컨텍스트         | 소유 데이터                                                   |
+| 컨텍스트     | 소유 데이터                                              |
 |--------------|----------------------------------------------------------|
 | Identity     | User, Account, Device, Consent, Subscription             |
 | Conversation | Message, ConversationDay, Moment, Attachment             |
@@ -195,7 +197,7 @@ Journal 결과를 Conversation이 알아야 한다면 이벤트로 역방향 전
 
 ## PostgreSQL Schema 분리
 
-```sql
+```
 identity.users
 identity.accounts
 
@@ -221,7 +223,7 @@ gamification.streaks
 
 ### 1. 시간/날짜 — 모든 사용자 입력에
 
-```sql
+```
 occurred_at  TIMESTAMPTZ  -- UTC 저장
 timezone     TEXT         -- 'Asia/Seoul'
 local_date   DATE         -- 사용자 현지 날짜
@@ -229,7 +231,7 @@ local_date   DATE         -- 사용자 현지 날짜
 
 ### 2. UserId — auth provider와 분리
 
-```sql
+```
 -- identity.users
 id          UUID PRIMARY KEY  -- 내부 식별자
 google_id   TEXT              -- auth 연결은 별도 칼럼
@@ -239,7 +241,7 @@ google_id   TEXT              -- auth 연결은 별도 칼럼
 
 AI가 생성한 모든 결과에 적용한다. 대화 응답(message.role=assistant)도 포함.
 
-```sql
+```
 -- 일기/Insight: 별도 generation_log 테이블
 generation_id    UUID
 provider         TEXT        -- 'anthropic', 'google'
@@ -264,13 +266,13 @@ output_tokens    INT NULL    -- AI 응답에만 값 있음, quota 집계용
 
 Soft Delete를 모든 것에 일괄 적용하지 않는다.
 
-| 유형                  | 정책                                     |
-|---------------------|----------------------------------------|
-| 일반 UI 삭제            | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
-| 계정 탈퇴 / 영구 삭제       | 유예 기간(예: 30일) 후 Hard Delete 또는 비가역 익명화 |
+| 유형                    | 정책                                                  |
+|-------------------------|-------------------------------------------------------|
+| 일반 UI 삭제            | Soft Delete (deleted_at), 복구 창 내 복원 가능        |
+| 계정 탈퇴 / 영구 삭제   | 유예 기간(예: 30일) 후 Hard Delete 또는 비가역 익명화 |
 | PointLedger / 결제 기록 | 법적·회계 보존 정책에 따라 별도 처리                  |
 
-```sql
+```
 deleted_at       TIMESTAMPTZ NULL   -- Soft Delete
 purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 ```
@@ -279,7 +281,9 @@ purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 
 ## AI 추상화 인터페이스
 
-Stage 0에서 인터페이스와 DTO만 정의됨(구현체 없음). provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`로 서브패키지 분리(2026-07-25). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
+provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`로 서브패키지 분리(2026-07-25). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
+
+`platform/llm/conversation`은 Stage 1(#17)에서 `GeminiConversationResponder`로 구현 완료(`RestClient` + Resilience4j `@CircuitBreaker`, 상세는 `DEVELOPMENT_STAGES.md` Stage 1 참고). `platform/llm/journal`(Claude)은 Stage 2에서 구현 예정, 아직 인터페이스만 존재.
 
 ```kotlin
 // platform/llm/conversation
@@ -386,12 +390,12 @@ contracts/events/
 
 ## 장애 허용 범위
 
-| 허용 가능         | 허용 불가         |
-|---------------|---------------|
-| AI 반응 지연      | 사용자 기록 유실     |
-| 일기 생성 지연      | 다른 사용자 데이터 노출 |
-| 알림 실패         | 중복 보상 지급      |
-| Insight 생성 실패 | 삭제한 데이터 재노출   |
+| 허용 가능         | 허용 불가               |
+|-------------------|-------------------------|
+| AI 반응 지연      | 사용자 기록 유실        |
+| 일기 생성 지연    | 다른 사용자 데이터 노출 |
+| 알림 실패         | 중복 보상 지급          |
+| Insight 생성 실패 | 삭제한 데이터 재노출    |
 
 LLM 장애가 메시지 저장에 영향을 주지 않아야 한다.
 
