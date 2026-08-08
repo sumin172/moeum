@@ -12,7 +12,11 @@
       "Bash(JAVA_HOME=\"D:/Dev/Tool/java21\" /tmp/gradle-8.12.1/bin/gradle wrapper --gradle-version 8.12.1)",
       "Read(//c/Users/mas/.claude/**)",
       "Bash(xargs head *)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:mvnrepository.com)",
+      "WebFetch(domain:search.maven.org)",
+      "WebFetch(domain:repo1.maven.org)"
     ]
   }
 }

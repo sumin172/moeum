@@ -32,6 +32,11 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.archunit.junit5)
+    testImplementation(libs.spring.boot.testcontainers)
+    testImplementation(libs.spring.boot.resttestclient)
+    testImplementation(libs.spring.boot.restclient)
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
 }
 
 tasks.withType<Test> {
