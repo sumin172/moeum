@@ -26,7 +26,6 @@ dependencies {
 
     implementation(libs.spring.boot.starter.security)
     compileOnly(libs.jakarta.servlet.api)
-    // 런타임 ObjectMapper는 jjwt-jackson(현재) / spring-boot-starter-web(bootstrap)이 제공한다.
     compileOnly(libs.jackson.databind)
     implementation(libs.jjwt.api)
     runtimeOnly(libs.jjwt.impl)

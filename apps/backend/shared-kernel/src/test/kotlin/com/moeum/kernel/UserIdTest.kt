@@ -25,10 +25,9 @@ class UserIdTest {
     }
 
     @Test
-    fun `연속 생성한 UUID는 시간순으로 대체로 증가한다`() {
+    fun `같은 generator 인스턴스에서 연속 생성한 UUID는 타임스탬프 필드 기준 비내림차순이다`() {
         val ids = (1..100).map { UserId.generate().value }
 
-        // v7은 타임스탬프가 앞자리라 unsigned 비교 기준으로 비내림차순이어야 한다.
         for (i in 1 until ids.size) {
             val prevMsb = ids[i - 1].mostSignificantBits ushr 16
             val currMsb = ids[i].mostSignificantBits ushr 16

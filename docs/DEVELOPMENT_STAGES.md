@@ -78,7 +78,11 @@ Conversation
 - ConversationDay 자동 생성 및 관리
 - AI 반응 호출 (Gemini 2.5 Flash, 해당 ConversationDay의 전체 메시지를 컨텍스트로 전달)
 - AI 응답 저장
-- 오늘 대화 조회 API
+- 오늘/전날 대화 조회 API (`GET /api/conversations/today`, 2026-08-02 결정)
+  - `previousDay` 옵션으로 전날 조회, 나머지 파라미터·동작은 오늘 조회와 동일
+  - `after`(마지막으로 받은 messageId) + `limit` 커서 페이지네이션 — 커서 없으면 최근 limit개, 있으면 그 이후 신규만
+  - 매번 하루 전체를 재조회하지 않기 위함이며, 같은 커서 메커니즘으로 AI 응답 도착 여부(비동기 생성 완료)도 폴링으로 감지 가능
+  - 커서 비교는 id(UUIDv7) 기준, 반환 시 표시 순서는 occurredAt 기준으로 재정렬(지연 전송된 오프라인 메시지가 늦게 도착해도 실제 발화 시점에 맞게 노출)
 - 유저당 일일 메시지/토큰 quota 최소 안전장치 (요금제와 무관하게 어뷰징·버그로 인한 비용 폭주 방지, Stage 6 요금제별 Rate Limit과는 별개)
 
 **AI 컨텍스트 전달 방식 (2026-07-25 결정)**
@@ -90,7 +94,7 @@ Conversation
 **스키마 핵심**
 ```sql
 conversation.messages
-  id                UUID PK
+  id                UUID PK      -- UUIDv7, 시간순 정렬 보장 → 목록 조회 페이지네이션 커서로 사용 (2026-08-02)
   conversation_day_id UUID
   user_id           UUID
   role              TEXT        -- 'user' | 'assistant'
@@ -112,8 +116,12 @@ conversation.messages
 conversation.conversation_days
   id              UUID PK
   user_id         UUID
-  local_date      DATE
-  timezone        TEXT          -- 최초 생성 시 고정
+  local_date      DATE          -- 최초 계산값 고정, 정체성(UNIQUE 키)이라 절대 재계산하지 않음
+  timezone        TEXT          -- 메시지 저장마다 최신 관측 zone으로 갱신 (2026-08-02 결정)
+                                 -- local_date와 달리 living 값. 마감 배치가 "이 zone 기준 자정 지났는지" 판단하는 근거.
+                                 -- 갱신은 local_date를 건드리지 않으므로 정체성 충돌 위험 없음.
+                                 -- 한 메시지의 zone 변화로 local_date 자체가 달라지면(실제 자정 넘김) 새 ConversationDay가
+                                 -- 열리는 것을 정상으로 받아들임(하루가 여러 row로 쪼개지는 fragmentation은 accepted trade-off)
   status          TEXT          -- OPEN | CLOSED
   source_revision BIGINT DEFAULT 0  -- 메시지 추가·마감 시 증가
   version         BIGINT        -- @Version 낙관적 락
@@ -160,7 +168,13 @@ conversation.conversation_days
 **할 것**
 
 Conversation
-- ConversationDay 마감 트리거 (수동 or 스케줄러, 즉시 반환)
+- ConversationDay 마감 트리거 — 스케줄 배치 채택 (2026-08-02 결정)
+  - 후보 비교: 배치(주기적 스캔) / 조회 시 lazy 처리 / 쓰기 경로에 끼워넣기 → 배치 채택
+  - 이유: 유저가 이탈해도(다시 접속 안 해도) 열린 day가 언젠가 반드시 마감되는 걸 보장하는 유일한 방식이고, 기존 command/query 경로에 부작용을 안 얹어 장애 격리가 됨
+  - 판단 기준은 유저 단위의 "마지막 zone"이 아니라 **각 ConversationDay row 자신의 timezone** — day마다 독립적으로 자정 여부 판단 (동시에 여러 day가 열려 있어도 서로 안 기다림)
+  - 매 배치 스캔마다 zone 계산을 반복하지 않도록, day의 timezone이 갱신될 때 `closesAt`(그 zone 기준 자정에 해당하는 UTC Instant)을 같이 계산해 저장하는 안 검토 — 배치 쿼리를 `WHERE status='OPEN' AND closes_at <= now()` 인덱스 스캔으로 단순화
+  - 마감은 원자적 조건부 UPDATE(`WHERE id=? AND status='OPEN'`)로 먼저 확정한 뒤 메시지를 읽어 일기를 생성 — 마감 순간 도착하는 메시지와의 레이스 방지
+  - 배치 자체는 멱등(이미 CLOSED인 row는 조건에 안 걸림) — 중간에 죽고 재실행돼도 안전
 - ConversationDayClosed 발행 (source_revision 포함)
 - 비동기로 Moment 추출 Job 시작 (LLM 배치 호출)
 - Moment 추출 완료 → MomentsPrepared 발행 (Moment 스냅샷 + source_revision 포함)
@@ -268,6 +282,10 @@ conversation.moments
 - Journal이 CONFIRMED 상태였다면 OUTDATED로 변경
 - 사용자에게 재생성 여부 제공
 - 재생성 요청은 generation_jobs의 request_key로 중복 방지
+
+**오프라인 지연 전송과의 상호작용 (2026-08-02 재확인)**
+- occurredAt을 클라이언트 작성 시각으로 받는 설계(Stage 1) 때문에, 배치가 실제 흐르는 서버 시각 기준으로 이미 day를 CLOSED한 뒤에 오프라인 큐잉됐던 메시지가 도착하는 상황이 구조적으로 항상 가능하다(비행기 모드 등으로 지연이 몇 시간~며칠까지 벌어질 수 있음)
+- 위 Option 3 정책 그대로 저장은 허용하되, 얼마나 자주 발생하는지 관측하기 위해 `SaveMessageService`에서 CLOSED day에 메시지가 붙을 때 경고 로그를 남긴다 (2026-08-02 적용) — 재오픈/일기 재생성 자동화 여부는 이 로그로 빈도를 확인한 뒤 결정
 
 **미확정 일기 정책 (결정 필요)**
 - 선택지: N일 후 자동 확정 or 영구 DRAFT 유지
@@ -414,13 +432,13 @@ gamification.point_ledger
 
 ## 단계별 인프라 도입 계획
 
-| 인프라        | 기본 계획      | 조기 도입 조건               |
-|------------|------------|------------------------|
-| PostgreSQL | Stage 0    | —                      |
-| Redis      | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션)    |
-| Outbox 패턴  | Stage 4    | 이벤트 유실이 업무 손실로 이어지는 시점 |
-| Read Model | Stage 5    | N+1 실측 시               |
-| Kafka      | MSA 분리 시   | Outbox transport 교체    |
+| 인프라      | 기본 계획    | 조기 도입 조건                          |
+|-------------|--------------|-----------------------------------------|
+| PostgreSQL  | Stage 0      | —                                       |
+| Redis       | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션)           |
+| Outbox 패턴 | Stage 4      | 이벤트 유실이 업무 손실로 이어지는 시점 |
+| Read Model  | Stage 5      | N+1 실측 시                             |
+| Kafka       | MSA 분리 시  | Outbox transport 교체                   |
 
 ---
 
@@ -451,14 +469,14 @@ gamification.point_ledger
 
 실제 사용 흐름을 본 뒤 결정한다. 지금 확정하지 않아도 된다.
 
-| 항목                                      | 결정 시점               |
-|-----------------------------------------|---------------------|
-| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)      | 사용자 행동 패턴 관찰 후      |
-| Insight 집계에 DRAFT 일기 포함 여부              | Insight 기능 구현 시     |
-| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시      |
-| Outbox를 Stage 2에 조기 도입할지                | 이벤트 유실 허용 여부 판단 시   |
-| Moment confidence를 제품 UI에 노출할지          | UX 설계 시             |
-| Redis 도입 여부                             | 세션/캐시 실제 필요 발생 시    |
-| 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)       | 실사용 트래픽 패턴 확인 후     |
-| 프롬프트/컨텍스트 캐싱 도입 시점                      | 실제 API 연동 시 비용 실측 후 |
-| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지   | 검색 품질 불만 발생 시       |
+| 항목                                                    | 결정 시점                     |
+|---------------------------------------------------------|-------------------------------|
+| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)       | 사용자 행동 패턴 관찰 후      |
+| Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시          |
+| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시          |
+| Outbox를 Stage 2에 조기 도입할지                        | 이벤트 유실 허용 여부 판단 시 |
+| Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                    |
+| Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시   |
+| 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후    |
+| 프롬프트/컨텍스트 캐싱 도입 시점                        | 실제 API 연동 시 비용 실측 후 |
+| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시        |
