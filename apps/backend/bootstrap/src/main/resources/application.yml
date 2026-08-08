@@ -19,3 +19,25 @@ server:
 logging:
   level:
     com.moeum: DEBUG
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      geminiConversationClient:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        recordExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+          - org.springframework.web.client.HttpClientErrorException.TooManyRequests
+          - com.moeum.platform.llm.conversation.ConversationResponseException
+
+moeum:
+  conversation:
+    ai:
+      daily-message-limit: 20

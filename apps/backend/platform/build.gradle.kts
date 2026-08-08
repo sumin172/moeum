@@ -31,6 +31,9 @@ dependencies {
     runtimeOnly(libs.jjwt.impl)
     runtimeOnly(libs.jjwt.jackson)
 
+    implementation(libs.spring.web)
+    implementation(libs.spring.cloud.starter.circuitbreaker.resilience4j)
+
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.spring.security.test)
 }

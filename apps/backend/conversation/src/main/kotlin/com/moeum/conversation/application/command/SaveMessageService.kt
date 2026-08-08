@@ -24,6 +24,8 @@ data class SaveMessageCommand(
     val timezone: String,
 )
 
+data class SaveMessageResult(val message: Message, val isNewlyCreated: Boolean)
+
 @Service
 class SaveMessageService(
     private val conversationDayRepository: ConversationDayRepository,
@@ -33,13 +35,15 @@ class SaveMessageService(
     private val log = LoggerFactory.getLogger(SaveMessageService::class.java)
 
     @Transactional
-    fun save(userId: UserId, command: SaveMessageCommand): Message {
+    fun save(userId: UserId, command: SaveMessageCommand): SaveMessageResult {
         if (command.content.isBlank()) {
             throw InvalidConversationRequestException("메시지 내용은 비어있을 수 없습니다")
         }
         val zoneId = parseTimezone(command.timezone)
 
-        messageRepository.findByUserIdAndClientMessageId(userId, command.clientMessageId)?.let { return it }
+        messageRepository.findByUserIdAndClientMessageId(userId, command.clientMessageId)?.let {
+            return SaveMessageResult(it, isNewlyCreated = false)
+        }
 
         val localDate = command.occurredAt.atZone(zoneId).toLocalDate()
         val conversationDay = conversationDayRepository.findByUserIdAndLocalDate(userId, localDate)
@@ -61,7 +65,7 @@ class SaveMessageService(
             localDate = localDate,
             clientMessageId = command.clientMessageId,
         )
-        return messageRepository.save(message)
+        return SaveMessageResult(messageRepository.save(message), isNewlyCreated = true)
     }
 
     private fun newConversationDay(userId: UserId, localDate: java.time.LocalDate, timezone: String): ConversationDay {

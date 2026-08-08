@@ -8,6 +8,7 @@ import com.moeum.conversation.domain.model.ConversationDayId
 import com.moeum.conversation.domain.model.ConversationDayStatus
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
+import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
@@ -43,9 +44,18 @@ class SaveMessageServiceTest {
                 ordered.takeLast(limit)
             }
         }
+        override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> =
+            messages.filter { it.conversationDayId == conversationDayId }
+                .sortedWith(compareBy({ it.occurredAt }, { it.id.value }))
         override fun save(message: Message): Message {
             messages.add(message)
             return message
+        }
+        override fun compareAndSetStatus(id: MessageId, expected: MessageResponseStatus, updated: MessageResponseStatus): Boolean {
+            val index = messages.indexOfFirst { it.id == id }
+            if (index < 0 || messages[index].responseStatus != expected) return false
+            messages[index] = messages[index].withResponseStatus(updated)
+            return true
         }
     }
 
@@ -73,13 +83,14 @@ class SaveMessageServiceTest {
             timezone = "Asia/Seoul",
         )
 
-        val message = service.save(userId, command)
+        val result = service.save(userId, command)
 
         val localDate = LocalDate.of(2026, 8, 2)
         val day = dayRepository.days.getValue(userId to localDate)
         assertThat(day.status).isEqualTo(ConversationDayStatus.OPEN)
         assertThat(day.sourceRevision).isEqualTo(1)
-        assertThat(message.conversationDayId).isEqualTo(day.id)
+        assertThat(result.message.conversationDayId).isEqualTo(day.id)
+        assertThat(result.isNewlyCreated).isTrue()
     }
 
     @Test
@@ -98,7 +109,7 @@ class SaveMessageServiceTest {
             SaveMessageCommand(UUID.randomUUID(), "두번째 메시지", Instant.parse("2026-08-02T02:00:00Z"), timezone),
         )
 
-        assertThat(second.conversationDayId).isEqualTo(first.conversationDayId)
+        assertThat(second.message.conversationDayId).isEqualTo(first.message.conversationDayId)
         val day = dayRepository.days.getValue(userId to LocalDate.of(2026, 8, 2))
         assertThat(day.sourceRevision).isEqualTo(2)
         assertThat(messageRepository.messages).hasSize(2)
@@ -119,8 +130,10 @@ class SaveMessageServiceTest {
         val first = service.save(userId, command)
         val retried = service.save(userId, command)
 
-        assertThat(retried.id).isEqualTo(first.id)
+        assertThat(retried.message.id).isEqualTo(first.message.id)
         assertThat(messageRepository.messages).hasSize(1)
+        assertThat(first.isNewlyCreated).isTrue()
+        assertThat(retried.isNewlyCreated).isFalse()
     }
 
     @Test

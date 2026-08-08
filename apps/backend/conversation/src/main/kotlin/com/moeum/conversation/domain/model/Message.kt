@@ -27,6 +27,8 @@ data class Message(
     val outputTokens: Int? = null,
     val deletedAt: Instant? = null,
 ) {
+    fun withResponseStatus(status: MessageResponseStatus): Message = copy(responseStatus = status)
+
     companion object {
         fun userMessage(
             id: MessageId,
@@ -49,6 +51,38 @@ data class Message(
                 localDate = localDate,
                 clientMessageId = clientMessageId,
                 responseStatus = MessageResponseStatus.PENDING,
+            )
+
+        fun assistantMessage(
+            id: MessageId,
+            conversationDayId: ConversationDayId,
+            userId: UserId,
+            content: String,
+            occurredAt: Instant,
+            timezone: String,
+            localDate: LocalDate,
+            generationId: UUID,
+            model: String,
+            promptVersion: String,
+            inputTokens: Int,
+            outputTokens: Int,
+        ): Message =
+            Message(
+                id = id,
+                conversationDayId = conversationDayId,
+                userId = userId,
+                role = MessageRole.ASSISTANT,
+                content = content,
+                occurredAt = occurredAt,
+                timezone = timezone,
+                localDate = localDate,
+                clientMessageId = null,
+                responseStatus = null,
+                generationId = generationId,
+                model = model,
+                promptVersion = promptVersion,
+                inputTokens = inputTokens,
+                outputTokens = outputTokens,
             )
     }
 }

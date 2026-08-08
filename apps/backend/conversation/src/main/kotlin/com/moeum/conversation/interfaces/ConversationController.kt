@@ -1,5 +1,6 @@
 package com.moeum.conversation.interfaces
 
+import com.moeum.conversation.application.command.GenerateConversationResponseService
 import com.moeum.conversation.application.command.SaveMessageCommand
 import com.moeum.conversation.application.command.SaveMessageService
 import com.moeum.conversation.application.query.GetTodayConversationService
@@ -31,6 +32,7 @@ private const val MAX_PAGE_SIZE = 200
 class ConversationController(
     private val saveMessageService: SaveMessageService,
     private val getTodayConversationService: GetTodayConversationService,
+    private val generateConversationResponseService: GenerateConversationResponseService,
 ) {
     private val log = LoggerFactory.getLogger(ConversationController::class.java)
 
@@ -45,7 +47,12 @@ class ConversationController(
 
         repeat(MAX_SAVE_ATTEMPTS) { attempt ->
             try {
-                return MessageResponse.from(saveMessageService.save(userId, command))
+                val result = saveMessageService.save(userId, command)
+                // 이번 호출이 실제로 새 행을 커밋했을 때만 트리거
+                if (result.isNewlyCreated) {
+                    generateConversationResponseService.generateAsync(result.message)
+                }
+                return MessageResponse.from(result.message)
             } catch (_: ObjectOptimisticLockingFailureException) {
                 log.warn("ConversationDay 낙관적 락 충돌, 재시도: userId={}, attempt={}", userId.value, attempt + 1)
             } catch (_: DataIntegrityViolationException) {

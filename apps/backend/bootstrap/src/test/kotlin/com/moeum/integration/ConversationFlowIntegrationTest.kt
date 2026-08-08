@@ -67,15 +67,50 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
         )
         assertThat(retryResponse.body!!.id).isEqualTo(savedId)
 
-        val todayResponse = restTemplate.exchange<TodayConversationResponse>(
-            "/api/conversations/today?timezone=Asia/Seoul",
-            HttpMethod.GET,
-            HttpEntity<Void>(authHeaders(jwt)),
+        // AI 응답(assistant 메시지)까지 비동기로 도착하는 걸 기다린다 — 유저 메시지 1개 + assistant 메시지 1개가 최종 상태.
+        val messages = awaitTodayMessages(jwt, expectedSize = 2)
+
+        val userMessages = messages.filter { it.role == "USER" }
+        assertThat(userMessages).hasSize(1)
+        assertThat(userMessages.single().id).isEqualTo(savedId)
+        assertThat(userMessages.single().content).isEqualTo("오늘 정말 피곤했다")
+    }
+
+    @Test
+    fun `메시지 저장 후 AI 응답이 비동기로 생성되어 오늘 대화 조회에 나타난다`() {
+        val jwt = issueJwt()
+        val request = SaveMessageRequest(
+            clientMessageId = UUID.randomUUID(),
+            content = "오늘 정말 피곤했다",
+            occurredAt = Instant.now(),
+            timezone = "Asia/Seoul",
         )
-        assertThat(todayResponse.statusCode).isEqualTo(HttpStatus.OK)
-        assertThat(todayResponse.body!!.messages).hasSize(1)
-        assertThat(todayResponse.body!!.messages.single().id).isEqualTo(savedId)
-        assertThat(todayResponse.body!!.messages.single().content).isEqualTo("오늘 정말 피곤했다")
+        restTemplate.exchange<MessageResponse>(
+            "/api/conversations/messages",
+            HttpMethod.POST,
+            HttpEntity(request, authHeaders(jwt)),
+        )
+
+        val messages = awaitTodayMessages(jwt, expectedSize = 2)
+
+        val userMessage = messages.single { it.role == "USER" }
+        assertThat(userMessage.responseStatus).isEqualTo("COMPLETED")
+        val assistantMessage = messages.single { it.role == "ASSISTANT" }
+        assertThat(assistantMessage.content).isEqualTo("테스트 응답입니다.")
+    }
+
+    private fun awaitTodayMessages(jwt: String, expectedSize: Int): List<MessageResponse> {
+        repeat(20) {
+            val response = restTemplate.exchange<TodayConversationResponse>(
+                "/api/conversations/today?timezone=Asia/Seoul",
+                HttpMethod.GET,
+                HttpEntity<Void>(authHeaders(jwt)),
+            )
+            val messages = response.body?.messages.orEmpty()
+            if (messages.size >= expectedSize) return messages
+            Thread.sleep(200)
+        }
+        throw AssertionError("AI 응답이 시간 내에 도착하지 않았습니다")
     }
 
     @Test

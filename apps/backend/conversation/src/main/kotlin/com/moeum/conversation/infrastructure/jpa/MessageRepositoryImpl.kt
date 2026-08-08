@@ -4,6 +4,7 @@ import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.ConversationDayId
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
+import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.kernel.UserId
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
@@ -27,8 +28,14 @@ class MessageRepositoryImpl(
         return entities.map { it.toDomain() }.sortedWith(compareBy({ it.occurredAt }, { it.id.value }))
     }
 
+    override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> =
+        jpaRepository.findByConversationDayIdOrderByIdAsc(conversationDayId.value).map { it.toDomain() }
+
     override fun save(message: Message): Message =
         jpaRepository.save(message.toEntity()).toDomain()
+
+    override fun compareAndSetStatus(id: MessageId, expected: MessageResponseStatus, updated: MessageResponseStatus): Boolean =
+        jpaRepository.compareAndSetStatus(id.value, expected, updated) > 0
 }
 
 private fun MessageJpaEntity.toDomain(): Message =
