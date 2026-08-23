@@ -26,6 +26,8 @@ class GetTodayConversationServiceTest {
             days[conversationDay.userId to conversationDay.localDate] = conversationDay
             return conversationDay
         }
+        override fun findOpenDueForClose(now: Instant, limit: Int): List<ConversationDay> = emptyList()
+        override fun closeIfOpen(id: ConversationDayId, closedAt: Instant): Boolean = error("not used in this test")
     }
 
     private class FakeMessageRepository : MessageRepository {
