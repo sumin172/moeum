@@ -35,6 +35,8 @@ class ConversationDayJpaEntity(
     var version: Long = 0,
     @Column(name = "opened_at", nullable = false)
     val openedAt: Instant,
+    @Column(name = "closes_at", nullable = false)
+    val closesAt: Instant,
     @Column(name = "closed_at")
     val closedAt: Instant? = null,
 ) : Persistable<UUID> {
