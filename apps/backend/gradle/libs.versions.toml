@@ -12,8 +12,6 @@ assertj = "3.27.7"
 testcontainers = "2.0.5"
 #noinspection UnusedVersionCatalogEntry
 spring-cloud-dependencies = "2025.1.2"
-#noinspection UnusedVersionCatalogEntry
-aws-sdk = "2.46.7"
 
 [libraries]
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
@@ -43,8 +41,6 @@ java-uuid-generator = { module = "com.fasterxml.uuid:java-uuid-generator", versi
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
-aws-sdk-s3 = { module = "software.amazon.awssdk:s3" }
-aws-sdk-url-connection-client = { module = "software.amazon.awssdk:url-connection-client" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

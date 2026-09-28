@@ -20,7 +20,6 @@ subprojects {
         configure<io.spring.gradle.dependencymanagement.dsl.DependencyManagementExtension> {
             imports {
                 mavenBom("org.springframework.cloud:spring-cloud-dependencies:${rootProject.libs.versions.spring.cloud.dependencies.get()}")
-                mavenBom("software.amazon.awssdk:bom:${rootProject.libs.versions.aws.sdk.get()}")
             }
         }
     }

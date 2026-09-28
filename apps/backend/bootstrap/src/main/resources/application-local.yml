@@ -25,12 +25,3 @@ moeum:
   gemini:
     # Google AI Studio(aistudio.google.com)에서 발급받은 Gemini API 키. 로컬에선 환경변수로 주입.
     api-key: ${GEMINI_API_KEY:}
-  storage:
-    s3:
-      # docker/garage 로 띄운 로컬 Garage. --default-bucket 플래그가 이 값 그대로 access key/secret/bucket을 자동 생성한다.
-      endpoint: http://localhost:3900
-      region: garage
-      bucket: moeum-snapshots
-      access-key: moeum-local-access-key
-      secret-key: moeum-local-secret-key-must-be-32-bytes-min
-      path-style-access: true

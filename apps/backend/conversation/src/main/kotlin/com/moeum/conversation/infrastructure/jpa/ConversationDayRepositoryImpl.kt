@@ -18,6 +18,9 @@ class ConversationDayRepositoryImpl(
     override fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay? =
         jpaRepository.findByUserIdAndLocalDate(userId.value, localDate)?.toDomain()
 
+    override fun findById(id: ConversationDayId): ConversationDay? =
+        jpaRepository.findById(id.value).map { it.toDomain() }.orElse(null)
+
     override fun save(conversationDay: ConversationDay): ConversationDay =
         jpaRepository.save(conversationDay.toEntity()).toDomain()
 

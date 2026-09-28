@@ -33,8 +33,6 @@ dependencies {
 
     implementation(libs.spring.web)
     implementation(libs.spring.cloud.starter.circuitbreaker.resilience4j)
-    implementation(libs.aws.sdk.s3)
-    runtimeOnly(libs.aws.sdk.url.connection.client)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.spring.security.test)

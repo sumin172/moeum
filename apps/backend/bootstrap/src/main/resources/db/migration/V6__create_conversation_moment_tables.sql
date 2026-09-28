@@ -17,8 +17,7 @@ CREATE TABLE conversation.moment_extraction_jobs (
 CREATE INDEX idx_conversation_moment_extraction_jobs_conversation_day_id
     ON conversation.moment_extraction_jobs (conversation_day_id);
 
--- MomentSet: 한 source_revision 시점 기준 추출 결과 단위.
--- raw_snapshot_key는 원본 대화 전체를 담은 Object Storage 참조 (Claim-Check 패턴, 이벤트/DB엔 원본 텍스트를 직접 싣지 않는다).
+-- MomentSet: 한 추출 실행 단위. source_revision은 추출 시점에 읽은 ConversationDay의 버전.
 CREATE TABLE conversation.moment_sets (
     id UUID PRIMARY KEY,
     conversation_day_id UUID NOT NULL,
@@ -26,8 +25,6 @@ CREATE TABLE conversation.moment_sets (
     generation_id UUID NOT NULL,
     model TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
-    raw_snapshot_key TEXT NULL,
-    raw_snapshot_purge_after TIMESTAMPTZ NULL,
     is_current BOOLEAN NOT NULL DEFAULT true,
     superseded_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL,
@@ -38,7 +35,7 @@ CREATE TABLE conversation.moment_sets (
 CREATE INDEX idx_conversation_moment_sets_conversation_day_id
     ON conversation.moment_sets (conversation_day_id);
 
--- 하루당 "현재 유효한" MomentSet은 하나뿐이어야 한다 (마감 후 메시지 추가로 재추출되면 이전 것은 is_current=false로 전환).
+-- 하루당 "현재 유효한" MomentSet은 하나뿐이어야 한다.
 CREATE UNIQUE INDEX uq_conversation_moment_sets_current_per_day
     ON conversation.moment_sets (conversation_day_id)
     WHERE is_current = true;
