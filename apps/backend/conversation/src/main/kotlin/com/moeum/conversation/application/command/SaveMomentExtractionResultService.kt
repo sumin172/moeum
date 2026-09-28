@@ -19,6 +19,7 @@ import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
+import java.util.UUID
 
 @Service
 class SaveMomentExtractionResultService(
@@ -36,6 +37,7 @@ class SaveMomentExtractionResultService(
         sourceRevision: Long,
         job: MomentExtractionJob,
         extraction: MomentExtractionResponse,
+        correlationId: UUID,
     ): List<Moment> {
         val now = timeProvider.now()
 
@@ -60,6 +62,7 @@ class SaveMomentExtractionResultService(
         eventPublisher.publishEvent(
             MomentsPreparedV1(
                 occurredAt = now,
+                correlationId = correlationId,
                 conversationDayId = conversationDayId.value,
                 userId = userId.value,
                 localDate = localDate,

@@ -9,7 +9,7 @@ data class MomentsPreparedV1(
     val eventType: String = "MomentsPrepared",
     val eventVersion: Int = 1,
     val occurredAt: Instant,
-    val correlationId: UUID = UUID.randomUUID(),
+    val correlationId: UUID,
     val causationId: UUID? = null,
     val conversationDayId: UUID,
     val userId: UUID,

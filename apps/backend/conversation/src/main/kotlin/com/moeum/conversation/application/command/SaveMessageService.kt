@@ -5,7 +5,6 @@ import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.ConversationDay
 import com.moeum.conversation.domain.model.ConversationDayId
-import com.moeum.conversation.domain.model.ConversationDayStatus
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.parseTimezone
@@ -48,10 +47,6 @@ class SaveMessageService(
         val localDate = command.occurredAt.atZone(zoneId).toLocalDate()
         val conversationDay = conversationDayRepository.findByUserIdAndLocalDate(userId, localDate)
             ?: newConversationDay(userId, localDate, command.timezone)
-
-        if (conversationDay.status == ConversationDayStatus.CLOSED) {
-            log.warn("이미 마감된 ConversationDay에 메시지 도착: userId={}, localDate={}", userId.value, localDate)
-        }
 
         conversationDayRepository.save(conversationDay.withMessageAdded(command.timezone))
 

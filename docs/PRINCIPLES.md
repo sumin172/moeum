@@ -27,7 +27,7 @@ conversationQueryService.getMessagesForJournalGeneration(id)
 **4. 모든 사용자 입력에 timezone과 local_date를 저장한다**
 - 나중에 추가하면 과거 데이터 전부 재계산
 - Message의 timezone/local_date는 저장 시점에 한 번 계산되고 이후 절대 갱신되지 않는 값(불변 기록)
-- ConversationDay.timezone은 예외 — 메시지가 추가될 때마다 최신 관측 zone으로 갱신되는 living 값(2026-08-02 결정, 하루 마감 시점 계산 정확도를 위함). 단 ConversationDay.local_date는 이때도 절대 재계산하지 않는다 — local_date가 그 row의 정체성(UNIQUE 키)이라 timezone과 분리해서 다뤄야 충돌 위험이 없다
+- ConversationDay.timezone은 예외 — 메시지가 추가될 때마다 최신 관측 zone으로 갱신되는 living 값(Journal이 "이 zone 기준 자정이 지났는지" 판단하는 근거). 단 ConversationDay.local_date는 이때도 절대 재계산하지 않는다 — local_date가 그 row의 정체성(UNIQUE 키)이라 timezone과 분리해서 다뤄야 충돌 위험이 없다
 
 **5. UserId는 auth provider ID와 분리한다**
 - 내부 UUID를 별도 생성
@@ -135,7 +135,7 @@ DDD 레이어링(`domain/application/infrastructure/interfaces`)이 항상 1차 
 - AI 결과를 원본 기록처럼 취급한다
 - Journal 모듈이 Moment를 생성하거나 conversation 테이블에 저장한다
 - 모듈 간 순환 의존 (conversation ↔ journal)
-- ConversationDayClosed 이벤트에 Moment 추출을 동기 결합시킨다 (마감 API가 LLM에 묶임)
+- 메시지 저장 API 응답을 Moment 추출이나 일기 생성 같은 LLM 호출과 동기로 묶는다
 
 ---
 

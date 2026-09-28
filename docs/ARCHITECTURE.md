@@ -50,7 +50,7 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 
 **비용 제어 원칙 (2026-07-25 갱신)**
 - 대화 반응: 고정된 "최근 N개" 대신 해당 ConversationDay(하루)의 전체 메시지를 컨텍스트로 사용 — LLM API가 무상태라 컨텍스트를 매번 재전송해야 하며, 하루 단위 자연 경계를 그대로 씀
-- 컨텍스트 재전송 비용은 프롬프트/컨텍스트 캐싱(Gemini/Claude 공통 지원)으로 완화 — 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
+- 컨텍스트 재전송 비용은 Gemini 2.5+의 암묵적 캐싱(implicit caching)이 자동으로 완화한다 — 별도 구현 필요 없음, 요청 최소 2,048 토큰 이상이고 이전 요청과 동일한 prefix일 때 자동 히트. 우리 요청 구조(고정 시스템 지시 + 계속 자라나는 대화 이력을 매번 그대로 재전송)가 이미 이 조건에 맞는 형태라 별도 코드 변경이 필요 없다. `GeminiConversationResponder`가 응답의 `cachedContentTokenCount`를 로그로 남겨 실제 히트 여부를 관측한다. 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
 - 유저당 일일 메시지/토큰 quota를 하드 캡으로 둠(요금제와 무관, 어뷰징·버그로 인한 비용 폭주 방지 — Stage 6 요금제별 Rate Limit과는 별개의 안전장치)
 - 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 함
 - 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축)
@@ -148,7 +148,7 @@ Journal 모듈은 Moment를 생성하거나 conversation 테이블에 저장하�
 
 **Journal — 원본 대화로 직접 서사를 생성한다**
 
-Journal은 Moment를 입력으로 쓰지 않는다. `ConversationDayClosed`를 구독해 일기 생성 Job을 만들고, Conversation의 publicapi로 그날 원본 대화를 조회해 서사를 쓴다.
+Journal은 Moment를 입력으로 쓰지 않는다. Conversation은 "마감"이라는 별도 상태나 이벤트를 갖지 않는다 — 하루의 경계는 `local_date`와 `timezone`으로 항상 계산 가능하다. Journal은 자체 스케줄러로 "생성해도 되는 day"를 스스로 판단하고, Conversation의 publicapi로 그 원본 대화를 조회해 서사를 쓴다.
 
 ```kotlin
 // conversation/application/publicapi
@@ -158,14 +158,14 @@ interface ConversationJournalSourceQuery {
 ```
 
 ```
-ConversationDay 마감 (source_revision 확정)
-  → ConversationDayClosed 발행 (conversationDayId, userId, localDate, sourceRevision)
-  → Journal이 구독 → ConversationJournalSourceQuery로 원본 조회 → 서사 생성
+Journal 스케줄러가 주기적으로 실행
+  → ConversationJournalSourceQuery로 "생성 대상 day" 조회 (timezone 기준 자정 + 버퍼 지난 day)
+  → 원본 조회 → 서사 생성
 ```
 
 **Moment 추출 — Insight/아카이브가 필요할 때만 호출한다**
 
-Moment 추출은 마감에 자동으로 반응하지 않는다. Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 Conversation의 Moment 추출 기능을 호출하면, 그 순간 `conversation.messages`를 읽어 구조화된 Moment를 뽑고 저장한다. 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 반환한다(멱등).
+Moment 추출은 Conversation의 어떤 상태 변화에도 자동으로 반응하지 않는다. Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 Conversation의 Moment 추출 기능을 호출하면, 그 순간 `conversation.messages`를 읽어 구조화된 Moment를 뽑고 저장한다. 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 반환한다(멱등).
 
 게이팅(구독 여부 등)은 호출하는 쪽(Insight, 아카이브)의 책임이다. Moment 추출 기능 자체는 구독 개념을 모른다.
 
@@ -178,7 +178,7 @@ Moment 추출은 마감에 자동으로 반응하지 않는다. Insight 배치�
 ```
 identity        ← 독립 (다른 모듈에 의존하지 않음)
 conversation    → shared-kernel(UserId)  [Identity API는 필요 시만]
-journal         → conversation.publicapi (ConversationJournalSourceQuery), ConversationDayClosed 이벤트 구독
+journal         → conversation.publicapi (ConversationJournalSourceQuery) — 자체 스케줄러로 호출, 이벤트 구독 없음
 insight         → journal integration event, conversation의 Moment 조회 publicapi
 gamification    → journal integration event
 notification    → 여러 모듈의 integration event
@@ -380,7 +380,6 @@ data class JournalConfirmedV1(
 **핵심 이벤트 목록**
 
 ```
-ConversationDayClosed       — 하루가 마감됐다는 사실 (source_revision 포함, Journal 구독 대상)
 MomentsPrepared             — Moment 추출 완료 (Insight/아카이브가 호출했을 때만 발생)
 JournalGenerationRequested
 JournalGenerated
@@ -397,16 +396,6 @@ Integration Event는 생산자 모듈이 소유한다. shared-kernel에 업무 �
 ```
 journal/application/publicapi/events/JournalConfirmedV1.kt
 conversation/application/publicapi/events/MomentsPreparedV1.kt
-```
-
-계약 파일 (JSON Schema)은 `contracts/events/`에 별도 보관한다.
-
-**계약 파일 위치**
-```
-contracts/events/
-├─ journal-confirmed-v1.json
-├─ conversation-day-closed-v1.json
-└─ ...
 ```
 
 ---
@@ -431,10 +420,13 @@ AI 응답 생성은 메시지 저장 트랜잭션과 분리하며,
 ## 핵심 관측 식별자
 
 ```
-traceId       — HTTP 요청 단위
-correlationId — 전체 업무 흐름
-causationId   — 이전 이벤트 ID
-eventId       — 현재 이벤트
+traceId       — HTTP 요청 단위 (아직 미도입 — 별도 필터/MDC 설정 필요)
+correlationId — 전체 업무 흐름. 이벤트 생성 시 기본값으로 새로 채우지 않는다 — 호출부가
+                자기 작업 단위(배치 실행, 요청 등)를 식별하는 값을 그대로 넘겨야 실제로
+                연결된다. 기본값을 두면 매번 새 값이 생겨 아무것도 추적할 수 없다.
+causationId   — 이전 이벤트 ID. 이벤트가 아니라 직접 호출로 트리거된 흐름(예: Moment 추출)은
+                이전 이벤트가 없으므로 null이 맞다
+eventId       — 현재 이벤트. 이건 매번 새로 생성하는 게 맞다(이 이벤트 자신의 식별자)
 userId        — 사용자
 journalId     — 일기
 generationId  — AI 생성 단위

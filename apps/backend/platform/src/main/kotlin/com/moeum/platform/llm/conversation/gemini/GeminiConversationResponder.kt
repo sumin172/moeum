@@ -47,6 +47,17 @@ class GeminiConversationResponder(
         val text = response?.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
             ?: throw ConversationResponseException("Gemini 응답에 유효한 content가 없습니다(안전 필터 등으로 차단됐을 수 있음)")
 
+        // Gemini 2.5+는 암묵적 캐싱을 자동 적용한다(별도 구현 불필요, 최소 토큰 수 이상 & 이전 요청과 동일한
+        // prefix일 때만 히트). 실제로 히트하고 있는지 확인하기 위한 로그 — 구현이 아니라 관측용.
+        val cachedTokens = response.usageMetadata?.cachedContentTokenCount ?: 0
+        if (cachedTokens > 0) {
+            log.debug(
+                "Gemini 캐시 히트: cachedTokens={}, promptTokens={}",
+                cachedTokens,
+                response.usageMetadata?.promptTokenCount ?: 0,
+            )
+        }
+
         return ConversationResponse(
             generationId = UuidV7.generate(),
             content = text,
@@ -84,4 +95,8 @@ data class GeminiGenerateContentResponse(
 )
 
 data class GeminiCandidate(val content: GeminiContent? = null)
-data class GeminiUsageMetadata(val promptTokenCount: Int = 0, val candidatesTokenCount: Int = 0)
+data class GeminiUsageMetadata(
+    val promptTokenCount: Int = 0,
+    val candidatesTokenCount: Int = 0,
+    val cachedContentTokenCount: Int = 0,
+)

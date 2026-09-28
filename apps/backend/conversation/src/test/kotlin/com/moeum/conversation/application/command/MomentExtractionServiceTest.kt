@@ -39,6 +39,7 @@ class MomentExtractionServiceTest {
     private val conversationDayId = ConversationDayId.generate()
     private val localDate: LocalDate = LocalDate.of(2026, 9, 28)
     private val now: Instant = Instant.parse("2026-09-28T15:00:00Z")
+    private val correlationId: UUID = UUID.randomUUID()
 
     private fun newDay(sourceRevision: Long): ConversationDay =
         ConversationDay.open(id = conversationDayId, userId = userId, localDate = localDate, timezone = "Asia/Seoul", now = now)
@@ -81,7 +82,7 @@ class MomentExtractionServiceTest {
 
         val service = newService(day = day, momentSetRepository = momentSetRepository, momentRepository = momentRepository, extractor = extractor)
 
-        val result = service.ensureExtracted(conversationDayId)
+        val result = service.ensureExtracted(conversationDayId, correlationId)
 
         assertThat(result).containsExactly(existingMoment)
         assertThat(extractor.wasCalled).isFalse() // 재추출 안 함
@@ -89,7 +90,7 @@ class MomentExtractionServiceTest {
 
     @Test
     fun `처음 호출이면 그 순간 원본 메시지를 다시 읽어 추출하고 결과를 저장·발행한다`() {
-        val day = newDay(sourceRevision = 3) // 마감 이후 메시지가 더 도착해 revision이 올라간 상황을 가정해도 무관
+        val day = newDay(sourceRevision = 3) // revision이 여러 번 올라간 상황을 가정해도 동작은 동일함을 보여주는 값
         val extractor = FakeMomentExtractor(
             MomentExtractionResponse(
                 generationId = UUID.randomUUID(),
@@ -112,7 +113,7 @@ class MomentExtractionServiceTest {
             eventPublisher = eventPublisher,
         )
 
-        val result = service.ensureExtracted(conversationDayId)
+        val result = service.ensureExtracted(conversationDayId, correlationId)
 
         assertThat(extractor.wasCalled).isTrue()
         assertThat(extractor.lastRequest?.rawTranscript).contains("오늘 점심은 국밥이었다")
@@ -121,6 +122,7 @@ class MomentExtractionServiceTest {
 
         val published = eventPublisher.published.single() as MomentsPreparedV1
         assertThat(published.sourceRevision).isEqualTo(3)
+        assertThat(published.correlationId).isEqualTo(correlationId) // 호출부가 준 값이 그대로 흘러간다
     }
 
     @Test
@@ -130,7 +132,7 @@ class MomentExtractionServiceTest {
 
         val service = newService(day = day, jobRepository = jobRepository, extractor = FailingMomentExtractor())
 
-        val result = service.ensureExtracted(conversationDayId)
+        val result = service.ensureExtracted(conversationDayId, correlationId)
 
         assertThat(result).isEmpty()
         val job = jobRepository.saved.single()
@@ -174,8 +176,6 @@ class MomentExtractionServiceTest {
         override fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay = day
         override fun findById(id: ConversationDayId): ConversationDay = day
         override fun save(conversationDay: ConversationDay): ConversationDay = conversationDay
-        override fun findOpenDueForClose(now: Instant, limit: Int): List<ConversationDay> = emptyList()
-        override fun closeIfOpen(id: ConversationDayId, closedAt: Instant): Boolean = true
     }
 
     private class FakeMessageRepository(private val messages: List<Message>) : MessageRepository {

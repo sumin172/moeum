@@ -22,12 +22,11 @@ class GetTodayConversationServiceTest {
         val days = mutableMapOf<Pair<UserId, LocalDate>, ConversationDay>()
         override fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay? =
             days[userId to localDate]
+        override fun findById(id: ConversationDayId): ConversationDay? = days.values.find { it.id == id }
         override fun save(conversationDay: ConversationDay): ConversationDay {
             days[conversationDay.userId to conversationDay.localDate] = conversationDay
             return conversationDay
         }
-        override fun findOpenDueForClose(now: Instant, limit: Int): List<ConversationDay> = emptyList()
-        override fun closeIfOpen(id: ConversationDayId, closedAt: Instant): Boolean = error("not used in this test")
     }
 
     private class FakeMessageRepository : MessageRepository {

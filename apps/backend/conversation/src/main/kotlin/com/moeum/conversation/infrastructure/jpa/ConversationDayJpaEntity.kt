@@ -1,10 +1,7 @@
 package com.moeum.conversation.infrastructure.jpa
 
-import com.moeum.conversation.domain.model.ConversationDayStatus
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
-import jakarta.persistence.EnumType
-import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
@@ -25,9 +22,6 @@ class ConversationDayJpaEntity(
     val localDate: LocalDate,
     @Column(nullable = false)
     val timezone: String,
-    @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
-    val status: ConversationDayStatus,
     @Column(name = "source_revision", nullable = false)
     val sourceRevision: Long,
     @Version
@@ -35,10 +29,6 @@ class ConversationDayJpaEntity(
     var version: Long = 0,
     @Column(name = "opened_at", nullable = false)
     val openedAt: Instant,
-    @Column(name = "closes_at", nullable = false)
-    val closesAt: Instant,
-    @Column(name = "closed_at")
-    val closedAt: Instant? = null,
 ) : Persistable<UUID> {
     override fun getId(): UUID = entityId
     override fun isNew(): Boolean = false

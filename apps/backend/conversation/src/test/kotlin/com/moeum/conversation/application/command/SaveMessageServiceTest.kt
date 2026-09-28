@@ -5,7 +5,6 @@ import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.ConversationDay
 import com.moeum.conversation.domain.model.ConversationDayId
-import com.moeum.conversation.domain.model.ConversationDayStatus
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.MessageResponseStatus
@@ -25,12 +24,11 @@ class SaveMessageServiceTest {
         val days = mutableMapOf<Pair<UserId, LocalDate>, ConversationDay>()
         override fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay? =
             days[userId to localDate]
+        override fun findById(id: ConversationDayId): ConversationDay? = days.values.find { it.id == id }
         override fun save(conversationDay: ConversationDay): ConversationDay {
             days[conversationDay.userId to conversationDay.localDate] = conversationDay
             return conversationDay
         }
-        override fun findOpenDueForClose(now: Instant, limit: Int): List<ConversationDay> = emptyList()
-        override fun closeIfOpen(id: ConversationDayId, closedAt: Instant): Boolean = error("not used in this test")
     }
 
     private class FakeMessageRepository : MessageRepository {
@@ -75,7 +73,7 @@ class SaveMessageServiceTest {
     ) = SaveMessageService(conversationDayRepository, messageRepository, timeProvider)
 
     @Test
-    fun `첫 메시지를 저장하면 새 ConversationDay가 OPEN 상태로 생성된다`() {
+    fun `첫 메시지를 저장하면 새 ConversationDay가 생성된다`() {
         val dayRepository = FakeConversationDayRepository()
         val service = newService(conversationDayRepository = dayRepository)
         val command = SaveMessageCommand(
@@ -89,7 +87,6 @@ class SaveMessageServiceTest {
 
         val localDate = LocalDate.of(2026, 8, 2)
         val day = dayRepository.days.getValue(userId to localDate)
-        assertThat(day.status).isEqualTo(ConversationDayStatus.OPEN)
         assertThat(day.sourceRevision).isEqualTo(1)
         assertThat(result.message.conversationDayId).isEqualTo(day.id)
         assertThat(result.isNewlyCreated).isTrue()
