@@ -39,6 +39,7 @@ class MomentExtractionServiceTest {
     private val conversationDayId = ConversationDayId.generate()
     private val localDate: LocalDate = LocalDate.of(2026, 9, 28)
     private val now: Instant = Instant.parse("2026-09-28T15:00:00Z")
+    private val correlationId: UUID = UUID.randomUUID()
 
     private fun newDay(sourceRevision: Long): ConversationDay =
         ConversationDay.open(id = conversationDayId, userId = userId, localDate = localDate, timezone = "Asia/Seoul", now = now)
@@ -81,7 +82,7 @@ class MomentExtractionServiceTest {
 
         val service = newService(day = day, momentSetRepository = momentSetRepository, momentRepository = momentRepository, extractor = extractor)
 
-        val result = service.ensureExtracted(conversationDayId)
+        val result = service.ensureExtracted(conversationDayId, correlationId)
 
         assertThat(result).containsExactly(existingMoment)
         assertThat(extractor.wasCalled).isFalse() // 재추출 안 함
@@ -112,7 +113,7 @@ class MomentExtractionServiceTest {
             eventPublisher = eventPublisher,
         )
 
-        val result = service.ensureExtracted(conversationDayId)
+        val result = service.ensureExtracted(conversationDayId, correlationId)
 
         assertThat(extractor.wasCalled).isTrue()
         assertThat(extractor.lastRequest?.rawTranscript).contains("오늘 점심은 국밥이었다")
@@ -121,6 +122,7 @@ class MomentExtractionServiceTest {
 
         val published = eventPublisher.published.single() as MomentsPreparedV1
         assertThat(published.sourceRevision).isEqualTo(3)
+        assertThat(published.correlationId).isEqualTo(correlationId) // 호출부가 준 값이 그대로 흘러간다
     }
 
     @Test
@@ -130,7 +132,7 @@ class MomentExtractionServiceTest {
 
         val service = newService(day = day, jobRepository = jobRepository, extractor = FailingMomentExtractor())
 
-        val result = service.ensureExtracted(conversationDayId)
+        val result = service.ensureExtracted(conversationDayId, correlationId)
 
         assertThat(result).isEmpty()
         val job = jobRepository.saved.single()

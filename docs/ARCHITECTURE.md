@@ -50,7 +50,7 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 
 **비용 제어 원칙 (2026-07-25 갱신)**
 - 대화 반응: 고정된 "최근 N개" 대신 해당 ConversationDay(하루)의 전체 메시지를 컨텍스트로 사용 — LLM API가 무상태라 컨텍스트를 매번 재전송해야 하며, 하루 단위 자연 경계를 그대로 씀
-- 컨텍스트 재전송 비용은 프롬프트/컨텍스트 캐싱(Gemini/Claude 공통 지원)으로 완화 — 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
+- 컨텍스트 재전송 비용은 Gemini 2.5+의 암묵적 캐싱(implicit caching)이 자동으로 완화한다 — 별도 구현 필요 없음, 요청 최소 2,048 토큰 이상이고 이전 요청과 동일한 prefix일 때 자동 히트. 우리 요청 구조(고정 시스템 지시 + 계속 자라나는 대화 이력을 매번 그대로 재전송)가 이미 이 조건에 맞는 형태라 별도 코드 변경이 필요 없다. `GeminiConversationResponder`가 응답의 `cachedContentTokenCount`를 로그로 남겨 실제 히트 여부를 관측한다. 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
 - 유저당 일일 메시지/토큰 quota를 하드 캡으로 둠(요금제와 무관, 어뷰징·버그로 인한 비용 폭주 방지 — Stage 6 요금제별 Rate Limit과는 별개의 안전장치)
 - 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 함
 - 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축)
@@ -398,16 +398,6 @@ journal/application/publicapi/events/JournalConfirmedV1.kt
 conversation/application/publicapi/events/MomentsPreparedV1.kt
 ```
 
-계약 파일 (JSON Schema)은 `contracts/events/`에 별도 보관한다.
-
-**계약 파일 위치**
-```
-contracts/events/
-├─ journal-confirmed-v1.json
-├─ moments-prepared-v1.json
-└─ ...
-```
-
 ---
 
 ## 장애 허용 범위
@@ -430,10 +420,13 @@ AI 응답 생성은 메시지 저장 트랜잭션과 분리하며,
 ## 핵심 관측 식별자
 
 ```
-traceId       — HTTP 요청 단위
-correlationId — 전체 업무 흐름
-causationId   — 이전 이벤트 ID
-eventId       — 현재 이벤트
+traceId       — HTTP 요청 단위 (아직 미도입 — 별도 필터/MDC 설정 필요)
+correlationId — 전체 업무 흐름. 이벤트 생성 시 기본값으로 새로 채우지 않는다 — 호출부가
+                자기 작업 단위(배치 실행, 요청 등)를 식별하는 값을 그대로 넘겨야 실제로
+                연결된다. 기본값을 두면 매번 새 값이 생겨 아무것도 추적할 수 없다.
+causationId   — 이전 이벤트 ID. 이벤트가 아니라 직접 호출로 트리거된 흐름(예: Moment 추출)은
+                이전 이벤트가 없으므로 null이 맞다
+eventId       — 현재 이벤트. 이건 매번 새로 생성하는 게 맞다(이 이벤트 자신의 식별자)
 userId        — 사용자
 journalId     — 일기
 generationId  — AI 생성 단위
