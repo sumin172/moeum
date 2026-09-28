@@ -27,15 +27,15 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 
 ## 기술 스택
 
-| 영역   | 선택                           | 이유                                        |
-|--------|--------------------------------|---------------------------------------------|
-| 백엔드 | Kotlin + Spring Boot + Java 21 | 도메인 표현력, 트랜잭션, JPA, 스케줄러 통합 |
-| 빌드   | Gradle Kotlin DSL              |                                             |
-| 웹     | Next.js                        | 아카이브 UI + 얇은 BFF                      |
-| 모바일 | Flutter (또는 RN+Expo)         | 팀 숙련도에 따라 결정                       |
-| DB     | PostgreSQL                     | 단일 클러스터로 시작                        |
-| 캐시   | Redis                          | 세션·Rate Limit (초기에는 생략 가능)        |
-| 파일   | Object Storage                 | 이미지·음성                                 |
+| 영역   | 선택                           | 이유                                                                                                            |
+|--------|--------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| 백엔드 | Kotlin + Spring Boot + Java 21 | 도메인 표현력, 트랜잭션, JPA, 스케줄러 통합                                                                     |
+| 빌드   | Gradle Kotlin DSL              |                                                                                                                 |
+| 웹     | Next.js                        | 아카이브 UI + 얇은 BFF                                                                                          |
+| 모바일 | Flutter (또는 RN+Expo)         | 팀 숙련도에 따라 결정                                                                                           |
+| DB     | PostgreSQL                     | 단일 클러스터로 시작                                                                                            |
+| 캐시   | Redis                          | 세션·Rate Limit (초기에는 생략 가능)                                                                            |
+| 파일   | Object Storage (S3 호환)       | 이미지·음성, Moment 원본 스냅샷 — 로컬/운영(안정화 전) Garage, 안정화 후 AWS S3로 전환 (2026-09-28, MinIO 대체) |
 
 ### AI 모델 라우팅
 
@@ -149,15 +149,42 @@ Journal 모듈은 Moment를 생성하거나 conversation 테이블에 저장하�
 Moment 추출은 LLM 배치 호출이므로 하루 마감 API와 분리한다. 마감 API가 LLM 속도에 묶이면 안 된다.
 
 ```
-ConversationDay 마감 (즉시 반환)
-  → ConversationDayClosed 발행
-  → Conversation이 Moment 추출 Job 시작 (비동기)
-  → Moment 추출 완료
-  → MomentsPrepared 발행 (Moment 스냅샷 포함)
-  → Journal이 MomentsPrepared를 구독해 일기 생성
+ConversationDay 마감 (즉시 반환, source_revision 확정)
+  → ConversationDayClosed 발행 (conversationDayId, userId, localDate, sourceRevision만 — 트리거 역할)
+  → Conversation이 source_revision 고정 조회로 원본 메시지를 직접 읽어 Moment 추출 Job 시작 (비동기)
+  → Moment 추출 완료 (원본 스냅샷을 Object Storage에 저장, Moment 목록 생성)
+  → MomentsPrepared 발행 (Moment 스냅샷은 직접 포함 / 원본 대화는 Object Storage 참조 키만 포함)
+  → Journal이 MomentsPrepared를 구독해 일기 생성 (Moment 구조 + 원본 참조를 함께 사용)
 ```
 
-MomentsPrepared 페이로드에 Moment 스냅샷을 포함해 Journal이 Conversation API를 재호출하지 않도록 한다. 서비스 분리 시에도 Journal이 Conversation DB를 볼 필요가 없다.
+**Moment 추출을 하는 이유 (토큰 절약이 아니다)**
+
+Moment 추출도 결국 그날 원본 전체를 한 번은 읽어야 하므로, Journal 생성 하나만 놓고 보면 총 토큰량이 줄지 않는다 (호출이 2번이라 오히려 늘 수도 있다). 실제 이유는:
+1. **모델 비용 분업**: 큰 원본은 저비용 모델(Gemini Flash)이 읽고, 비싼 모델(Claude Haiku)의 입력은 구조화된 Moment로 대체할 수 있는 경로를 열어둔다.
+2. **재사용**: 같은 Moment를 Journal뿐 아니라 Insight(감정 패턴 분석 근거)와 아카이브(사용자가 직접 열람하는 "기억 조각")가 공유한다. Journal 하나만을 위한 추출이 아니다.
+
+**Journal은 왜 Moment만으로 생성하지 않는가**
+
+Moment 추출(구조화 압축)과 Journal 생성(서사화)을 모두 Moment 위에서만 하면 "압축 위에 압축"이 되어 원문 뉘앙스가 누적 손실된다. narrative화는 Journal 생성 단계에서 원본으로부터 **딱 한 번만** 일어나야 하므로, Journal은 Moment 구조(사실 골격)와 원본 텍스트(뉘앙스) 둘 다 참고해 서사를 만든다.
+
+**이벤트 페이로드에 무엇을 담을지 판단하는 기준**
+
+"원본이냐 가공이냐"가 아니라 **"크기가 원천적으로 제한돼 있는가, 사용량에 비례해 무제한으로 커질 수 있는가"**다.
+- Moment 스냅샷: 구조화돼 있어 크기 상한이 있다 → 이벤트에 직접 포함
+- 원본 대화 전체: 대화량에 비례해 무제한으로 커진다 → 이벤트엔 절대 담지 않고 Object Storage에 저장 후 참조 키만 포함 (Claim-Check 패턴)
+
+이 원칙은 인프로세스 이벤트든 향후 Kafka/SQS 같은 실제 메시지 브로커든 동일하게 적용된다. 오히려 브로커는 메시지 크기 제한(SQS 256KB, Kafka 기본 1MB)이 있어 더 엄격히 지켜야 한다.
+
+**원본 스냅샷(Object Storage) 보존 정책 (2026-09-22 갱신)**
+- 저장 위치: Object Storage (DB 컬럼 아님 — 큰 blob이 DB에 쌓이면 백업/복제/vacuum 부담이 커진다)
+  - 로컬/운영(안정화 전) 모두 **Garage**(Docker, EC2 자체 운영), 안정화 이후 AWS S3로 전환. S3 호환 API라 전환 시 `SnapshotStore` 구현체 교체 없이 엔드포인트/자격증명 설정만 바뀐다.
+  - 2026-09-22 최초 검토 시엔 MinIO를 전제했으나, MinIO 커뮤니티 에디션이 2026-04-25부로 GitHub 저장소가 archived되고 신규 이미지 배포가 끊긴 것을 확인해 채택하지 않음(2026-09-28). 대안으로 RustFS(운영 최소 요구 메모리 128GB — 소규모 서버에 부적합)도 검토했으나 제외하고, 가벼운 단일 바이너리(Rust, 외부 의존성 없음, 최소 RAM 1GB)인 **Garage**(AGPL v3, 활발히 유지보수됨)를 채택
+  - 이 스냅샷은 `conversation.messages`에서 언제든 동일하게 재구성 가능한 캐시이므로, Garage 단일 노드 자체 운영의 내구성 부재(복제 없음) 리스크를 이 데이터에 한해서는 감수할 수 있다고 판단. 추후 이미지/음성 등 재구성 불가능한 데이터를 같은 Garage에 올리게 되면 이 판단을 재검토한다.
+- 압축 저장
+- 보존 기간: **일기 생성(`generation_status` → `COMPLETED`) 직후 즉시 삭제.** 원본은 `conversation.messages`에 `source_revision` 고정 조회로 언제든 동일하게 재구성 가능하므로, 캐시를 오래 들고 있을 이유가 없다 — 비용 절감이 우선순위.
+  - 삭제 호출은 DB 트랜잭션 밖에서 수행한다 (LLM 호출을 트랜잭션 밖에 두는 것과 같은 이유 — 외부 I/O가 DB 커넥션을 붙잡지 않게).
+  - 삭제 호출 자체가 실패할 경우를 대비해 `purge_after`(예: +N일)를 안전망으로 둔다. 정상 흐름에서는 즉시 삭제가 기본이고, `purge_after`는 오직 삭제 실패 시 폴백(정리 스케줄러가 나중에 훑어서 지움) 용도다.
+- 스냅샷 키는 이벤트뿐 아니라 `conversation.moment_sets`에도 컬럼으로 저장해 재시도 시 이벤트 없이도 추적 가능하게 한다.
 
 **모듈 의존 방향 (단방향 엄수)**
 
@@ -281,9 +308,9 @@ purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 
 ## AI 추상화 인터페이스
 
-provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`로 서브패키지 분리(2026-07-25). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
+provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`, `platform/llm/moment`로 서브패키지 분리(2026-07-25, moment는 2026-09-22 추가). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
 
-`platform/llm/conversation`은 Stage 1(#17)에서 `GeminiConversationResponder`로 구현 완료(`RestClient` + Resilience4j `@CircuitBreaker`, 상세는 `DEVELOPMENT_STAGES.md` Stage 1 참고). `platform/llm/journal`(Claude)은 Stage 2에서 구현 예정, 아직 인터페이스만 존재.
+`platform/llm/conversation`은 Stage 1(#17)에서 `GeminiConversationResponder`로 구현 완료(`RestClient` + Resilience4j `@CircuitBreaker`, 상세는 `DEVELOPMENT_STAGES.md` Stage 1 참고). `platform/llm/moment`(Gemini)와 `platform/llm/journal`(Claude)은 Stage 2에서 구현 예정, 아직 인터페이스만 존재.
 
 ```kotlin
 // platform/llm/conversation
@@ -293,11 +320,20 @@ interface ConversationResponder {
 // ConversationRequest(messages: List<LlmMessage>, systemPrompt: String?)
 // ConversationResponse(generationId, content, model, provider, promptVersion, inputTokens, outputTokens)
 
+// platform/llm/moment
+interface MomentExtractor {
+    fun extract(request: MomentExtractionRequest): MomentExtractionResponse
+}
+// MomentExtractionRequest(messages: List<LlmMessage>, localDate: String) — conversation.LlmMessage 재사용 (같은 모듈 내부 서브패키지라 공유 무방)
+// MomentExtractionResponse(generationId, moments: List<ExtractedMoment>, model, provider, promptVersion, inputTokens, outputTokens)
+// ExtractedMoment(type, summary, emotion?, confidence?, occurredAt?) — conversation.moments 스키마와 1:1 대응
+
 // platform/llm/journal
 interface JournalGenerator {
     fun generate(request: JournalGenerationRequest): JournalGenerationResponse
 }
-// JournalGenerationRequest(moments: List<MomentSnapshot>, localDate: String)
+// JournalGenerationRequest(moments: List<MomentSnapshot>, rawTranscript: String, localDate: String)
+// rawTranscript는 호출부(Journal 모듈)가 MomentsPrepared의 Object Storage 참조 키로 미리 읽어온 값 — Moment만으로 서사화하면 이중 압축(구조화 압축 + 서사화)으로 퀄리티가 떨어지므로 원본을 함께 넘긴다
 // JournalGenerationResponse(generationId, title, content, model, provider, promptVersion, inputTokens, outputTokens)
 
 // InsightGenerator — Stage 5에서 정의 (아직 없음)
@@ -357,8 +393,8 @@ data class JournalConfirmedV1(
 **핵심 이벤트 목록**
 
 ```
-ConversationDayClosed       — 하루가 마감됐다는 사실 (빠른 반환, Moment 미포함)
-MomentsPrepared             — Moment 추출 완료, 스냅샷 페이로드 포함 (Journal 구독 대상)
+ConversationDayClosed       — 하루가 마감됐다는 사실 (빠른 반환, source_revision 포함, Moment/원본 미포함 — 트리거 전용)
+MomentsPrepared             — Moment 추출 완료. Moment 스냅샷은 직접 포함, 원본 대화는 Object Storage 참조 키만 포함 (Journal 구독 대상)
 JournalGenerationRequested
 JournalGenerated
 JournalConfirmed

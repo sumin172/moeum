@@ -190,13 +190,13 @@ Conversation
   - 매 배치 스캔마다 zone 계산을 반복하지 않도록, day의 timezone이 갱신될 때 `closesAt`(그 zone 기준 자정에 해당하는 UTC Instant)을 같이 계산해 저장하는 안 검토 — 배치 쿼리를 `WHERE status='OPEN' AND closes_at <= now()` 인덱스 스캔으로 단순화
   - 마감은 원자적 조건부 UPDATE(`WHERE id=? AND status='OPEN'`)로 먼저 확정한 뒤 메시지를 읽어 일기를 생성 — 마감 순간 도착하는 메시지와의 레이스 방지
   - 배치 자체는 멱등(이미 CLOSED인 row는 조건에 안 걸림) — 중간에 죽고 재실행돼도 안전
-- ConversationDayClosed 발행 (source_revision 포함)
-- 비동기로 Moment 추출 Job 시작 (LLM 배치 호출)
-- Moment 추출 완료 → MomentsPrepared 발행 (Moment 스냅샷 + source_revision 포함)
+- ConversationDayClosed 발행 (source_revision 포함) — ⚠️ 2026-09-21 기준 develop 브랜치의 실제 `ConversationDayClosedV1`엔 `source_revision` 필드가 누락돼 있음. 아래 "Moment 추출·전달 시 데이터 전송 전략" 반영 시 반드시 같이 추가할 것.
+- Moment 추출 Job은 이벤트에 실린 데이터가 아니라 `source_revision` 고정 조회로 원본 메시지를 직접 읽어 처리 (같은 모듈 내부라 라이브 조회에 문제 없음, 상세는 아래 섹션)
+- Moment 추출 완료 → 원본 스냅샷을 Object Storage에 저장 → MomentsPrepared 발행 (Moment 스냅샷은 직접 포함 + 원본은 Object Storage 참조 키만 포함, source_revision 포함)
 
 Journal
 - **MomentsPrepared 구독** → 일기 생성 Job 생성 (ConversationDayClosed 직접 구독 안 함)
-- 페이로드의 Moment 스냅샷 사용 (Conversation API 재호출 없음)
+- 페이로드의 Moment 스냅샷(구조화 사실) + 원본 대화(Object Storage 참조로 읽음)를 함께 사용 — Moment만으로 생성하면 "압축 위에 서사화"가 되어 퀄리티가 떨어지므로 원본에서 직접 서사화한다 (Conversation API 실시간 재호출은 아님, 이벤트가 가리키는 스냅샷을 읽을 뿐)
 - Claude Haiku로 일기 초안 생성
 - 구조화 출력 (JSON Schema 검증)
 - AI 생성 메타데이터 저장
@@ -266,15 +266,17 @@ journal.generation_jobs
   created_at          TIMESTAMPTZ
 
 conversation.moment_sets
-  id                  UUID PK
-  conversation_day_id UUID
-  source_revision     BIGINT        -- 어떤 ConversationDay 버전 기준으로 추출했는지
-  generation_id       UUID
-  model               TEXT
-  prompt_version      TEXT
-  is_current          BOOLEAN DEFAULT true
-  superseded_at       TIMESTAMPTZ NULL
-  created_at          TIMESTAMPTZ
+  id                       UUID PK
+  conversation_day_id      UUID
+  source_revision          BIGINT        -- 어떤 ConversationDay 버전 기준으로 추출했는지
+  generation_id            UUID
+  model                    TEXT
+  prompt_version           TEXT
+  raw_snapshot_key         TEXT NULL     -- 원본 대화 스냅샷의 Object Storage 참조 키 (Journal 생성용)
+  raw_snapshot_purge_after TIMESTAMPTZ NULL  -- 스냅샷 보존 기한 (캐시성 데이터, 원본은 conversation.messages에 영구 보존)
+  is_current               BOOLEAN DEFAULT true
+  superseded_at            TIMESTAMPTZ NULL
+  created_at               TIMESTAMPTZ
 
 conversation.moments
   id              UUID PK
@@ -287,6 +289,46 @@ conversation.moments
   occurred_at     TIMESTAMPTZ NULL
   deleted_at      TIMESTAMPTZ NULL
 ```
+
+**Moment 추출·전달 시 데이터 전송 전략 (2026-09-21 결정)**
+
+Moment 관련 데이터는 두 홉으로 나뉘고, 각 홉의 성격이 달라 전송 방식도 다르게 가져간다.
+
+1. **마감 → Moment 추출** (Conversation 모듈 내부, 앞으로도 절대 물리적으로 갈라지지 않을 관계)
+   - `ConversationDayClosedV1`은 트리거 역할만 한다: `conversationDayId`, `userId`, `localDate`, `sourceRevision`만 포함
+   - 실제 메시지는 Moment 추출 워커가 `source_revision` 고정 조회로 자기 소유 테이블(`conversation.messages`)에서 직접 읽는다 — 같은 모듈 내부라 "다른 모듈 DB 조회" 문제가 아니다
+   - 데이터가 아무리 많아져도 이 이벤트를 무겁게 만들 필요가 없다. 오히려 무겁게 만들면 (인프로세스든 향후 Outbox/큐든) 메모리·저장 비용만 늘어난다
+
+2. **Moment 추출 → Journal 생성** (서로 다른 모듈 경계, 미래 물리 분리 후보)
+   - `MomentsPreparedV1`엔 Moment 스냅샷(구조화된 사실 목록)을 **직접 포함** — 구조화돼 있어 크기 상한이 있다
+   - 원본 대화 전체(raw transcript)는 **이벤트에 직접 넣지 않는다.** 대화량에 비례해 무제한으로 커질 수 있기 때문. 대신 Object Storage에 저장하고 참조 키(`raw_snapshot_key`)만 이벤트/DB에 담는다 (Claim-Check 패턴)
+   - 판단 기준은 "원본이냐 가공이냐"가 아니라 **"크기가 원천적으로 제한돼 있는가, 무제한으로 커질 수 있는가"**다. 같은 이유로 잘 압축된 서사 요약본이라도 크기가 작다면 이벤트에 직접 넣어도 무방하다 — 다만 이 파이프라인엔 그런 중간 요약 단계 자체가 없다(아래 참고)
+   - 이 원칙은 지금의 인프로세스 이벤트뿐 아니라 향후 Kafka/SQS 도입 시에도 동일하게 적용된다. 오히려 실제 브로커는 메시지 크기 제한(SQS 256KB, Kafka 기본 1MB)이 있어 더 엄격히 지켜야 한다
+
+**Journal이 Moment 스냅샷만으로 생성하지 않는 이유**
+
+Moment 추출(구조화 압축)과 Journal 생성(서사화)을 둘 다 Moment 위에서만 하면 "압축 위에 압축"이 되어 원문 뉘앙스가 누적 손실된다. narrative화는 Journal 생성 단계에서 원본으로부터 **딱 한 번만** 일어나야 하므로, 별도의 "서사 요약본" 중간 산출물을 만들지 않는다 — Journal은 Moment(사실 골격) + 원본(뉘앙스)을 함께 참고해 서사를 짠다.
+
+**Moment 추출을 하는 진짜 이유 (토큰 절약이 아니다)**
+
+Moment 추출도 결국 그날 원본 전체를 한 번은 읽어야 하므로, Journal 생성 하나만 놓고 보면 총 토큰량은 줄지 않는다(호출이 2번이라 오히려 늘 수도 있다). 실제 이유:
+1. **모델 비용 분업** — 큰 원본은 저비용 모델(Gemini)이 읽고, 비싼 모델(Claude Haiku)의 입력 일부를 구조화된 Moment로 대체할 수 있는 경로를 만든다
+2. **재사용** — 같은 Moment를 Journal뿐 아니라 Insight(Stage 5, 감정 패턴 분석 근거)와 아카이브(Stage 3, 사용자가 직접 열람하는 "기억 조각")가 공유한다
+
+**원본 스냅샷(Object Storage) 보존 정책 (2026-09-22 확정)**
+- 저장 위치: Object Storage. DB 컬럼에 큰 blob을 쌓지 않는다 — 백업/복제/vacuum 부담 회피
+  - 로컬/운영(안정화 전) 모두 **Garage**(Docker, EC2 자체 운영)로 시작하고, 안정화 후 AWS S3로 전환한다. S3 호환 API라 전환 시 코드 변경 없이 설정(엔드포인트/자격증명)만 바꾸면 된다
+  - 2026-09-22엔 MinIO를 전제했으나, MinIO 커뮤니티 에디션이 2026-04-25부로 GitHub 저장소 archived, 신규 이미지 배포 중단된 것을 확인해 채택 철회(2026-09-28). RustFS도 검토했으나 운영 최소 요구 메모리가 공식 문서 기준 128GB로 소규모 서버에 부적합해 제외. Garage는 Rust 단일 바이너리, 외부 의존성 없음, 최소 RAM 1GB로 가장 가벼움
+  - Garage 단일 노드 자체 운영은 내구성이 없다(복제 없음)는 리스크가 있지만, 이 스냅샷은 `conversation.messages`에서 언제든 동일하게 재구성 가능한 **캐시**라 유실이 곧 영구 손실로 이어지지 않는다 → 이 데이터에 한해 리스크 수용. 나중에 이미지/음성처럼 재구성 불가능한 데이터를 얹게 되면 재검토
+- 압축 저장
+- 보존 기간: **일기 생성 성공(`generation_status` → `COMPLETED`) 직후 즉시 삭제.** 재시도 중(FAILED)엔 아직 필요하므로 삭제하지 않는다. 원본은 `conversation.messages`에 `source_revision` 고정 조회로 언제든 동일하게 재구성 가능하므로 캐시를 오래 들고 있을 이유가 없다
+  - 삭제 호출은 "Job COMPLETED" DB 트랜잭션 밖에서 수행 (LLM 호출을 트랜잭션 밖에 두는 것과 동일한 이유 — 외부 I/O가 DB 커넥션을 붙잡지 않게)
+  - 삭제 호출이 실패할 경우를 위해 `purge_after`를 안전망으로 둔다 — 정상 흐름에선 즉시 삭제가 기본이고, `purge_after`는 삭제 실패 시에만 폴백(정리 스케줄러가 나중에 훑어서 지움)으로 작동한다
+- 재시도 시 이벤트 없이도 추적 가능하도록 `conversation.moment_sets.raw_snapshot_key`에도 같이 저장한다
+
+**한 유저 하루 대화량 자체가 극단적으로 커지는 경우 (참고, 지금 안 만듦)**
+
+위 전략은 "하루 전체를 한 번에 LLM에 투입"하는 지금 모델의 전송 방식을 최적화한 것이지, LLM 컨텍스트 윈도우 자체의 한계는 해결하지 못한다. 그 지점에 도달하면 "마감 후 배치 1회 추출"이 아니라 대화 도중 구간별로 점진적으로 추출하는 방식으로 재설계해야 한다. 지금은 신호가 없으니 만들지 않는다 (트리거 조건은 "구현하면서 결정" 표 참고).
 
 **request_key 구성**
 마감 후 메시지가 추가되면 source_revision이 증가하므로 같은 날짜라도 새 Job이 생성된다.
@@ -370,6 +412,7 @@ ConversationDayClosed 유실로 일기가 생성되지 않고 사용자가 인�
 - 태그 정확 일치 검색 (`journal.journal_tags` INDEX)
 - 제목/본문 기본 LIKE 검색
 - 일기 상세 조회 (원본 대화 연결)
+- 일기 상세에서 **Moment 드릴다운** (2026-09-21 결정) — Journal은 "그날의 서사", Moment는 "추억의 조각". Journal만 요약본으로 노출하면 "그날의 감성 총평" 하나로 끝나버려 기획 의도(조각 모음)와 어긋난다는 판단 하에, Moment를 Journal의 내부 부산물이 아니라 사용자가 직접 열람 가능한 1급 데이터로 승격한다. 일기 문장 ↔ 근거 Moment를 연결해 클릭하면 원본 조각(시각/타입/감정)을 볼 수 있게 한다
 - 연도별 아카이브
 
 **검색 전략**
@@ -447,13 +490,14 @@ gamification.point_ledger
 
 ## 단계별 인프라 도입 계획
 
-| 인프라      | 기본 계획    | 조기 도입 조건                          |
-|-------------|--------------|-----------------------------------------|
-| PostgreSQL  | Stage 0      | —                                       |
-| Redis       | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션)           |
-| Outbox 패턴 | Stage 4      | 이벤트 유실이 업무 손실로 이어지는 시점 |
-| Read Model  | Stage 5      | N+1 실측 시                             |
-| Kafka       | MSA 분리 시  | Outbox transport 교체                   |
+| 인프라         | 기본 계획    | 조기 도입 조건                                                                                                                           |
+|----------------|--------------|------------------------------------------------------------------------------------------------------------------------------------------|
+| PostgreSQL     | Stage 0      | —                                                                                                                                        |
+| Redis          | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션)                                                                                                            |
+| Object Storage | Stage 2      | Moment 추출 시 원본 대화 스냅샷 저장용 (Claim-Check). 로컬/운영(안정화 전) 모두 Garage, 안정화 후 AWS S3로 전환 (2026-09-28, MinIO 대체) |
+| Outbox 패턴    | Stage 4      | 이벤트 유실이 업무 손실로 이어지는 시점                                                                                                  |
+| Read Model     | Stage 5      | N+1 실측 시                                                                                                                              |
+| Kafka          | MSA 분리 시  | Outbox transport 교체 (도입 시에도 큰 페이로드는 계속 Object Storage 참조로, 메시지엔 안 실음)                                           |
 
 ---
 
@@ -484,14 +528,16 @@ gamification.point_ledger
 
 실제 사용 흐름을 본 뒤 결정한다. 지금 확정하지 않아도 된다.
 
-| 항목                                                    | 결정 시점                     |
-|---------------------------------------------------------|-------------------------------|
-| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)       | 사용자 행동 패턴 관찰 후      |
-| Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시          |
-| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시          |
-| Outbox를 Stage 2에 조기 도입할지                        | 이벤트 유실 허용 여부 판단 시 |
-| Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                    |
-| Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시   |
-| 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후    |
-| 프롬프트/컨텍스트 캐싱 도입 시점                        | 실제 API 연동 시 비용 실측 후 |
-| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시        |
+| 항목                                                    | 결정 시점                                   |
+|---------------------------------------------------------|---------------------------------------------|
+| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)       | 사용자 행동 패턴 관찰 후                    |
+| Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시                        |
+| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시                        |
+| Outbox를 Stage 2에 조기 도입할지                        | 이벤트 유실 허용 여부 판단 시               |
+| Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                                  |
+| 점진적(구간별) Moment 추출로 전환할 시점                | 하루 대화량이 LLM 컨텍스트 한계에 근접할 때 |
+| Garage(운영)에서 AWS S3로 전환할 구체 시점              | 서비스 안정화 판단 후                       |
+| Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시                 |
+| 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후                  |
+| 프롬프트/컨텍스트 캐싱 도입 시점                        | 실제 API 연동 시 비용 실측 후               |
+| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시                      |

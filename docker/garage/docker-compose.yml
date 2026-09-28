@@ -1,0 +1,33 @@
+services:
+  garage:
+    image: dxflrs/garage:v2.4.1
+    container_name: moeum-garage
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      GARAGE_DEFAULT_ACCESS_KEY: moeum-local-access-key
+      GARAGE_DEFAULT_SECRET_KEY: moeum-local-secret-key-must-be-32-bytes-min
+      GARAGE_DEFAULT_BUCKET: moeum-snapshots
+    ports:
+      - "3900:3900" # S3 API
+      - "3901:3901" # RPC
+    volumes:
+      - ./garage.toml:/etc/garage.toml
+      - moeum-garage-data:/tmp/data
+      - moeum-garage-meta:/tmp/meta
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+
+volumes:
+  moeum-garage-data:
+  moeum-garage-meta:

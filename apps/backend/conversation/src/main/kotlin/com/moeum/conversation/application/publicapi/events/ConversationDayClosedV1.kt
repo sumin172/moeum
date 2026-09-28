@@ -14,4 +14,5 @@ data class ConversationDayClosedV1(
     val conversationDayId: UUID,
     val userId: UUID,
     val localDate: LocalDate,
+    val sourceRevision: Long,
 )

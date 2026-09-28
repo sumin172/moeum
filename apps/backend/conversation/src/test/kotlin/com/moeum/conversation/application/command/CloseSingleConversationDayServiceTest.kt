@@ -57,6 +57,7 @@ class CloseSingleConversationDayServiceTest {
         assertThat(event.userId).isEqualTo(day.userId.value)
         assertThat(event.localDate).isEqualTo(day.localDate)
         assertThat(event.occurredAt).isEqualTo(now)
+        assertThat(event.sourceRevision).isEqualTo(day.sourceRevision)
     }
 
     @Test

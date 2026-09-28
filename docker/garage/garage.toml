@@ -1,0 +1,15 @@
+# 로컬 개발 전용 설정. 단일 노드, replication 없음.
+metadata_dir = "/tmp/meta"
+data_dir = "/tmp/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+# 로컬 개발 전용 시크릿. 운영 환경에서는 새로 생성해서 환경변수/시크릿 매니저로 주입한다.
+rpc_secret = "048e44695fd42541299213c74966498cf17f6349e95228faa5f9bbf62f5bd421"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"

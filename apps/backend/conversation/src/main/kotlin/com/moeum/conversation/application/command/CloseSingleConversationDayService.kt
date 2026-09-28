@@ -31,6 +31,7 @@ class CloseSingleConversationDayService(
                 conversationDayId = day.id.value,
                 userId = day.userId.value,
                 localDate = day.localDate,
+                sourceRevision = day.sourceRevision,
             ),
         )
         log.info("ConversationDay 마감: id={}, userId={}, localDate={}", day.id.value, day.userId.value, day.localDate)
