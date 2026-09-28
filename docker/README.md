@@ -11,3 +11,4 @@ docker-compose up -d
 ## 향후 추가 예정
 - `redis/` — 캐시 / 세션 (Stage 3+)
 - `kafka/` — 이벤트 브로커 (MSA 전환 시)
+- Object Storage — 이미지·음성 첨부 기능 도입 시

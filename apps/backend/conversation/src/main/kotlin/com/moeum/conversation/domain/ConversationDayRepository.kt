@@ -8,6 +8,7 @@ import java.time.LocalDate
 
 interface ConversationDayRepository {
     fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay?
+    fun findById(id: ConversationDayId): ConversationDay?
     fun save(conversationDay: ConversationDay): ConversationDay
 
     // now 기준 마감 시각이 지난 OPEN day를 최대 limit개 조회한다 (배치 스캔용).

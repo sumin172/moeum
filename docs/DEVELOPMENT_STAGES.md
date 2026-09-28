@@ -183,20 +183,17 @@ conversation.ai_usage_daily
 **할 것**
 
 Conversation
-- ConversationDay 마감 트리거 — 스케줄 배치 채택 (2026-08-02 결정)
-  - 후보 비교: 배치(주기적 스캔) / 조회 시 lazy 처리 / 쓰기 경로에 끼워넣기 → 배치 채택
-  - 이유: 유저가 이탈해도(다시 접속 안 해도) 열린 day가 언젠가 반드시 마감되는 걸 보장하는 유일한 방식이고, 기존 command/query 경로에 부작용을 안 얹어 장애 격리가 됨
-  - 판단 기준은 유저 단위의 "마지막 zone"이 아니라 **각 ConversationDay row 자신의 timezone** — day마다 독립적으로 자정 여부 판단 (동시에 여러 day가 열려 있어도 서로 안 기다림)
-  - 매 배치 스캔마다 zone 계산을 반복하지 않도록, day의 timezone이 갱신될 때 `closesAt`(그 zone 기준 자정에 해당하는 UTC Instant)을 같이 계산해 저장하는 안 검토 — 배치 쿼리를 `WHERE status='OPEN' AND closes_at <= now()` 인덱스 스캔으로 단순화
-  - 마감은 원자적 조건부 UPDATE(`WHERE id=? AND status='OPEN'`)로 먼저 확정한 뒤 메시지를 읽어 일기를 생성 — 마감 순간 도착하는 메시지와의 레이스 방지
-  - 배치 자체는 멱등(이미 CLOSED인 row는 조건에 안 걸림) — 중간에 죽고 재실행돼도 안전
-- ConversationDayClosed 발행 (source_revision 포함)
-- 비동기로 Moment 추출 Job 시작 (LLM 배치 호출)
-- Moment 추출 완료 → MomentsPrepared 발행 (Moment 스냅샷 + source_revision 포함)
+- ConversationDay 마감 트리거 — 스케줄 배치
+  - 판단 기준은 **각 ConversationDay row 자신의 timezone** — day마다 독립적으로 자정 여부 판단 (동시에 여러 day가 열려 있어도 서로 안 기다림)
+  - day의 timezone이 갱신될 때 `closesAt`(그 zone 기준 자정에 해당하는 UTC Instant)을 같이 계산해 저장 — 배치 쿼리는 `WHERE status='OPEN' AND closes_at <= now()` 인덱스 스캔
+  - 마감은 원자적 조건부 UPDATE(`WHERE id=? AND status='OPEN'`)로 확정 — 마감 순간 도착하는 메시지와의 레이스 방지
+  - 배치 자체는 멱등 (이미 CLOSED인 row는 조건에 안 걸림, 중간에 죽고 재실행돼도 안전)
+- ConversationDayClosed 발행 (conversationDayId, userId, localDate, sourceRevision 포함)
+- Moment 추출은 여기서 실행되지 않는다 — Insight 배치나 아카이브 드릴다운이 필요할 때 직접 호출하는 별도 기능이다(아래 "Moment 추출" 참고)
 
 Journal
-- **MomentsPrepared 구독** → 일기 생성 Job 생성 (ConversationDayClosed 직접 구독 안 함)
-- 페이로드의 Moment 스냅샷 사용 (Conversation API 재호출 없음)
+- **ConversationDayClosed 구독** → 일기 생성 Job 생성
+- Conversation의 publicapi(`ConversationJournalSourceQuery`)로 원본 대화를 조회해 서사 생성 — Moment는 입력에 없다
 - Claude Haiku로 일기 초안 생성
 - 구조화 출력 (JSON Schema 검증)
 - AI 생성 메타데이터 저장
@@ -265,16 +262,26 @@ journal.generation_jobs
   error_code          TEXT NULL
   created_at          TIMESTAMPTZ
 
-conversation.moment_sets
+conversation.moment_extraction_jobs
   id                  UUID PK
   conversation_day_id UUID
-  source_revision     BIGINT        -- 어떤 ConversationDay 버전 기준으로 추출했는지
-  generation_id       UUID
-  model               TEXT
-  prompt_version      TEXT
-  is_current          BOOLEAN DEFAULT true
-  superseded_at       TIMESTAMPTZ NULL
+  source_revision     BIGINT        -- 추출 시점에 읽은 ConversationDay 버전
+  request_key         TEXT UNIQUE   -- 멱등키: {conversationDayId}:{sourceRevision}
+  status              TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
+  attempt_count       INT DEFAULT 0
+  error_code          TEXT NULL
   created_at          TIMESTAMPTZ
+
+conversation.moment_sets
+  id                       UUID PK
+  conversation_day_id      UUID
+  source_revision          BIGINT        -- 추출 시점에 읽은 ConversationDay의 버전
+  generation_id            UUID
+  model                    TEXT
+  prompt_version           TEXT
+  is_current               BOOLEAN DEFAULT true
+  superseded_at            TIMESTAMPTZ NULL
+  created_at               TIMESTAMPTZ
 
 conversation.moments
   id              UUID PK
@@ -288,6 +295,27 @@ conversation.moments
   deleted_at      TIMESTAMPTZ NULL
 ```
 
+**Moment 추출**
+
+Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 `MomentExtractionService.ensureExtracted(conversationDayId)`를 직접 호출한다. 마감에 자동으로 반응하지 않는다.
+
+- 호출 시점에 `conversation.messages`를 그 자리에서 다시 읽어 Moment를 추출한다 — 원본을 별도로 보관해둘 필요가 없다
+- 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 그대로 반환한다(멱등, 재호출 안전)
+- 게이팅(구독 여부 등)은 호출부(Insight, 아카이브)의 책임이다 — `MomentExtractionService`는 구독 개념을 모른다
+- 완료되면 `MomentsPreparedV1`을 발행한다
+
+Moment를 추출하는 이유:
+1. **모델 비용 분업** — 원본은 저비용 모델(Gemini)이 읽고, 비싼 모델의 입력 일부를 구조화된 Moment로 대체할 수 있는 경로를 만든다
+2. **재사용** — 같은 Moment를 Insight(Stage 5, 감정 패턴 분석 근거)와 아카이브(Stage 3, 사용자가 직접 열람하는 "기억 조각")가 공유한다
+
+**Journal은 원본만으로 생성한다**
+
+`JournalGenerationRequest(rawTranscript: String, localDate: String)` — Moment는 입력에 없다. narrative화는 원본으로부터 한 번만 일어난다.
+
+**한 유저 하루 대화량 자체가 극단적으로 커지는 경우 (참고, 지금 안 만듦)**
+
+지금 방식(하루 전체를 한 번에 LLM에 투입)은 LLM 컨텍스트 윈도우 자체의 한계는 해결하지 못한다. 그 지점에 도달하면 "한 번에 추출"이 아니라 대화 도중 구간별로 점진적으로 추출하는 방식으로 재설계해야 한다. 지금은 신호가 없으니 만들지 않는다 (트리거 조건은 "구현하면서 결정" 표 참고).
+
 **request_key 구성**
 마감 후 메시지가 추가되면 source_revision이 증가하므로 같은 날짜라도 새 Job이 생성된다.
 동일 조건 재시도 → 기존 키로 멱등 처리. 내용 변경 재생성 → 새 키로 새 Job.
@@ -298,53 +326,53 @@ conversation.moments
 - 사용자에게 재생성 여부 제공
 - 재생성 요청은 generation_jobs의 request_key로 중복 방지
 
-**오프라인 지연 전송과의 상호작용 (2026-08-02 재확인)**
-- occurredAt을 클라이언트 작성 시각으로 받는 설계(Stage 1) 때문에, 배치가 실제 흐르는 서버 시각 기준으로 이미 day를 CLOSED한 뒤에 오프라인 큐잉됐던 메시지가 도착하는 상황이 구조적으로 항상 가능하다(비행기 모드 등으로 지연이 몇 시간~며칠까지 벌어질 수 있음)
-- 위 Option 3 정책 그대로 저장은 허용하되, 얼마나 자주 발생하는지 관측하기 위해 `SaveMessageService`에서 CLOSED day에 메시지가 붙을 때 경고 로그를 남긴다 (2026-08-02 적용) — 재오픈/일기 재생성 자동화 여부는 이 로그로 빈도를 확인한 뒤 결정
+**오프라인 지연 전송과의 상호작용**
+- occurredAt을 클라이언트 작성 시각으로 받으므로, 배치가 실제 서버 시각 기준으로 day를 CLOSED한 뒤에 오프라인 큐잉됐던 메시지가 도착하는 상황이 구조적으로 항상 가능하다(비행기 모드 등으로 지연이 몇 시간~며칠까지 벌어질 수 있음)
+- Option 3 정책 그대로 저장은 허용하되, `SaveMessageService`에서 CLOSED day에 메시지가 붙을 때 경고 로그를 남긴다 — 재오픈/일기 재생성 자동화 여부는 이 로그로 빈도를 확인한 뒤 결정
 
 **미확정 일기 정책 (결정 필요)**
 - 선택지: N일 후 자동 확정 or 영구 DRAFT 유지
 - Insight 집계에 DRAFT 포함 여부
 
-**@TransactionalEventListener + @Async 구현 주의사항**
+**@TransactionalEventListener + @Async 구현**
 
-Stage 2 기본: `@TransactionalEventListener(AFTER_COMMIT) + @Async`로 in-process 처리.
-마감 트랜잭션 커밋 후 별도 스레드에서 Moment 추출이 시작되므로, 마감 API가 LLM을 기다리지 않는다.
+Journal은 `@TransactionalEventListener(AFTER_COMMIT) + @Async`로 `ConversationDayClosed`를 구독한다. 마감 트랜잭션 커밋 후 별도 스레드에서 일기 생성이 시작되므로, 마감 API가 LLM을 기다리지 않는다.
 
 ```kotlin
 @Async
 @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
 fun handle(event: ConversationDayClosedV1) {
     runCatching {
-        momentExtractionProcessor.process(event)
+        journalGenerationProcessor.process(event)
     }.onFailure { e ->
         // markFailed 자체가 실패해도 로그는 남아야 한다
-        runCatching { momentJobFailureHandler.markFailed(event, e) }
-            .onFailure { log.error("Moment extraction failure handler failed", it) }
+        runCatching { journalJobFailureHandler.markFailed(event, e) }
+            .onFailure { log.error("Journal generation failure handler failed", it) }
     }
 }
 ```
 
-**리스너 내 트랜잭션 구조 (핵심)**
+**리스너 내 트랜잭션 구조**
 
-AFTER_COMMIT 시점에는 원래 트랜잭션이 이미 닫혔다. DB 저장 시 `REQUIRES_NEW`로 새 트랜잭션 명시적 시작.
-LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다.
+AFTER_COMMIT 시점에는 원래 트랜잭션이 이미 닫혔다. DB 저장 시 `REQUIRES_NEW`로 새 트랜잭션을 명시적으로 시작한다. LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다.
 
 ```
-새 트랜잭션 → MomentExtractionJob PENDING 저장 → 커밋
-트랜잭션 밖 → LLM 호출
-새 트랜잭션 → MomentSet 저장 → Job COMPLETED → MomentsPrepared 발행 → 커밋
+새 트랜잭션 → JournalGenerationJob PENDING 저장 → 커밋
+트랜잭션 밖 → ConversationJournalSourceQuery로 원본 조회 → LLM 호출
+새 트랜잭션 → Journal 저장 → Job COMPLETED → 커밋
 실패 시     → 새 트랜잭션 → Job FAILED, errorCode, attemptCount 기록 → 커밋
 ```
+
+Moment 추출(`MomentExtractionService`)은 이벤트로 트리거되지 않으므로 이 구조가 적용되지 않는다 — 호출부(Insight, 아카이브)가 동기/비동기 여부를 직접 결정한다.
 
 **유실 가능성 인지**
 
 in-process 이벤트는 신뢰성 있는 메시지 큐가 아니다.
-서버 종료 타이밍에 따라 ConversationDay가 CLOSED됐지만 Moment 추출이 시작되지 않을 수 있다.
+서버 종료 타이밍에 따라 ConversationDay가 CLOSED됐지만 일기 생성이 시작되지 않을 수 있다.
 
 최소 복구 통로로 다음을 제공한다:
-- `MomentExtractionJob`에 FAILED/PENDING 상태 기록
-- MomentSet이 없는 CLOSED ConversationDay 조회 API 또는 스케줄러
+- Journal 생성 Job에 FAILED/PENDING 상태 기록
+- Journal이 없는 CLOSED ConversationDay 조회 API 또는 스케줄러
 - 수동 재처리 트리거
 
 유실이 제품상 허용되지 않는 시점 → Outbox 도입.
@@ -353,7 +381,7 @@ in-process 이벤트는 신뢰성 있는 메시지 큐가 아니다.
 ConversationDayClosed 유실로 일기가 생성되지 않고 사용자가 인지 못하는 상황이 실제로 문제라면 Stage 2에서 조기 도입한다.
 
 **이 단계 완료 기준**
-- 대화 → Moment 추출(Conversation) → 일기 생성 → 수정 → 확정 흐름이 작동한다
+- 대화 → 일기 생성 → 수정 → 확정 흐름이 작동한다
 - AI 생성 실패 시 FAILED 상태로 기록되고 재시도 가능하다
 - 모바일/웹 동시 수정 시 @Version 낙관적 락이 충돌을 감지한다
 - JournalConfirmed Integration Event가 발행된다 (현재는 in-process)
@@ -370,6 +398,7 @@ ConversationDayClosed 유실로 일기가 생성되지 않고 사용자가 인�
 - 태그 정확 일치 검색 (`journal.journal_tags` INDEX)
 - 제목/본문 기본 LIKE 검색
 - 일기 상세 조회 (원본 대화 연결)
+- 일기 상세에서 **Moment 드릴다운** — Journal은 "그날의 서사", Moment는 "추억의 조각". 일기 문장 ↔ 근거 Moment를 연결해 클릭하면 원본 조각(시각/타입/감정)을 볼 수 있게 한다
 - 연도별 아카이브
 
 **검색 전략**
@@ -447,13 +476,14 @@ gamification.point_ledger
 
 ## 단계별 인프라 도입 계획
 
-| 인프라      | 기본 계획    | 조기 도입 조건                          |
-|-------------|--------------|-----------------------------------------|
-| PostgreSQL  | Stage 0      | —                                       |
-| Redis       | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션)           |
-| Outbox 패턴 | Stage 4      | 이벤트 유실이 업무 손실로 이어지는 시점 |
-| Read Model  | Stage 5      | N+1 실측 시                             |
-| Kafka       | MSA 분리 시  | Outbox transport 교체                   |
+| 인프라         | 기본 계획      | 조기 도입 조건                          |
+|----------------|----------------|-----------------------------------------|
+| PostgreSQL     | Stage 0        | —                                       |
+| Redis          | Stage 1 이후   | 세션 필요 시 (초기엔 DB 세션)           |
+| Object Storage | 도입 시점 미정 | 이미지·음성 등 첨부 기능 필요 시        |
+| Outbox 패턴    | Stage 4        | 이벤트 유실이 업무 손실로 이어지는 시점 |
+| Read Model     | Stage 5        | N+1 실측 시                             |
+| Kafka          | MSA 분리 시    | Outbox transport 교체                   |
 
 ---
 
@@ -484,14 +514,15 @@ gamification.point_ledger
 
 실제 사용 흐름을 본 뒤 결정한다. 지금 확정하지 않아도 된다.
 
-| 항목                                                    | 결정 시점                     |
-|---------------------------------------------------------|-------------------------------|
-| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)       | 사용자 행동 패턴 관찰 후      |
-| Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시          |
-| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시          |
-| Outbox를 Stage 2에 조기 도입할지                        | 이벤트 유실 허용 여부 판단 시 |
-| Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                    |
-| Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시   |
-| 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후    |
-| 프롬프트/컨텍스트 캐싱 도입 시점                        | 실제 API 연동 시 비용 실측 후 |
-| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시        |
+| 항목                                                    | 결정 시점                                   |
+|---------------------------------------------------------|---------------------------------------------|
+| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)       | 사용자 행동 패턴 관찰 후                    |
+| Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시                        |
+| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시                        |
+| Outbox를 Stage 2에 조기 도입할지                        | 이벤트 유실 허용 여부 판단 시               |
+| Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                                  |
+| 점진적(구간별) Moment 추출로 전환할 시점                | 하루 대화량이 LLM 컨텍스트 한계에 근접할 때 |
+| Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시                 |
+| 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후                  |
+| 프롬프트/컨텍스트 캐싱 도입 시점                        | 실제 API 연동 시 비용 실측 후               |
+| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시                      |

@@ -16,6 +16,7 @@ class CloseSingleConversationDayServiceTest {
     private class FakeConversationDayRepository(private val closeSucceeds: Boolean) : ConversationDayRepository {
         var closeIfOpenCalls = 0
         override fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay? = null
+        override fun findById(id: ConversationDayId): ConversationDay? = null
         override fun save(conversationDay: ConversationDay): ConversationDay = conversationDay
         override fun findOpenDueForClose(now: Instant, limit: Int): List<ConversationDay> = emptyList()
         override fun closeIfOpen(id: ConversationDayId, closedAt: Instant): Boolean {
@@ -57,6 +58,7 @@ class CloseSingleConversationDayServiceTest {
         assertThat(event.userId).isEqualTo(day.userId.value)
         assertThat(event.localDate).isEqualTo(day.localDate)
         assertThat(event.occurredAt).isEqualTo(now)
+        assertThat(event.sourceRevision).isEqualTo(day.sourceRevision)
     }
 
     @Test

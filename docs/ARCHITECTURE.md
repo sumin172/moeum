@@ -27,15 +27,15 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 
 ## 기술 스택
 
-| 영역   | 선택                           | 이유                                        |
-|--------|--------------------------------|---------------------------------------------|
-| 백엔드 | Kotlin + Spring Boot + Java 21 | 도메인 표현력, 트랜잭션, JPA, 스케줄러 통합 |
-| 빌드   | Gradle Kotlin DSL              |                                             |
-| 웹     | Next.js                        | 아카이브 UI + 얇은 BFF                      |
-| 모바일 | Flutter (또는 RN+Expo)         | 팀 숙련도에 따라 결정                       |
-| DB     | PostgreSQL                     | 단일 클러스터로 시작                        |
-| 캐시   | Redis                          | 세션·Rate Limit (초기에는 생략 가능)        |
-| 파일   | Object Storage                 | 이미지·음성                                 |
+| 영역   | 선택                           | 이유                                                                                                            |
+|--------|--------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| 백엔드 | Kotlin + Spring Boot + Java 21 | 도메인 표현력, 트랜잭션, JPA, 스케줄러 통합                                                                     |
+| 빌드   | Gradle Kotlin DSL              |                                                                                                                 |
+| 웹     | Next.js                        | 아카이브 UI + 얇은 BFF                                                                                          |
+| 모바일 | Flutter (또는 RN+Expo)         | 팀 숙련도에 따라 결정                                                                                           |
+| DB     | PostgreSQL                     | 단일 클러스터로 시작                                                                                            |
+| 캐시   | Redis                          | 세션·Rate Limit (초기에는 생략 가능)                                                                            |
+| 파일   | Object Storage                 | 이미지·음성 (도입 시점 미정, 필요해지면 결정)                                                                   |
 
 ### AI 모델 라우팅
 
@@ -146,26 +146,40 @@ interface ConversationJournalSourceQuery {
 Moment는 Conversation 컨텍스트가 소유하고 생성한다.
 Journal 모듈은 Moment를 생성하거나 conversation 테이블에 저장하지 않는다.
 
-Moment 추출은 LLM 배치 호출이므로 하루 마감 API와 분리한다. 마감 API가 LLM 속도에 묶이면 안 된다.
+**Journal — 원본 대화로 직접 서사를 생성한다**
+
+Journal은 Moment를 입력으로 쓰지 않는다. `ConversationDayClosed`를 구독해 일기 생성 Job을 만들고, Conversation의 publicapi로 그날 원본 대화를 조회해 서사를 쓴다.
+
+```kotlin
+// conversation/application/publicapi
+interface ConversationJournalSourceQuery {
+    fun getJournalSource(conversationDayId: ConversationDayId): JournalSourceSnapshot
+}
+```
 
 ```
-ConversationDay 마감 (즉시 반환)
-  → ConversationDayClosed 발행
-  → Conversation이 Moment 추출 Job 시작 (비동기)
-  → Moment 추출 완료
-  → MomentsPrepared 발행 (Moment 스냅샷 포함)
-  → Journal이 MomentsPrepared를 구독해 일기 생성
+ConversationDay 마감 (source_revision 확정)
+  → ConversationDayClosed 발행 (conversationDayId, userId, localDate, sourceRevision)
+  → Journal이 구독 → ConversationJournalSourceQuery로 원본 조회 → 서사 생성
 ```
 
-MomentsPrepared 페이로드에 Moment 스냅샷을 포함해 Journal이 Conversation API를 재호출하지 않도록 한다. 서비스 분리 시에도 Journal이 Conversation DB를 볼 필요가 없다.
+**Moment 추출 — Insight/아카이브가 필요할 때만 호출한다**
+
+Moment 추출은 마감에 자동으로 반응하지 않는다. Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 Conversation의 Moment 추출 기능을 호출하면, 그 순간 `conversation.messages`를 읽어 구조화된 Moment를 뽑고 저장한다. 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 반환한다(멱등).
+
+게이팅(구독 여부 등)은 호출하는 쪽(Insight, 아카이브)의 책임이다. Moment 추출 기능 자체는 구독 개념을 모른다.
+
+**Moment 추출을 하는 이유**
+1. **모델 비용 분업**: 원본은 저비용 모델(Gemini Flash)이 읽고, 비싼 모델의 입력 일부를 구조화된 Moment로 대체할 수 있는 경로를 제공한다.
+2. **재사용**: 같은 Moment를 Insight(감정 패턴 분석 근거)와 아카이브(사용자가 직접 열람하는 "기억 조각")가 공유한다.
 
 **모듈 의존 방향 (단방향 엄수)**
 
 ```
 identity        ← 독립 (다른 모듈에 의존하지 않음)
 conversation    → shared-kernel(UserId)  [Identity API는 필요 시만]
-journal         → (MomentsPrepared 이벤트 기반이면 conversation 직접 의존 불필요)
-insight         → journal integration event
+journal         → conversation.publicapi (ConversationJournalSourceQuery), ConversationDayClosed 이벤트 구독
+insight         → journal integration event, conversation의 Moment 조회 publicapi
 gamification    → journal integration event
 notification    → 여러 모듈의 integration event
 ```
@@ -281,9 +295,9 @@ purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 
 ## AI 추상화 인터페이스
 
-provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`로 서브패키지 분리(2026-07-25). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
+provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`, `platform/llm/moment`로 서브패키지 분리(2026-07-25, moment는 2026-09-22 추가). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
 
-`platform/llm/conversation`은 Stage 1(#17)에서 `GeminiConversationResponder`로 구현 완료(`RestClient` + Resilience4j `@CircuitBreaker`, 상세는 `DEVELOPMENT_STAGES.md` Stage 1 참고). `platform/llm/journal`(Claude)은 Stage 2에서 구현 예정, 아직 인터페이스만 존재.
+`platform/llm/conversation`은 Stage 1(#17)에서 `GeminiConversationResponder`로 구현 완료(`RestClient` + Resilience4j `@CircuitBreaker`, 상세는 `DEVELOPMENT_STAGES.md` Stage 1 참고). `platform/llm/moment`(Gemini)와 `platform/llm/journal`(Claude)은 Stage 2에서 구현 예정, 아직 인터페이스만 존재.
 
 ```kotlin
 // platform/llm/conversation
@@ -293,11 +307,20 @@ interface ConversationResponder {
 // ConversationRequest(messages: List<LlmMessage>, systemPrompt: String?)
 // ConversationResponse(generationId, content, model, provider, promptVersion, inputTokens, outputTokens)
 
+// platform/llm/moment
+interface MomentExtractor {
+    fun extract(request: MomentExtractionRequest): MomentExtractionResponse
+}
+// MomentExtractionRequest(rawTranscript: String, localDate: String) — conversation.messages를 그 자리에서 읽어 만든 원본 텍스트
+// MomentExtractionResponse(generationId, moments: List<ExtractedMoment>, model, provider, promptVersion, inputTokens, outputTokens)
+// ExtractedMoment(type, summary, emotion?, confidence?, occurredAt?) — conversation.moments 스키마와 1:1 대응
+
 // platform/llm/journal
 interface JournalGenerator {
     fun generate(request: JournalGenerationRequest): JournalGenerationResponse
 }
-// JournalGenerationRequest(moments: List<MomentSnapshot>, localDate: String)
+// JournalGenerationRequest(rawTranscript: String, localDate: String) — Moment는 입력에 없다
+// rawTranscript는 ConversationJournalSourceQuery로 조회한 원본 그대로
 // JournalGenerationResponse(generationId, title, content, model, provider, promptVersion, inputTokens, outputTokens)
 
 // InsightGenerator — Stage 5에서 정의 (아직 없음)
@@ -357,8 +380,8 @@ data class JournalConfirmedV1(
 **핵심 이벤트 목록**
 
 ```
-ConversationDayClosed       — 하루가 마감됐다는 사실 (빠른 반환, Moment 미포함)
-MomentsPrepared             — Moment 추출 완료, 스냅샷 페이로드 포함 (Journal 구독 대상)
+ConversationDayClosed       — 하루가 마감됐다는 사실 (source_revision 포함, Journal 구독 대상)
+MomentsPrepared             — Moment 추출 완료 (Insight/아카이브가 호출했을 때만 발생)
 JournalGenerationRequested
 JournalGenerated
 JournalConfirmed
