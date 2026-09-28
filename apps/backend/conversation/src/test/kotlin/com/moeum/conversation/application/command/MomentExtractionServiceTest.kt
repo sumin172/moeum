@@ -89,7 +89,7 @@ class MomentExtractionServiceTest {
 
     @Test
     fun `처음 호출이면 그 순간 원본 메시지를 다시 읽어 추출하고 결과를 저장·발행한다`() {
-        val day = newDay(sourceRevision = 3) // 마감 이후 메시지가 더 도착해 revision이 올라간 상황을 가정해도 무관
+        val day = newDay(sourceRevision = 3) // revision이 여러 번 올라간 상황을 가정해도 동작은 동일함을 보여주는 값
         val extractor = FakeMomentExtractor(
             MomentExtractionResponse(
                 generationId = UUID.randomUUID(),
@@ -174,8 +174,6 @@ class MomentExtractionServiceTest {
         override fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay = day
         override fun findById(id: ConversationDayId): ConversationDay = day
         override fun save(conversationDay: ConversationDay): ConversationDay = conversationDay
-        override fun findOpenDueForClose(now: Instant, limit: Int): List<ConversationDay> = emptyList()
-        override fun closeIfOpen(id: ConversationDayId, closedAt: Instant): Boolean = true
     }
 
     private class FakeMessageRepository(private val messages: List<Message>) : MessageRepository {

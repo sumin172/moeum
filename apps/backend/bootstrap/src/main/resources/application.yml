@@ -54,6 +54,3 @@ moeum:
   conversation:
     ai:
       daily-message-limit: 20
-    day-close:
-      batch-size: 200
-      scan-interval: PT5M

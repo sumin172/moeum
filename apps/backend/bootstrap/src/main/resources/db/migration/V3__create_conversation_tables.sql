@@ -3,11 +3,9 @@ CREATE TABLE conversation.conversation_days (
     user_id UUID NOT NULL,
     local_date DATE NOT NULL,
     timezone TEXT NOT NULL,
-    status TEXT NOT NULL,
     source_revision BIGINT NOT NULL DEFAULT 0,
     version BIGINT NOT NULL DEFAULT 0,
     opened_at TIMESTAMPTZ NOT NULL,
-    closed_at TIMESTAMPTZ NULL,
     CONSTRAINT uq_conversation_conversation_days_user_local_date UNIQUE (user_id, local_date)
 );
 
@@ -34,3 +32,12 @@ CREATE TABLE conversation.messages (
 );
 
 CREATE INDEX idx_conversation_messages_conversation_day_id ON conversation.messages (conversation_day_id);
+
+CREATE TABLE conversation.ai_usage_daily (
+    user_id UUID NOT NULL,
+    usage_date DATE NOT NULL,
+    message_count INT NOT NULL DEFAULT 0,
+    input_tokens BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, usage_date)
+);

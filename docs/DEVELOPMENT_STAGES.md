@@ -120,16 +120,14 @@ conversation.conversation_days
   id              UUID PK
   user_id         UUID
   local_date      DATE          -- 최초 계산값 고정, 정체성(UNIQUE 키)이라 절대 재계산하지 않음
-  timezone        TEXT          -- 메시지 저장마다 최신 관측 zone으로 갱신 (2026-08-02 결정)
-                                 -- local_date와 달리 living 값. 마감 배치가 "이 zone 기준 자정 지났는지" 판단하는 근거.
+  timezone        TEXT          -- 메시지 저장마다 최신 관측 zone으로 갱신
+                                 -- local_date와 달리 living 값. Journal이 "이 zone 기준 자정 지났는지" 판단하는 근거.
                                  -- 갱신은 local_date를 건드리지 않으므로 정체성 충돌 위험 없음.
                                  -- 한 메시지의 zone 변화로 local_date 자체가 달라지면(실제 자정 넘김) 새 ConversationDay가
                                  -- 열리는 것을 정상으로 받아들임(하루가 여러 row로 쪼개지는 fragmentation은 accepted trade-off)
-  status          TEXT          -- OPEN | CLOSED
-  source_revision BIGINT DEFAULT 0  -- 메시지 추가·마감 시 증가
+  source_revision BIGINT DEFAULT 0  -- 메시지 추가 시 증가
   version         BIGINT        -- @Version 낙관적 락
   opened_at       TIMESTAMPTZ
-  closed_at       TIMESTAMPTZ NULL
 
   UNIQUE (user_id, local_date)  -- 하루에 하나
 
@@ -163,7 +161,7 @@ conversation.ai_usage_daily
 네트워크 단절 후 재시도해도 같은 clientMessageId면 중복 저장하지 않는다.
 
 **이 단계에서 Moment는 추출하지 않는다**
-- Moment 추출은 ConversationDay 마감 시 Conversation 모듈이 담당
+- Moment 추출은 Insight/아카이브가 필요할 때 직접 호출하는 별도 기능이다 (Stage 2 "Moment 추출" 참고)
 - 지금은 메시지 원본 저장이 전부
 
 **이 단계 완료 기준**
@@ -183,17 +181,13 @@ conversation.ai_usage_daily
 **할 것**
 
 Conversation
-- ConversationDay 마감 트리거 — 스케줄 배치
-  - 판단 기준은 **각 ConversationDay row 자신의 timezone** — day마다 독립적으로 자정 여부 판단 (동시에 여러 day가 열려 있어도 서로 안 기다림)
-  - day의 timezone이 갱신될 때 `closesAt`(그 zone 기준 자정에 해당하는 UTC Instant)을 같이 계산해 저장 — 배치 쿼리는 `WHERE status='OPEN' AND closes_at <= now()` 인덱스 스캔
-  - 마감은 원자적 조건부 UPDATE(`WHERE id=? AND status='OPEN'`)로 확정 — 마감 순간 도착하는 메시지와의 레이스 방지
-  - 배치 자체는 멱등 (이미 CLOSED인 row는 조건에 안 걸림, 중간에 죽고 재실행돼도 안전)
-- ConversationDayClosed 발행 (conversationDayId, userId, localDate, sourceRevision 포함)
+- ConversationDay는 메시지 저장 시 자동 생성·갱신된다(Stage 1). 별도의 "마감" 상태나 배치는 없다 — 하루의 경계는 `local_date` + `timezone`으로 항상 계산 가능하므로, 명시적으로 상태를 전환하는 단계 자체가 불필요하다
+- Journal이 조회할 수 있도록 publicapi(`ConversationJournalSourceQuery`)로 원본 대화와 day 목록(날짜/timezone/source_revision)을 노출한다
 - Moment 추출은 여기서 실행되지 않는다 — Insight 배치나 아카이브 드릴다운이 필요할 때 직접 호출하는 별도 기능이다(아래 "Moment 추출" 참고)
 
 Journal
-- **ConversationDayClosed 구독** → 일기 생성 Job 생성
-- Conversation의 publicapi(`ConversationJournalSourceQuery`)로 원본 대화를 조회해 서사 생성 — Moment는 입력에 없다
+- **자체 스케줄러**가 주기적으로 Conversation의 publicapi를 조회해, 각 day의 timezone 기준 자정으로부터 일정 시간(버퍼)이 지났고 아직 일기가 없는 day를 찾아 생성 Job을 만든다
+- 그 조회로 얻은 원본 대화로 서사 생성 — Moment는 입력에 없다
 - Claude Haiku로 일기 초안 생성
 - 구조화 출력 (JSON Schema 검증)
 - AI 생성 메타데이터 저장
@@ -317,44 +311,45 @@ Moment를 추출하는 이유:
 지금 방식(하루 전체를 한 번에 LLM에 투입)은 LLM 컨텍스트 윈도우 자체의 한계는 해결하지 못한다. 그 지점에 도달하면 "한 번에 추출"이 아니라 대화 도중 구간별로 점진적으로 추출하는 방식으로 재설계해야 한다. 지금은 신호가 없으니 만들지 않는다 (트리거 조건은 "구현하면서 결정" 표 참고).
 
 **request_key 구성**
-마감 후 메시지가 추가되면 source_revision이 증가하므로 같은 날짜라도 새 Job이 생성된다.
+일기 확정 후 메시지가 추가되면 source_revision이 증가하므로 같은 날짜라도 새 Job이 생성된다.
 동일 조건 재시도 → 기존 키로 멱등 처리. 내용 변경 재생성 → 새 키로 새 Job.
 
-**ConversationDay 마감 후 메시지 추가 정책 (Option 3 채택)**
-- CLOSED 상태에서도 메시지 추가 허용 (원본 기록 우선)
+**일기 확정 후 메시지 추가 정책**
+- 메시지 추가는 상태와 무관하게 항상 허용된다 (원본 기록 우선)
 - Journal이 CONFIRMED 상태였다면 OUTDATED로 변경
 - 사용자에게 재생성 여부 제공
 - 재생성 요청은 generation_jobs의 request_key로 중복 방지
 
 **오프라인 지연 전송과의 상호작용**
-- occurredAt을 클라이언트 작성 시각으로 받으므로, 배치가 실제 서버 시각 기준으로 day를 CLOSED한 뒤에 오프라인 큐잉됐던 메시지가 도착하는 상황이 구조적으로 항상 가능하다(비행기 모드 등으로 지연이 몇 시간~며칠까지 벌어질 수 있음)
-- Option 3 정책 그대로 저장은 허용하되, `SaveMessageService`에서 CLOSED day에 메시지가 붙을 때 경고 로그를 남긴다 — 재오픈/일기 재생성 자동화 여부는 이 로그로 빈도를 확인한 뒤 결정
+- occurredAt을 클라이언트 작성 시각으로 받으므로, Journal이 이미 그 날짜의 일기를 생성한 뒤에 오프라인 큐잉됐던 메시지가 도착하는 상황이 구조적으로 항상 가능하다(비행기 모드 등으로 지연이 몇 시간~며칠까지 벌어질 수 있음)
+- 이 경우도 저장은 그대로 허용하고, 위 OUTDATED 전환 정책으로 처리한다
 
 **미확정 일기 정책 (결정 필요)**
 - 선택지: N일 후 자동 확정 or 영구 DRAFT 유지
 - Insight 집계에 DRAFT 포함 여부
 
-**@TransactionalEventListener + @Async 구현**
+**Journal 생성 스케줄러**
 
-Journal은 `@TransactionalEventListener(AFTER_COMMIT) + @Async`로 `ConversationDayClosed`를 구독한다. 마감 트랜잭션 커밋 후 별도 스레드에서 일기 생성이 시작되므로, 마감 API가 LLM을 기다리지 않는다.
+이벤트 리스너가 아니라 Journal 자신의 스케줄러가 주기적으로 대상을 스캔한다. Conversation은 "마감"이라는 신호를 별도로 주지 않으므로, "언제 생성해도 되는지"를 Journal이 스스로 판단해야 한다.
 
 ```kotlin
-@Async
-@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-fun handle(event: ConversationDayClosedV1) {
-    runCatching {
-        journalGenerationProcessor.process(event)
-    }.onFailure { e ->
-        // markFailed 자체가 실패해도 로그는 남아야 한다
-        runCatching { journalJobFailureHandler.markFailed(event, e) }
-            .onFailure { log.error("Journal generation failure handler failed", it) }
-    }
+@Scheduled(fixedDelayString = "PT5M")
+fun scan() {
+    runCatching { generateDueJournals() }
+        .onFailure { e -> log.error("Journal 생성 스케줄 스캔 실패", e) }
+}
+
+fun generateDueJournals() {
+    val dueDays = conversationJournalSourceQuery.findDueForJournal(bufferAfterMidnight = Duration.ofHours(4))
+    dueDays.forEach { day -> generateSingleJournal(day) }
 }
 ```
 
-**리스너 내 트랜잭션 구조**
+`bufferAfterMidnight`만큼 그 day의 자정(timezone 기준) 이후 기다렸다가 대상으로 잡는다 — 오프라인 지연 메시지가 어느 정도 도착할 시간을 준 뒤에 생성해서 OUTDATED 재생성 빈도를 줄인다. 구체 시간은 "구현하면서 결정" 표 참고.
 
-AFTER_COMMIT 시점에는 원래 트랜잭션이 이미 닫혔다. DB 저장 시 `REQUIRES_NEW`로 새 트랜잭션을 명시적으로 시작한다. LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다.
+**Job 저장과 LLM 호출 분리**
+
+LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다.
 
 ```
 새 트랜잭션 → JournalGenerationJob PENDING 저장 → 커밋
@@ -363,22 +358,15 @@ AFTER_COMMIT 시점에는 원래 트랜잭션이 이미 닫혔다. DB 저장 시
 실패 시     → 새 트랜잭션 → Job FAILED, errorCode, attemptCount 기록 → 커밋
 ```
 
-Moment 추출(`MomentExtractionService`)은 이벤트로 트리거되지 않으므로 이 구조가 적용되지 않는다 — 호출부(Insight, 아카이브)가 동기/비동기 여부를 직접 결정한다.
+Moment 추출(`MomentExtractionService`)은 스케줄러로 트리거되지 않으므로 이 구조가 적용되지 않는다 — 호출부(Insight, 아카이브)가 동기/비동기 여부를 직접 결정한다.
 
 **유실 가능성 인지**
 
-in-process 이벤트는 신뢰성 있는 메시지 큐가 아니다.
-서버 종료 타이밍에 따라 ConversationDay가 CLOSED됐지만 일기 생성이 시작되지 않을 수 있다.
+스케줄러가 매 회차마다 "아직 생성 안 된 day"를 다시 스캔하는 방식이라, 특정 회차가 서버 재시작 등으로 건너뛰어도 다음 스캔에서 그대로 다시 잡힌다 — 이벤트 유실 문제 자체가 없다.
 
-최소 복구 통로로 다음을 제공한다:
-- Journal 생성 Job에 FAILED/PENDING 상태 기록
-- Journal이 없는 CLOSED ConversationDay 조회 API 또는 스케줄러
-- 수동 재처리 트리거
-
-유실이 제품상 허용되지 않는 시점 → Outbox 도입.
-
-**Outbox 조기 도입 기준**
-ConversationDayClosed 유실로 일기가 생성되지 않고 사용자가 인지 못하는 상황이 실제로 문제라면 Stage 2에서 조기 도입한다.
+그래도 다음은 필요하다:
+- Journal 생성 Job에 FAILED/PENDING 상태 기록 (재시도 대상 판단용)
+- 반복 실패(attempt_count 임계치 초과)에 대한 수동 개입 경로
 
 **이 단계 완료 기준**
 - 대화 → 일기 생성 → 수정 → 확정 흐름이 작동한다
@@ -519,8 +507,8 @@ gamification.point_ledger
 | 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)       | 사용자 행동 패턴 관찰 후                    |
 | Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시                        |
 | AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시                        |
-| Outbox를 Stage 2에 조기 도입할지                        | 이벤트 유실 허용 여부 판단 시               |
 | Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                                  |
+| Journal 생성 스케줄러의 자정 이후 버퍼 시간 구체 수치   | 오프라인 지연 메시지 패턴 관찰 후           |
 | 점진적(구간별) Moment 추출로 전환할 시점                | 하루 대화량이 LLM 컨텍스트 한계에 근접할 때 |
 | Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시                 |
 | 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후                  |

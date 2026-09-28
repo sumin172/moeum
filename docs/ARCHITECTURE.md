@@ -148,7 +148,7 @@ Journal 모듈은 Moment를 생성하거나 conversation 테이블에 저장하�
 
 **Journal — 원본 대화로 직접 서사를 생성한다**
 
-Journal은 Moment를 입력으로 쓰지 않는다. `ConversationDayClosed`를 구독해 일기 생성 Job을 만들고, Conversation의 publicapi로 그날 원본 대화를 조회해 서사를 쓴다.
+Journal은 Moment를 입력으로 쓰지 않는다. Conversation은 "마감"이라는 별도 상태나 이벤트를 갖지 않는다 — 하루의 경계는 `local_date`와 `timezone`으로 항상 계산 가능하다. Journal은 자체 스케줄러로 "생성해도 되는 day"를 스스로 판단하고, Conversation의 publicapi로 그 원본 대화를 조회해 서사를 쓴다.
 
 ```kotlin
 // conversation/application/publicapi
@@ -158,14 +158,14 @@ interface ConversationJournalSourceQuery {
 ```
 
 ```
-ConversationDay 마감 (source_revision 확정)
-  → ConversationDayClosed 발행 (conversationDayId, userId, localDate, sourceRevision)
-  → Journal이 구독 → ConversationJournalSourceQuery로 원본 조회 → 서사 생성
+Journal 스케줄러가 주기적으로 실행
+  → ConversationJournalSourceQuery로 "생성 대상 day" 조회 (timezone 기준 자정 + 버퍼 지난 day)
+  → 원본 조회 → 서사 생성
 ```
 
 **Moment 추출 — Insight/아카이브가 필요할 때만 호출한다**
 
-Moment 추출은 마감에 자동으로 반응하지 않는다. Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 Conversation의 Moment 추출 기능을 호출하면, 그 순간 `conversation.messages`를 읽어 구조화된 Moment를 뽑고 저장한다. 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 반환한다(멱등).
+Moment 추출은 Conversation의 어떤 상태 변화에도 자동으로 반응하지 않는다. Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 Conversation의 Moment 추출 기능을 호출하면, 그 순간 `conversation.messages`를 읽어 구조화된 Moment를 뽑고 저장한다. 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 반환한다(멱등).
 
 게이팅(구독 여부 등)은 호출하는 쪽(Insight, 아카이브)의 책임이다. Moment 추출 기능 자체는 구독 개념을 모른다.
 
@@ -178,7 +178,7 @@ Moment 추출은 마감에 자동으로 반응하지 않는다. Insight 배치�
 ```
 identity        ← 독립 (다른 모듈에 의존하지 않음)
 conversation    → shared-kernel(UserId)  [Identity API는 필요 시만]
-journal         → conversation.publicapi (ConversationJournalSourceQuery), ConversationDayClosed 이벤트 구독
+journal         → conversation.publicapi (ConversationJournalSourceQuery) — 자체 스케줄러로 호출, 이벤트 구독 없음
 insight         → journal integration event, conversation의 Moment 조회 publicapi
 gamification    → journal integration event
 notification    → 여러 모듈의 integration event
@@ -380,7 +380,6 @@ data class JournalConfirmedV1(
 **핵심 이벤트 목록**
 
 ```
-ConversationDayClosed       — 하루가 마감됐다는 사실 (source_revision 포함, Journal 구독 대상)
 MomentsPrepared             — Moment 추출 완료 (Insight/아카이브가 호출했을 때만 발생)
 JournalGenerationRequested
 JournalGenerated
@@ -405,7 +404,7 @@ conversation/application/publicapi/events/MomentsPreparedV1.kt
 ```
 contracts/events/
 ├─ journal-confirmed-v1.json
-├─ conversation-day-closed-v1.json
+├─ moments-prepared-v1.json
 └─ ...
 ```
 
