@@ -3,6 +3,8 @@ package com.moeum.journal.application.command
 import com.moeum.conversation.application.publicapi.ActiveDay
 import com.moeum.conversation.application.publicapi.ConversationActivityQuery
 import com.moeum.conversation.application.publicapi.MessageSnapshot
+import com.moeum.journal.domain.GeneratedJournal
+import com.moeum.journal.domain.JournalGenerator
 import com.moeum.journal.domain.JournalRepository
 import com.moeum.journal.domain.JournalRevisionRepository
 import com.moeum.journal.domain.model.GenerationJob
@@ -14,10 +16,7 @@ import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
-import com.moeum.platform.llm.journal.JournalGenerationException
-import com.moeum.platform.llm.journal.JournalGenerationRequest
-import com.moeum.platform.llm.journal.JournalGenerationResponse
-import com.moeum.platform.llm.journal.JournalGenerator
+import com.moeum.platform.llm.LlmException
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -54,10 +53,10 @@ class GenerationExecutorTest {
 
     private class ScriptedGenerator(private val failures: Int) : JournalGenerator {
         var calls = 0
-        override fun generate(request: JournalGenerationRequest): JournalGenerationResponse {
+        override fun generate(userId: UserId, diaryDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
             calls++
-            if (calls <= failures) throw JournalGenerationException("생성 실패")
-            return JournalGenerationResponse(UUID.randomUUID(), "산책", "{\"body\":\"산책을 했다\"}", "gemini", "google", "v1", 100, 50)
+            if (calls <= failures) throw LlmException("생성 실패")
+            return GeneratedJournal(UUID.randomUUID(), "산책", "{\"body\":\"산책을 했다\"}", "gemini", "google", "v1", 100, 50)
         }
     }
 
@@ -108,7 +107,7 @@ class GenerationExecutorTest {
         executor.executeDueJobs()
         val retrying = jobRepository.jobs.getValue(job.id)
         assertThat(retrying.state.status).isEqualTo(JobStatus.PENDING)
-        assertThat(retrying.state.lastErrorCode).isEqualTo("JournalGenerationException")
+        assertThat(retrying.state.lastErrorCode).isEqualTo("LlmException")
 
         // backoff 전에는 다시 실행하지 않는다
         executor.executeDueJobs()

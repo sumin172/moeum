@@ -44,7 +44,7 @@ insight, gamification, notification은 해당 Stage에서 모듈 추가.
 공통
 - PostgreSQL schema 분리 (conversation.*, journal.*, identity.*)
 - Shared Kernel 정의
-- LLM 추상화 인터페이스 (ConversationResponder, JournalGenerator)
+- LLM 추상화 인터페이스 (#33에서 범용 `LlmClient` + 업무 모듈별 포트로 재편, `ARCHITECTURE.md` "AI 추상화 인터페이스")
 - JWT 인증 구조 (auth provider ID와 내부 UserId 분리)
 - Domain Event / Integration Event 구분 원칙 정의 (공통 베이스 타입은 첫 실제 이벤트 구현 시 정의 — Stage 0에 만든 `DomainEvent`/`EventEnvelope`는 사용처 없이 남아 #27에서 제거)
 - 로컬 개발 환경 (Docker Compose: PostgreSQL)
@@ -77,8 +77,9 @@ Conversation
 - 메시지 수신 및 저장 (occurred_at, timezone, local_date, day_date 포함)
 - AI 반응 호출 (Gemini, 사용자 하루(day_date)의 전체 메시지를 컨텍스트로 전달)
   - 모델명은 `moeum.gemini.model` 설정값(`GeminiProperties`), 기본값 `gemini-flash-latest` (2026-08-08 결정 — `gemini-2.5-flash`는 신규 API 키에 404 확인되어 폐기)
-  - `RestClient` 기반 REST 직접 호출(`GeminiConversationResponder`), 응답 저장 전까지는 트랜잭션을 걸지 않고(외부 HTTP 호출을 트랜잭션 밖에 둠), 응답 저장은 별도 `SaveGeneratedResponseService.save()`(`@Transactional`)로 분리 — 자기 자신 호출로 인한 AOP(`@Transactional`/`@Async`) 무시 문제 회피
-  - `@CircuitBreaker(name="geminiConversationClient")`(Resilience4j) 적용, 반복 실패 시 빠른 실패(2026-08-08 실제 서킷 오픈 동작 확인)
+  - `RestClient` 기반 REST 직접 호출(#33부터 `LlmClient` → `GeminiProvider`, 프롬프트는 conversation의 `LlmConversationResponder`), 응답 저장 전까지는 트랜잭션을 걸지 않고(외부 HTTP 호출을 트랜잭션 밖에 둠), 응답 저장은 별도 `SaveGeneratedResponseService.save()`(`@Transactional`)로 분리 — 자기 자신 호출로 인한 AOP(`@Transactional`/`@Async`) 무시 문제 회피
+  - Resilience4j 서킷브레이커 적용, 반복 실패 시 빠른 실패(2026-08-08 실제 서킷 오픈 동작 확인). #33부터 provider 단위(`llm-gemini`)
+  - 응답 토큰 상한 150(`moeum.llm.routes.conversation-response`, thinking 끔) — #33
   - 응답 생성은 `conversation.response_jobs` 작업으로 실행 — 자동 재시도, 워커 장애 시 회수, 사용자 재시도 API (#31, `ARCHITECTURE.md` "AI 작업 실행 규칙")
 - AI 응답 저장
 - 오늘/전날 대화 조회 API (`GET /api/conversations/today`, 2026-08-02 결정)
@@ -130,8 +131,7 @@ conversation.ai_usage_daily
   user_id         UUID
   usage_date      DATE    -- messages.day_date와 같은 사용자 하루
   message_count   INT     -- 유저×하루 quota 카운터. 새 메시지와 사용자 재시도 요청마다 증가(서버 자동 재시도는 제외, #31)
-  input_tokens    BIGINT  -- 현재 미집계(항상 0), 토큰 기준 quota 도입 시 사용 예정
-  output_tokens   BIGINT  -- 현재 미집계(항상 0)
+  -- 토큰 사용량은 여기 없다(#33에서 항상 0이던 컬럼 제거). 토큰 기준 quota는 platform.llm_invocations로 집계
 
   PRIMARY KEY (user_id, usage_date)
 ```
@@ -195,8 +195,8 @@ Journal
 - 일기의 하루(`diary_date`)는 Conversation의 `day_date`를 그대로 쓴다 — Journal은 하루 경계를 계산하지 않는다(#29 이전엔 `DiaryPreference.generationTime`으로 직접 계산)
 - **GenerationPlanner**가 `plan(from, to)` 하나로 동작 — 새 활동이 생긴 하루마다 그 하루가 끝나는 시각을 첫 `next_attempt_at`으로 `generation_jobs`에 PENDING Job을 멱등 insert한다. 이 함수를 "최근 몇 분"(정상 경로)과 "최근 며칠"(reconciliation)로 다른 범위를 주고 반복 호출하는 것으로 정상/복구를 모두 처리한다(자세한 규칙은 아래 "Journal 생성 스케줄러" 참고)
 - **GenerationExecutor**가 주기적으로 실행할 차례인 Job을 하나씩 claim해 실행(공통 "AI 작업 실행 규칙": 재시도·리스 회수·fencing) — `ConversationActivityQuery.findMessages(userId, diaryDate)`로 그 하루의 원본을 조회해 서사 생성. Moment는 입력에 없다
-- `JournalGenerator`로 일기 초안 생성 — `GeminiJournalGenerator`/`ClaudeJournalGenerator` 둘 다 구현, `moeum.journal.provider`(기본값 `gemini`)로 선택. Claude는 결제 설정 후 전환할 대기 상태
-- 구조화 출력 (현재는 `{"title", "body"}` 최소 구조. JSON Schema 검증 등 본격 구조화는 소비처(아카이브 상세, Stage 3)가 생긴 뒤 설계)
+- `JournalGenerator`(journal 포트, 구현은 `LlmJournalGenerator`)로 일기 초안 생성 — provider·모델은 `moeum.llm.routes.journal-generation`으로 선택(현재 Gemini). Claude는 provider 구현만 있고 결제 설정 후 전환·실호출 검증 예정
+- 구조화 출력 (현재는 `{"title", "body"}` 최소 구조, JSON 모드 + 파싱 실패 시 재시도로 보장. JSON Schema 강제 등 본격 구조화는 소비처(아카이브 상세, Stage 3)가 생긴 뒤 설계 — Stage 3 "할 것" 참고)
 - AI 생성 메타데이터 저장
 - 일기 확정
 
@@ -401,6 +401,7 @@ Job claim (PROCESSING, attempt_count+1, version+1, 리스) → 커밋
 - 제목/본문 기본 LIKE 검색
 - 일기 상세 조회 (원본 대화 연결)
 - 일기 상세에서 **Moment 드릴다운** (Moment 재설계 포함, Stage 2 "Moment (보류)" 참고) — Journal은 "그날의 서사", Moment는 "추억의 조각". 일기 문장 ↔ 근거 Moment를 연결해 클릭하면 원본 조각(시각/타입/감정)을 볼 수 있게 한다
+- 일기 content 구조 확정(섹션·태그·근거 Moment 연결 등)과 **LLM 출력 JSON 스키마 강제** — `LlmRequest`에 응답 스키마를 추가하고(Gemini는 응답 스키마 옵션, Claude는 지원 방식 확인 후), `LlmJournalGenerator`가 스키마를 넘긴다. 그전까지는 JSON 모드 + 파싱 실패 시 재시도(#33)
 - 연도별 아카이브
 
 **검색 전략**

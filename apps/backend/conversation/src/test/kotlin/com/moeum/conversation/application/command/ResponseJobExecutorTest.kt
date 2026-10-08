@@ -10,10 +10,10 @@ import com.moeum.conversation.support.testResponseJobProperties
 import com.moeum.conversation.support.userMessage
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
-import com.moeum.platform.llm.conversation.ConversationRequest
-import com.moeum.platform.llm.conversation.ConversationResponder
-import com.moeum.platform.llm.conversation.ConversationResponse
-import com.moeum.platform.llm.conversation.ConversationResponseException
+import com.moeum.conversation.domain.ConversationResponder
+import com.moeum.conversation.domain.ConversationResponse
+import com.moeum.conversation.domain.model.Message
+import com.moeum.platform.llm.LlmException
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -31,9 +31,9 @@ class ResponseJobExecutorTest {
     private val jobRepository = InMemoryResponseJobRepository()
 
     private class ScriptedResponder(private val outcomes: ArrayDeque<() -> ConversationResponse>) : ConversationResponder {
-        val requests = mutableListOf<ConversationRequest>()
-        override fun respond(request: ConversationRequest): ConversationResponse {
-            requests += request
+        val requests = mutableListOf<List<Message>>()
+        override fun respond(userId: UserId, context: List<Message>): ConversationResponse {
+            requests += context
             return outcomes.removeFirst().invoke()
         }
     }
@@ -52,7 +52,7 @@ class ResponseJobExecutorTest {
         )
     }
 
-    private val failure = { throw ConversationResponseException("Gemini 응답 생성 실패") }
+    private val failure = { throw LlmException("LLM 호출 실패") }
 
     private fun executor(responder: ConversationResponder) = ResponseJobExecutor(
         responseJobRepository = jobRepository,
@@ -93,7 +93,7 @@ class ResponseJobExecutorTest {
 
         executor(responder).executeAsync(job.id)
 
-        assertThat(responder.requests.single().messages.map { it.content }).containsExactly("자정 전", "자정 후")
+        assertThat(responder.requests.single().map { it.content }).containsExactly("자정 전", "자정 후")
     }
 
     @Test
@@ -107,7 +107,7 @@ class ResponseJobExecutorTest {
         assertThat(state.attemptCount).isEqualTo(1)
         // 첫 backoff 10초 + 지터 최대 20%
         assertThat(state.nextAttemptAt).isBetween(start.plusSeconds(10), start.plusSeconds(12))
-        assertThat(state.lastErrorCode).isEqualTo("ConversationResponseException")
+        assertThat(state.lastErrorCode).isEqualTo("LlmException")
         assertThat(assistantMessages()).isEmpty()
     }
 

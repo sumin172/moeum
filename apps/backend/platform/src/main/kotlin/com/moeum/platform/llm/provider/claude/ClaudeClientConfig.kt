@@ -1,4 +1,4 @@
-package com.moeum.platform.llm.conversation.gemini
+package com.moeum.platform.llm.provider.claude
 
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -8,10 +8,10 @@ import java.net.http.HttpClient
 import java.time.Duration
 
 @Configuration
-class GeminiClientConfig {
+class ClaudeClientConfig {
 
     @Bean
-    fun geminiRestClient(properties: GeminiProperties): RestClient {
+    fun claudeRestClient(properties: ClaudeProperties): RestClient {
         val httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofMillis(properties.connectionTimeoutMs.toLong()))
             .build()

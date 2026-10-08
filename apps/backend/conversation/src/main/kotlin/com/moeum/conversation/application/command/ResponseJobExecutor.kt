@@ -1,14 +1,12 @@
 package com.moeum.conversation.application.command
 
+import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.domain.model.ResponseJobId
 import com.moeum.conversation.infrastructure.config.ResponseJobProperties
 import com.moeum.kernel.TimeProvider
-import com.moeum.platform.llm.conversation.ConversationRequest
-import com.moeum.platform.llm.conversation.ConversationResponder
-import com.moeum.platform.llm.conversation.LlmMessage
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.scheduling.annotation.Async
@@ -61,8 +59,7 @@ class ResponseJobExecutor(
             val userMessage = messageRepository.findById(job.userMessageId)
                 ?: error("응답 작업의 유저 메시지가 없습니다: messageId=${job.userMessageId.value}")
             val context = messageRepository.findAllByUserIdAndDayDate(job.userId, job.dayDate)
-                .map { LlmMessage(role = it.role.name.lowercase(), content = it.content) }
-            val response = conversationResponder.respond(ConversationRequest(messages = context))
+            val response = conversationResponder.respond(job.userId, context)
             saveGeneratedResponseService.save(job, userMessage, response)
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 응답 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)

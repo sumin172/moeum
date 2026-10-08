@@ -19,8 +19,8 @@ class AiUsageRepositoryImpl(
     override fun recordAttempt(userId: UserId, date: LocalDate): Int {
         val result = entityManager.createNativeQuery(
             """
-            INSERT INTO conversation.ai_usage_daily (user_id, usage_date, message_count, input_tokens, output_tokens)
-            VALUES (:userId, :usageDate, 1, 0, 0)
+            INSERT INTO conversation.ai_usage_daily (user_id, usage_date, message_count)
+            VALUES (:userId, :usageDate, 1)
             ON CONFLICT (user_id, usage_date)
             DO UPDATE SET message_count = ai_usage_daily.message_count + 1
             RETURNING message_count

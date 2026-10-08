@@ -1,13 +1,11 @@
 package com.moeum.journal.application.command
 
 import com.moeum.conversation.application.publicapi.ConversationActivityQuery
-import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.journal.domain.GenerationJobRepository
+import com.moeum.journal.domain.JournalGenerator
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.kernel.TimeProvider
-import com.moeum.platform.llm.journal.JournalGenerationRequest
-import com.moeum.platform.llm.journal.JournalGenerator
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
@@ -45,9 +43,7 @@ class GenerationExecutor(
 
         try {
             val messages = conversationActivityQuery.findMessages(job.userId, job.diaryDate)
-            val generation = journalGenerator.generate(
-                JournalGenerationRequest(rawTranscript = buildTranscript(messages), localDate = job.diaryDate.toString()),
-            )
+            val generation = journalGenerator.generate(job.userId, job.diaryDate, messages)
             saveGeneratedJournalService.save(job, generation)
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 일기 생성 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
@@ -67,6 +63,3 @@ class GenerationExecutor(
         }
     }
 }
-
-private fun buildTranscript(messages: List<MessageSnapshot>): String =
-    messages.joinToString("\n") { "[${it.occurredAt}] ${it.role}: ${it.content}" }

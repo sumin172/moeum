@@ -117,7 +117,7 @@ DDD 레이어링(`domain/application/infrastructure/interfaces`)이 항상 1차 
 
 적용 예:
 - `platform/security` → `config` / `jwt` / `filter` / `context`
-- `platform/llm` → `conversation` / `journal` (여기는 Gemini/Claude라는 실제 provider 축까지 겹침)
+- `platform/llm` → `provider`(gemini / claude) / `ledger` (업무 용도별 분리는 하지 않는다 — 용도별 프롬프트는 각 업무 모듈의 `infrastructure/ai`에)
 - `identity/domain` → `model`(값객체) vs 루트(포트 인터페이스), `identity/infrastructure` → `jpa` / `google` / `config`, `identity/interfaces` → `dto` vs 루트(컨트롤러)
 
 파일이 1개뿐인 역할은 서브패키지로 안 뺀다(예: 컨트롤러 1개면 `interfaces/` 루트 유지).
@@ -156,10 +156,11 @@ User Entity, Journal Entity, 도메인 enum 전체 → 각 모듈 내부에
 
 ## AI 사용 원칙
 
-- 모델명과 공급자를 도메인 코드에 직접 쓰지 않는다
-- ConversationResponder / JournalGenerator 인터페이스 뒤에 구현을 숨긴다
+- 모델명과 공급자를 도메인 코드에 직접 쓰지 않는다 — 용도별 라우팅 설정(`moeum.llm.routes`)으로 정한다
+- 업무 모듈은 자기 포트(ConversationResponder / JournalGenerator) 뒤에 구현을 숨기고, 구현은 platform의 범용 `LlmClient`만 쓴다. 프롬프트와 응답 해석은 업무 모듈이 소유하고 platform에 두지 않는다
 - LLM 호출 실패는 메시지 저장 실패로 이어지지 않는다
-- LLM 장애 격리: Timeout + 제한적 Retry + Circuit Breaker
+- LLM 장애 격리: Timeout + provider별 Circuit Breaker + provider별 동시 호출 상한(bulkhead). 재시도는 호출하는 작업(AI 작업 실행 규칙)이 맡는다
+- 모든 LLM 호출(성공·실패)은 호출 원장(`platform.llm_invocations`)에 남긴다 — 비용·사용량 집계의 원천
 
 **비용 제어 원칙 (2026-07-25 결정)**
 - 대화 컨텍스트는 고정된 "최근 N개 메시지" 대신 사용자 하루(day_date) 전체를 사용한다 — LLM API는 무상태라 매 호출마다 컨텍스트를 재전송해야 하며, 하루 단위 경계가 이미 자연스러운 컨텍스트 경계다

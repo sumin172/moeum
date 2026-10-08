@@ -45,17 +45,17 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 | Moment 추출 (보류) | Gemini Flash (계열) | 구조화 출력, 저비용              |
 | 일기 생성 초안     | Claude Haiku 4.5    | 하루 1회, 한국어 품질            |
 
-일기 생성은 Claude Haiku가 목표 모델이지만, 결제 설정 전까지 기본값은 Gemini다(`moeum.journal.provider=gemini`). 두 구현 모두 존재하며 설정값만 바꾸면 전환된다.
+일기 생성은 Claude Haiku가 목표 모델이지만, 결제 설정 전까지는 Gemini를 쓴다. 용도별 provider·모델은 `moeum.llm.routes.<용도>` 설정으로 정해지므로, 전환은 `journal-generation.provider`/`model` 값만 바꾸면 된다(Claude 실호출은 결제 후 검증 예정).
 | Insight 생성       | Claude Sonnet 4.6   | 주·월 1회, 품질 우선             |
 
 모델 계열명(Flash)만 여기서 고정하고 구체 버전 alias는 설정값(`moeum.gemini.model`)으로 둔다 — Gemini 모델 alias는 구세대가 조기 폐기되는 경우가 있어(2026-08-08: `gemini-2.5-flash`가 신규 API 키에 404, `gemini-flash-latest`로 교체) 문서에 특정 버전을 못박지 않는다.
 
 **비용 제어 원칙 (2026-07-25 갱신)**
 - 대화 반응: 고정된 "최근 N개" 대신 사용자 하루(day_date, 아래 "하루 경계" 참고)의 전체 메시지를 컨텍스트로 사용 — LLM API가 무상태라 컨텍스트를 매번 재전송해야 하며, 하루 단위 자연 경계를 그대로 씀
-- 컨텍스트 재전송 비용은 Gemini 2.5+의 암묵적 캐싱(implicit caching)이 자동으로 완화한다 — 별도 구현 필요 없음, 요청 최소 2,048 토큰 이상이고 이전 요청과 동일한 prefix일 때 자동 히트. 우리 요청 구조(고정 시스템 지시 + 계속 자라나는 대화 이력을 매번 그대로 재전송)가 이미 이 조건에 맞는 형태라 별도 코드 변경이 필요 없다. `GeminiConversationResponder`가 응답의 `cachedContentTokenCount`를 로그로 남겨 실제 히트 여부를 관측한다. 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
+- 컨텍스트 재전송 비용은 Gemini 2.5+의 암묵적 캐싱(implicit caching)이 자동으로 완화한다 — 별도 구현 필요 없음, 요청 최소 2,048 토큰 이상이고 이전 요청과 동일한 prefix일 때 자동 히트. 우리 요청 구조(고정 시스템 지시 + 계속 자라나는 대화 이력을 매번 그대로 재전송)가 이미 이 조건에 맞는 형태라 별도 코드 변경이 필요 없다. 캐시로 처리된 입력 토큰은 호출 원장(`platform.llm_invocations.cached_input_tokens`)에 남아 실제 히트율을 관측할 수 있다. 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
 - 유저당 일일 메시지/토큰 quota를 하드 캡으로 둠(요금제와 무관, 어뷰징·버그로 인한 비용 폭주 방지 — Stage 6 요금제별 Rate Limit과는 별개의 안전장치)
 - 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 함
-- 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축) — 아직 미구현(요청에 `maxOutputTokens` 미설정)
+- 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축) — `moeum.llm.routes.conversation-response.max-output-tokens`. Gemini 2.5+는 thinking 토큰도 상한에 포함되므로 이 용도는 `thinking-budget: 0`으로 thinking을 끈다. 상한에 걸려 잘린 응답 비율은 원장의 `finish_reason`(MAX_TOKENS)으로 관측한다(#33)
 - 시스템 프롬프트 최소화
 - 개발 중 전체를 Gemini 무료 티어로 처리
 
@@ -98,7 +98,7 @@ backend/
 │  ├─ gamification/     # 미션, 스트릭, 포인트 원장
 │  └─ notification/     # 알림 발송
 ├─ platform/
-│  ├─ llm/              # AI 제공자 추상화
+│  ├─ llm/              # 범용 LLM 클라이언트(라우팅·provider·동시성 상한·호출 원장). 프롬프트는 업무 모듈이 소유
 │  ├─ database/         # JPA 공통 설정
 │  ├─ messaging/        # 이벤트 발행/구독 인프라
 │  ├─ security/         # JWT, 인증 필터
@@ -269,6 +269,7 @@ identity.accounts
 
 conversation.messages
 conversation.day_preferences
+conversation.response_jobs
 conversation.moments          -- Moment 재도입 시
 
 journal.journals
@@ -280,6 +281,8 @@ insight.patterns
 
 gamification.point_ledger
 gamification.streaks
+
+platform.llm_invocations      -- 업무 모듈에 속하지 않는 공통 인프라 데이터(LLM 호출 원장)
 ```
 
 하나의 DB 인스턴스라도 schema를 분리해 논리적 소유권을 강제한다.
@@ -310,8 +313,10 @@ google_id   TEXT              -- auth 연결은 별도 칼럼
 AI가 생성한 모든 결과에 적용한다. 대화 응답(message.role=assistant)도 포함.
 
 ```
--- 일기/Insight: 생성 Job 테이블에 기록 (현재 journal.generation_jobs)
--- 별도 통합 generation_log(호출 원장) 테이블은 아직 없음 — LLM 계층 재편 시 검토
+-- 모든 LLM 호출(성공·실패): platform.llm_invocations (호출 원장, #33)
+--   purpose, user_id, provider, model, prompt_version, generation_id, input/output/cached 토큰,
+--   latency_ms, succeeded, finish_reason, error_code, created_at
+-- 생성 결과 자체에도 메타데이터를 남긴다 — 일기/Insight는 생성 Job 테이블(현재 journal.generation_jobs)에
 generation_id    UUID
 provider         TEXT        -- 'anthropic', 'google'
 model            TEXT        -- 'claude-haiku-4-5'
@@ -350,28 +355,49 @@ purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 
 ## AI 추상화 인터페이스
 
-provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`로 서브패키지 분리(2026-07-25). `platform/llm/moment`는 2026-09-22 추가됐다가 #27에서 Moment와 함께 제거. `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
+**platform은 "LLM을 부르는 법"만, 업무 모듈은 "무엇을 어떻게 시킬지"만 갖는다 (2026-10-08, #33).**
 
-두 서브패키지 모두 `RestClient` + Resilience4j `@CircuitBreaker` 구조로 구현되어 있다: `platform/llm/conversation`은 `GeminiConversationResponder`(Stage 1, #17), `platform/llm/journal`은 `GeminiJournalGenerator`/`ClaudeJournalGenerator` 둘 다 구현돼 있고 `moeum.journal.provider`(기본값 `gemini`)로 선택한다(Claude는 결제 설정 후 전환할 임시 대기 상태). 상세는 `DEVELOPMENT_STAGES.md` 참고.
+이전에는 `platform/llm/conversation`, `platform/llm/journal`에 각 업무의 프롬프트와 응답 해석이 들어 있고, Gemini 요청/응답 DTO가 용도별로 복사돼 있었다. 기능이 늘 때마다 모든 모듈이 의존하는 platform이 비대해지는 구조라 나눴다.
+
+```
+업무 모듈                                          platform/llm
+───────────────────────────────────                ─────────────────────────────────────────────
+conversation/domain/ConversationResponder (포트)
+conversation/infrastructure/ai/                    LlmClient.generate(LlmRequest): LlmResult
+  LlmConversationResponder  ── 프롬프트 ──────▶      RoutingLlmClient
+journal/domain/JournalGenerator (포트)                ├ moeum.llm.routes.<purpose> → provider·모델·토큰 상한
+journal/infrastructure/ai/                            ├ provider별 동시 호출 상한(Semaphore)
+  LlmJournalGenerator  ── 프롬프트·JSON 해석 ─▶       ├ provider/gemini, provider/claude (DTO는 provider당 한 벌,
+                                                       │   서킷브레이커 llm-gemini / llm-claude)
+                                                       └ 호출 원장 platform.llm_invocations (성공·실패 모두)
+```
 
 ```kotlin
-// platform/llm/conversation
-interface ConversationResponder {
-    fun respond(request: ConversationRequest): ConversationResponse
+// platform/llm
+interface LlmClient {
+    fun generate(request: LlmRequest): LlmResult   // 실패하면 LlmException
 }
-// ConversationRequest(messages: List<LlmMessage>) — 시스템 지시는 구현체가 소유
-// ConversationResponse(generationId, content, model, provider, promptVersion, inputTokens, outputTokens)
+// LlmRequest(purpose, systemPrompt, messages: List<LlmMessage>, promptVersion, responseFormat = TEXT|JSON, userId?)
+// LlmResult(generationId, text, provider, model, promptVersion, inputTokens, outputTokens)
 
-// platform/llm/journal
-interface JournalGenerator {
-    fun generate(request: JournalGenerationRequest): JournalGenerationResponse
+// conversation/domain — 구현: infrastructure/ai/LlmConversationResponder (purpose = conversation-response)
+interface ConversationResponder {
+    fun respond(userId: UserId, context: List<Message>): ConversationResponse
 }
-// JournalGenerationRequest(rawTranscript: String, localDate: String) — Moment는 입력에 없다
-// rawTranscript는 ConversationActivityQuery.findMessages(userId, diaryDate)로 조회한 원본 그대로
-// JournalGenerationResponse(generationId, title, content, model, provider, promptVersion, inputTokens, outputTokens)
+
+// journal/domain — 구현: infrastructure/ai/LlmJournalGenerator (purpose = journal-generation)
+interface JournalGenerator {
+    fun generate(userId: UserId, diaryDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal
+}
+// Moment는 입력에 없다. messages는 ConversationActivityQuery.findMessages(userId, diaryDate)로 조회한 원본 그대로
 
 // InsightGenerator — Stage 5에서 정의 (아직 없음)
 ```
+
+- **응답 구조 강제**는 지금 JSON 모드(`responseFormat = JSON`, "JSON 객체로만 응답")까지만 지원한다. 필드 구조(JSON 스키마) 강제는 일기 구조가 복잡해지는 Stage 3에서 `LlmRequest`에 추가한다(`DEVELOPMENT_STAGES.md` Stage 3).
+- **프롬프트 버전**은 프롬프트를 소유한 모듈의 어댑터가 관리하고, 바꿀 때 올린다(생성 메타데이터·원장에 남아 품질 비교 기준이 된다).
+- **장애 격리**: 서킷브레이커는 용도가 아니라 provider 단위(같은 provider를 쓰는 용도들이 함께 빠르게 실패), 동시 호출 상한도 provider 단위. 재시도는 LLM 계층이 아니라 호출하는 작업(`AI 작업 실행 규칙`)이 맡는다.
+- **원장**은 호출부 트랜잭션과 무관하게(REQUIRES_NEW) 남기고, 기록 실패가 LLM 호출 결과를 바꾸지 않는다. platform이 테이블을 갖는 첫 사례다 — 업무 데이터가 아니라 비용·사용량을 한곳에서 보기 위한 공통 인프라 데이터라서 `platform` schema에 둔다.
 
 모델명과 공급자는 도메인 코드에 직접 등장하지 않는다.
 

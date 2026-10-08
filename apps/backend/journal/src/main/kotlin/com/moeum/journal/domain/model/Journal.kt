@@ -12,7 +12,7 @@ data class Journal(
     val diaryDate: LocalDate,
     val lifecycleStatus: JournalLifecycleStatus,
     val title: String,
-    // JSONB 원문. 구조 자체는 아직 미정(JournalGenerator의 구조화 출력 설계 시 확정, docs/DEVELOPMENT_STAGES.md 참고).
+    // JSONB 원문. 구조 자체는 아직 미정(현재 {"body"} 최소 구조, 소비처가 생기면 확정, docs/DEVELOPMENT_STAGES.md 참고).
     val content: String,
     val currentRevision: Int,
     val version: Long,

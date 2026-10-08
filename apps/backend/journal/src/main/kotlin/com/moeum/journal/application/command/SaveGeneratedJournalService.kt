@@ -1,5 +1,6 @@
 package com.moeum.journal.application.command
 
+import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.JournalRepository
 import com.moeum.journal.domain.JournalRevisionRepository
@@ -10,7 +11,6 @@ import com.moeum.journal.domain.model.JournalRevision
 import com.moeum.journal.domain.model.JournalRevisionEditor
 import com.moeum.journal.domain.model.JournalRevisionId
 import com.moeum.kernel.TimeProvider
-import com.moeum.platform.llm.journal.JournalGenerationResponse
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -24,7 +24,7 @@ class SaveGeneratedJournalService(
     // 일기와 작업 완료를 한 트랜잭션에서 저장한다. 리스를 뺏긴 워커면 작업 저장이 낙관적 락 충돌로 실패해
     // 트랜잭션 전체가 롤백되므로 일기가 중복 저장되지 않는다.
     @Transactional
-    fun save(job: GenerationJob, generation: JournalGenerationResponse): Journal {
+    fun save(job: GenerationJob, generation: GeneratedJournal): Journal {
         val now = timeProvider.now()
 
         val journal = journalRepository.save(

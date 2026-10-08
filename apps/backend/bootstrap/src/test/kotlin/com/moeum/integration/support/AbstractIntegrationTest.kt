@@ -30,13 +30,21 @@ import java.util.UUID
  */
 @ActiveProfiles("local")
 @AutoConfigureTestRestTemplate
-@Import(AbstractIntegrationTest.FakeGoogleVerifierConfig::class, AbstractIntegrationTest.FakeConversationResponderConfig::class)
+@Import(
+    AbstractIntegrationTest.FakeGoogleVerifierConfig::class,
+    AbstractIntegrationTest.FakeConversationResponderConfig::class,
+    AbstractIntegrationTest.FakeLlmProviderConfig::class,
+)
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     // 재시도 흐름을 몇 초 안에 끝까지 검증할 수 있도록 응답 작업 backoff와 poll 주기를 줄인다
     properties = [
         "moeum.conversation.response-job.backoff=200ms",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
+        // 실제 provider 없이 LlmClient → 호출 원장 경로를 검증하기 위한 용도(FakeLlmProvider)
+        "moeum.llm.routes.integration-test.provider=fake",
+        "moeum.llm.routes.integration-test.model=fake-model",
+        "moeum.llm.routes.integration-test.max-output-tokens=100",
     ],
 )
 abstract class AbstractIntegrationTest {
@@ -95,5 +103,11 @@ abstract class AbstractIntegrationTest {
         @Bean
         @Primary
         fun fakeConversationResponder(): ControllableConversationResponder = ControllableConversationResponder()
+    }
+
+    @TestConfiguration
+    class FakeLlmProviderConfig {
+        @Bean
+        fun fakeLlmProvider(): FakeLlmProvider = FakeLlmProvider()
     }
 }
