@@ -67,12 +67,11 @@ CREATE INDEX idx_conversation_response_jobs_pending ON conversation.response_job
 CREATE INDEX idx_conversation_response_jobs_processing ON conversation.response_jobs (lease_expires_at)
     WHERE status = 'PROCESSING';
 
--- usage_date: messages.day_date와 같은 사용자 하루
+-- 하루 AI 응답 요청 수 quota 카운터. usage_date: messages.day_date와 같은 사용자 하루.
+-- 토큰 사용량은 여기가 아니라 platform.llm_invocations에서 집계한다.
 CREATE TABLE conversation.ai_usage_daily (
     user_id UUID NOT NULL,
     usage_date DATE NOT NULL,
     message_count INT NOT NULL DEFAULT 0,
-    input_tokens BIGINT NOT NULL DEFAULT 0,
-    output_tokens BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, usage_date)
 );

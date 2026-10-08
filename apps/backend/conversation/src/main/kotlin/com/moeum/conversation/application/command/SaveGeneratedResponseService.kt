@@ -1,12 +1,12 @@
 package com.moeum.conversation.application.command
 
+import com.moeum.conversation.domain.ConversationResponse
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.kernel.TimeProvider
-import com.moeum.platform.llm.conversation.ConversationResponse
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 

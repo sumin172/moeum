@@ -28,10 +28,13 @@ dependencies {
     implementation(project(":conversation"))
 
     implementation(libs.spring.boot.starter.data.jpa)
+    // LLM 응답(JSON) 파싱. 런타임 JsonMapper는 bootstrap의 web starter가 제공한다.
+    compileOnly(libs.jackson.databind)
     compileOnly(libs.spring.boot.starter.web)
     compileOnly(libs.spring.boot.starter.security)
 
     testImplementation(libs.spring.boot.starter.test)
+    testImplementation(libs.jackson.databind)
 }
 
 tasks.withType<Test> {
