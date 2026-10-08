@@ -33,6 +33,9 @@ CREATE TABLE conversation.messages (
 
 CREATE INDEX idx_conversation_messages_conversation_day_id ON conversation.messages (conversation_day_id);
 
+-- GenerationPlanner.plan(from, to)이 전체 사용자 대상으로 occurred_at 범위 스캔을 한다(ConversationActivityQuery.findActivities).
+CREATE INDEX idx_conversation_messages_occurred_at ON conversation.messages (occurred_at);
+
 CREATE TABLE conversation.ai_usage_daily (
     user_id UUID NOT NULL,
     usage_date DATE NOT NULL,

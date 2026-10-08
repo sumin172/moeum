@@ -25,3 +25,6 @@ moeum:
   gemini:
     # Google AI Studio(aistudio.google.com)에서 발급받은 Gemini API 키. 로컬에선 환경변수로 주입.
     api-key: ${GEMINI_API_KEY:}
+  claude:
+    # console.anthropic.com에서 발급받은 Claude API 키. 로컬에선 환경변수로 주입.
+    api-key: ${ANTHROPIC_API_KEY:}

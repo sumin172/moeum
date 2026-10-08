@@ -8,6 +8,7 @@ import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.kernel.UserId
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
+import java.time.Instant
 import java.util.UUID
 
 @Component
@@ -30,6 +31,14 @@ class MessageRepositoryImpl(
 
     override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> =
         jpaRepository.findByConversationDayIdOrderByIdAsc(conversationDayId.value).map { it.toDomain() }
+
+    override fun findByOccurredAtRange(from: Instant, to: Instant): List<Message> =
+        jpaRepository.findByOccurredAtGreaterThanEqualAndOccurredAtLessThan(from, to).map { it.toDomain() }
+
+    override fun findByUserIdAndOccurredAtRange(userId: UserId, from: Instant, to: Instant): List<Message> =
+        jpaRepository.findByUserIdAndOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtAsc(
+            userId.value, from, to,
+        ).map { it.toDomain() }
 
     override fun save(message: Message): Message =
         jpaRepository.save(message.toEntity()).toDomain()
