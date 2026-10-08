@@ -71,7 +71,7 @@ insight, gamification, notification은 해당 Stage에서 모듈 추가.
 Identity
 - 사용자 가입 / Google ID Token 검증 방식 로그인 (2026-07-25 결정, 리다이렉트 기반 OAuth2Login 아님 — 근거는 `ARCHITECTURE.md` "로그인 방식" 참고)
 - UserId 생성 (내부 UUID v7, auth ID와 분리 — RFC 9562 직접 구현, `shared-kernel/UserId.kt`)
-- JWT 발급 (`platform/security/jwt`)
+- JWT 발급 (`platform/security/jwt`) — #35부터 access token 15분 + 기기별 refresh token(rotation·재사용 감지), 탈퇴 사용자 인증 차단 (`ARCHITECTURE.md` "인증 세션")
 
 Conversation
 - 메시지 수신 및 저장 (occurred_at, timezone, local_date, day_date 포함)
@@ -470,7 +470,7 @@ gamification.point_ledger
 - 구독 플랜 / 결제 — 무료 티어의 대화 컨텍스트(핵심 기록 경험)는 깎지 않고, Insight(Claude Sonnet) 같은 고비용 기능을 유료 게이팅하는 방향으로 설계 (2026-07-25 결정)
 - 사용량 제한 (Rate Limit) — 요금제별 세분화된 제한. 유저당 최소 quota 안전장치는 Stage 1부터 이미 적용됨, 여기서는 그걸 요금제 단위로 고도화
 - 데이터 내보내기 (전체 기록 ZIP)
-- 계정 탈퇴 + 파생 데이터 연쇄 삭제
+- 계정 탈퇴 + 파생 데이터 연쇄 삭제 (탈퇴 사용자의 로그인·refresh 차단은 #35에서 이미 적용 — 여기서는 users.deleted_at을 실제로 찍고 파생 데이터를 지우는 흐름)
 - 관리자 도구
 - 모델 라우팅 최적화 (비용 vs 품질)
 - AI 학습 사용 동의 처리

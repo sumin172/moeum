@@ -26,7 +26,7 @@ class JwtProviderTest {
         val jwtProvider: JwtProvider = JwtProviderImpl(jwtProperties, FixedTimeProvider(now))
         val userId = UserId.generate()
 
-        val token = jwtProvider.issue(userId)
+        val token = jwtProvider.issue(userId).token
         val parsed = jwtProvider.parse(token)
 
         assertThat(parsed.userId).isEqualTo(userId)
@@ -39,7 +39,7 @@ class JwtProviderTest {
         val longAgo = Instant.now().minusSeconds(jwtProperties.expirationSeconds + 3600)
         val jwtProvider: JwtProvider = JwtProviderImpl(jwtProperties, FixedTimeProvider(longAgo))
 
-        val expiredToken = jwtProvider.issue(UserId.generate())
+        val expiredToken = jwtProvider.issue(UserId.generate()).token
 
         assertThatThrownBy { jwtProvider.parse(expiredToken) }
             .isInstanceOf(InvalidJwtException::class.java)
@@ -54,7 +54,7 @@ class JwtProviderTest {
             FixedTimeProvider(now),
         )
 
-        val token = otherProvider.issue(UserId.generate())
+        val token = otherProvider.issue(UserId.generate()).token
 
         assertThatThrownBy { jwtProvider.parse(token) }
             .isInstanceOf(InvalidJwtException::class.java)

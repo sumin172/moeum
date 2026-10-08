@@ -1,6 +1,9 @@
 package com.moeum.identity.interfaces
 
 import com.moeum.identity.domain.InvalidGoogleTokenException
+import com.moeum.identity.domain.InvalidRefreshTokenException
+import com.moeum.identity.domain.RefreshTokenAlreadyRotatedException
+import com.moeum.identity.domain.UserDeletedException
 import com.moeum.platform.web.ErrorResponse
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -16,7 +19,27 @@ class IdentityExceptionHandler {
     @ExceptionHandler(InvalidGoogleTokenException::class)
     fun handleInvalidGoogleToken(e: InvalidGoogleTokenException): ResponseEntity<ErrorResponse> {
         log.warn("Google 로그인 실패: {}", e.message)
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-            .body(ErrorResponse(code = IdentityErrorCode.INVALID_GOOGLE_TOKEN.code, message = IdentityErrorCode.INVALID_GOOGLE_TOKEN.description))
+        return error(HttpStatus.UNAUTHORIZED, IdentityErrorCode.INVALID_GOOGLE_TOKEN)
     }
+
+    @ExceptionHandler(InvalidRefreshTokenException::class)
+    fun handleInvalidRefreshToken(e: InvalidRefreshTokenException): ResponseEntity<ErrorResponse> {
+        log.info("refresh 거부: {}", e.message)
+        return error(HttpStatus.UNAUTHORIZED, IdentityErrorCode.INVALID_REFRESH_TOKEN)
+    }
+
+    @ExceptionHandler(RefreshTokenAlreadyRotatedException::class)
+    fun handleAlreadyRotated(e: RefreshTokenAlreadyRotatedException): ResponseEntity<ErrorResponse> {
+        log.info("동시 refresh: {}", e.message)
+        return error(HttpStatus.CONFLICT, IdentityErrorCode.REFRESH_TOKEN_ROTATED)
+    }
+
+    @ExceptionHandler(UserDeletedException::class)
+    fun handleUserDeleted(e: UserDeletedException): ResponseEntity<ErrorResponse> {
+        log.warn("탈퇴 사용자 인증 시도: {}", e.message)
+        return error(HttpStatus.FORBIDDEN, IdentityErrorCode.USER_DELETED)
+    }
+
+    private fun error(status: HttpStatus, code: IdentityErrorCode): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(status).body(ErrorResponse(code = code.code, message = code.description))
 }

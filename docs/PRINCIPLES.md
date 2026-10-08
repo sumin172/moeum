@@ -64,6 +64,7 @@ provider, model, prompt_version, generation_id, generated_at
 - userId처럼 stale해도 피해가 작은 값만 포함한다
 - 구독 등급처럼 자주 바뀌고 stale하면 매출/신뢰 문제가 되는 값은 authorities든 plain claim이든 형태와 무관하게 JWT에 넣지 않고, 사용 시점에 살아있는 소스(DB/캐시)에서 조회한다
 - 즉시 무효화가 필요해지면(구독 취소, 강제 로그아웃 등) Token Version / Security Stamp 패턴을 후보로 고려한다 (2026-07-25 결정, subscriptionTier를 JwtClaims에서 제거함)
+- 대신 access token 수명을 15분으로 짧게 두고, 세션 상태는 서버가 관리하는 refresh token(기기별 세션)에 둔다 — 로그아웃·탈퇴·탈취 대응은 refresh token 폐기로 하고, 반영까지 최대 15분을 감수한다 (2026-10-08, #35)
 
 ---
 

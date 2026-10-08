@@ -251,6 +251,22 @@ JWT claim 구조는 `platform/security`에서 정의한다.
 
 리다이렉트 기반 `oauth2Login()`(서버 세션 기반, 웹 전용) 대신 ID Token 검증 방식을 택함 — 클라이언트(웹/모바일)가 Google 로그인 SDK로 직접 로그인해 ID Token을 받고, `POST /api/auth/google`로 보내면 서버가 Google 공개키로 서명 검증 후 우리 JWT를 발급한다. 웹/Flutter 모바일에 동일하게 쓸 수 있고, 별도 필터체인/콜백 핸들러 없이 REST 엔드포인트 하나로 끝난다. Client Secret 불필요(Client ID만 필요). 구현: `identity/domain/GoogleIdTokenVerifierPort` + `identity/infrastructure/google/GoogleIdTokenVerifierAdapter`(`com.google.api-client` 사용).
 
+**인증 세션: access token + refresh token (2026-10-08, #35)**
+
+```
+POST /api/auth/google  { idToken, deviceId }  → { accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt }
+POST /api/auth/refresh { refreshToken }       → 같은 형식(새 access·refresh token)
+POST /api/auth/logout  { refreshToken }       → 204 (멱등)
+```
+
+- **access token**: 15분 JWT(`moeum.jwt.expiration-seconds`), 서버가 상태 없이 검증한다. 세션 폐기(로그아웃·탈퇴·탈취 대응)가 반영되기까지 최대 15분 — 즉시 무효화는 하지 않는다.
+- **refresh token**: identity가 소유하는 기기별 세션(`identity.auth_sessions`). 값은 `<세션 ID>.<비밀값>`이고 DB에는 비밀값의 SHA-256 해시만 둔다. 수명 30일, 로그인·refresh 때마다 연장.
+- **rotation과 재사용 감지**: refresh할 때마다 비밀값을 새로 발급한다. 이 세션의 예전 토큰이 다시 들어오면 해시가 맞지 않으므로 탈취로 보고 세션 전체를 폐기한다 — 토큰 이력 테이블 없이 감지된다. 폐기는 거부 응답과 함께 커밋돼야 하므로 서비스는 거부를 예외가 아닌 결과값(`RefreshOutcome`)으로 돌려준다.
+- **동시 refresh**: 앱 시작 시 같은 토큰으로 거의 동시에 refresh하는 경우를 탈취로 오인하지 않도록, 직전 토큰이 30초(`rotation-grace`) 안에 다시 오면 세션을 유지하고 409(`IDENTITY_REFRESH_TOKEN_ROTATED`)를 준다. 동시 저장은 낙관적 락으로 하나만 성공한다. 클라이언트는 refresh를 직렬화하는 것이 원칙이다.
+- **기기**: 로그인 요청의 `deviceId`(앱 설치 단위 UUID)로 기기당 활성 세션 하나를 유지한다(같은 기기 재로그인 시 이전 세션 폐기). 기기별 세션 목록·개별 로그아웃 API는 아직 없다.
+- **전달 방식**: 모바일·웹 모두 응답 body. 웹은 BFF(Next.js)가 refresh token을 httpOnly 쿠키로 감싸 브라우저 JS에 노출하지 않는다.
+- **탈퇴 사용자**: 로그인과 refresh 모두 거부(403 `IDENTITY_USER_DELETED`)하고, refresh 시 세션을 폐기한다. 탈퇴 기능 자체(연쇄 삭제)는 Stage 6.
+
 순환 의존 금지: `conversation → journal`, `journal → conversation` 양방향 불가.
 Journal 결과를 Conversation이 알아야 한다면 이벤트로 역방향 전달.
 
