@@ -29,10 +29,10 @@ Stage 6: 상용화 (구독 + 결제 + 관리자)
 Gradle 모듈 (실제 기능이 있는 것만 생성)
 - `app` — 부트스트랩, 설정 조합
 - `identity` — 사용자, 인증
-- `conversation` — 메시지, ConversationDay, Moment
+- `conversation` — 메시지, ConversationDay
 - `journal` — 일기 생성, 확정
 - `platform` — LLM 추상화, 보안, 관측가능성, 공통 인프라
-- `shared-kernel` — UserId, Money, DomainEvent, TimeProvider
+- `shared-kernel` — UserId, TimeProvider
 
 insight, gamification, notification은 해당 Stage에서 모듈 추가.
 논리적 Bounded Context는 설계 문서에 정의하되, Gradle 모듈은 구현 시 생성한다.
@@ -46,7 +46,7 @@ insight, gamification, notification은 해당 Stage에서 모듈 추가.
 - Shared Kernel 정의
 - LLM 추상화 인터페이스 (ConversationResponder, JournalGenerator)
 - JWT 인증 구조 (auth provider ID와 내부 UserId 분리)
-- Domain Event / Integration Event 타입 기반 구조 정의
+- Domain Event / Integration Event 구분 원칙 정의 (공통 베이스 타입은 첫 실제 이벤트 구현 시 정의 — Stage 0에 만든 `DomainEvent`/`EventEnvelope`는 사용처 없이 남아 #27에서 제거)
 - 로컬 개발 환경 (Docker Compose: PostgreSQL)
 
 **절대 하지 않을 것**
@@ -162,8 +162,7 @@ conversation.ai_usage_daily
 네트워크 단절 후 재시도해도 같은 clientMessageId면 중복 저장하지 않는다.
 
 **이 단계에서 Moment는 추출하지 않는다**
-- Moment 추출은 Insight/아카이브가 필요할 때 직접 호출하는 별도 기능이다 (Stage 2 "Moment 추출" 참고)
-- 지금은 메시지 원본 저장이 전부
+- 지금은 메시지 원본 저장이 전부 (Moment는 Stage 2 "Moment (보류)" 참고)
 
 **이 단계 완료 기준**
 - 실제 대화 흐름이 된다
@@ -184,7 +183,6 @@ conversation.ai_usage_daily
 Conversation
 - ConversationDay는 메시지 저장 시 자동 생성·갱신된다(Stage 1). 별도의 "마감" 상태나 배치는 없다 — 하루의 경계는 `local_date` + `timezone`으로 항상 계산 가능하므로, 명시적으로 상태를 전환하는 단계 자체가 불필요하다
 - Journal이 조회할 수 있도록 publicapi(`ConversationActivityQuery`)로 `findActivities(from, to)`(구간 내 원시 활동)와 `findMessages(userId, from, to)`(구간 원본 조회)를 노출한다. "diary day"나 "생성 대상" 같은 Journal의 개념은 이 인터페이스에 등장하지 않는다
-- Moment 추출은 여기서 실행되지 않는다 — Insight 배치나 아카이브 드릴다운이 필요할 때 직접 호출하는 별도 기능이다(아래 "Moment 추출" 참고)
 
 Journal
 - `DiaryPreference`(사용자별 `generationTime`)로 "하루를 어디서 끊고 싶은지"를 사용자별로 표현한다
@@ -204,7 +202,7 @@ journal.journals
 
 journal.generation_jobs
   generation_status TEXT  -- PENDING | PROCESSING | COMPLETED | FAILED
-  request_key TEXT UNIQUE -- conversationDayId + type + promptVersion
+  UNIQUE (user_id, diary_date) -- 최초 생성 Job 멱등키 (아래 스키마 참고)
   attempt_count INT
 ```
 
@@ -272,52 +270,13 @@ journal.generation_jobs
   UNIQUE (user_id, diary_date)  -- V1 최초 생성 Job에 대한 멱등키일 뿐, 영구 도메인 제약은 아니다.
                                  -- 재생성을 지원하게 되면 Job이 "일기 하나"가 아니라 "생성 시도 하나"를 뜻해야 하므로
                                  -- 그때 키 구성이 달라질 수 있다.
-
-conversation.moment_extraction_jobs
-  id                  UUID PK
-  conversation_day_id UUID
-  source_revision     BIGINT        -- 추출 시점에 읽은 ConversationDay 버전
-  request_key         TEXT UNIQUE   -- 멱등키: {conversationDayId}:{sourceRevision}
-  status              TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
-  attempt_count       INT DEFAULT 0
-  error_code          TEXT NULL
-  created_at          TIMESTAMPTZ
-
-conversation.moment_sets
-  id                       UUID PK
-  conversation_day_id      UUID
-  source_revision          BIGINT        -- 추출 시점에 읽은 ConversationDay의 버전
-  generation_id            UUID
-  model                    TEXT
-  prompt_version           TEXT
-  is_current               BOOLEAN DEFAULT true
-  superseded_at            TIMESTAMPTZ NULL
-  created_at               TIMESTAMPTZ
-
-conversation.moments
-  id              UUID PK
-  moment_set_id   UUID              -- MomentSet FK
-  conversation_day_id UUID
-  type            TEXT              -- 'MEAL', 'WORK', 'EXERCISE', ...
-  summary         TEXT
-  emotion         TEXT NULL
-  confidence      FLOAT NULL
-  occurred_at     TIMESTAMPTZ NULL
-  deleted_at      TIMESTAMPTZ NULL
 ```
 
-**Moment 추출**
+**Moment (보류)**
 
-Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 `MomentExtractionService.ensureExtracted(conversationDayId)`를 직접 호출한다. 마감에 자동으로 반응하지 않는다.
+Moment(구조화된 기억 조각: 시각/타입/감정)는 Insight(Stage 5, 감정 패턴 근거)와 아카이브(Stage 3, 사용자가 열람하는 "기억 조각")가 공유할 데이터이고, 원본은 저비용 모델이 읽고 비싼 모델에는 Moment를 넘기는 비용 분업 경로이기도 하다.
 
-- 호출 시점에 `conversation.messages`를 그 자리에서 다시 읽어 Moment를 추출한다 — 원본을 별도로 보관해둘 필요가 없다
-- 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 그대로 반환한다(멱등, 재호출 안전)
-- 게이팅(구독 여부 등)은 호출부(Insight, 아카이브)의 책임이다 — `MomentExtractionService`는 구독 개념을 모른다
-- 완료되면 `MomentsPreparedV1`을 발행한다
-
-Moment를 추출하는 이유:
-1. **모델 비용 분업** — 원본은 저비용 모델(Gemini)이 읽고, 비싼 모델의 입력 일부를 구조화된 Moment로 대체할 수 있는 경로를 만든다
-2. **재사용** — 같은 Moment를 Insight(Stage 5, 감정 패턴 분석 근거)와 아카이브(Stage 3, 사용자가 직접 열람하는 "기억 조각")가 공유한다
+2026-10-08(#27) 구현과 테이블을 제거했다. 호출부·구독자가 없는 선제 구현이었고, `conversation_day_id`(자정 기준)에 키가 묶여 일기(diary day 기준)와 구간이 어긋났으며, 같은 day의 두 번째 추출이 부분 유니크 인덱스 위반으로 항상 실패하는 버그도 있었다. 하루 경계 통일 이후 처음 쓰는 기능(Stage 3 또는 Stage 5)에서 키 구조·호출 시점·버전 관리(재추출 시 이전 결과 superseded 처리)를 다시 설계한다. 이전 설계는 git 이력(#21, #23)에 남아 있다.
 
 **Journal은 원본만으로 생성한다**
 
@@ -418,8 +377,6 @@ PENDING Job claim (PROCESSING으로 전이) → 커밋
 실패 시     → 새 트랜잭션 → Job FAILED, errorCode, attemptCount 기록 → 커밋
 ```
 
-Moment 추출(`MomentExtractionService`)은 스케줄러로 트리거되지 않으므로 이 구조가 적용되지 않는다 — 호출부(Insight, 아카이브)가 동기/비동기 여부를 직접 결정한다.
-
 **유실 가능성 인지**
 
 정상 경로는 매 회차 조회 구간이 서로 겹치게(lookback ≥ 스케줄 주기) 스캔하므로, 특정 회차가 서버 재시작 등으로 건너뛰어도 다음 회차의 겹치는 구간에서 그대로 다시 잡힌다. Job은 한 번 INSERT되면 UNIQUE 제약으로 중복 없이 보존되고 Executor가 이후 언제든 claim해서 실행한다. 장애가 lookback보다 길어지면 정상 경로만으로는 회수되지 않으므로, 그 상한을 reconciliation(위 참고)이 메운다 — 두 경로가 같은 `plan()`을 쓰므로 "정상 경로는 유실 없음, 장애는 각자 알아서"가 아니라 "관측 범위가 다른 같은 메커니즘이 상한 없이 복구한다"가 된다.
@@ -446,7 +403,7 @@ Moment 추출(`MomentExtractionService`)은 스케줄러로 트리거되지 않�
 - 태그 정확 일치 검색 (`journal.journal_tags` INDEX)
 - 제목/본문 기본 LIKE 검색
 - 일기 상세 조회 (원본 대화 연결)
-- 일기 상세에서 **Moment 드릴다운** — Journal은 "그날의 서사", Moment는 "추억의 조각". 일기 문장 ↔ 근거 Moment를 연결해 클릭하면 원본 조각(시각/타입/감정)을 볼 수 있게 한다
+- 일기 상세에서 **Moment 드릴다운** (Moment 재설계 포함, Stage 2 "Moment (보류)" 참고) — Journal은 "그날의 서사", Moment는 "추억의 조각". 일기 문장 ↔ 근거 Moment를 연결해 클릭하면 원본 조각(시각/타입/감정)을 볼 수 있게 한다
 - 연도별 아카이브
 
 **검색 전략**
@@ -544,7 +501,6 @@ gamification.point_ledger
 5. 데이터 유형별 삭제·보존 정책 — deleted_at + purge_after + Hard Delete 기준 정의
 6. PostgreSQL schema 분리 — 모듈별
 7. ConversationDay.source_revision — OUTDATED 판단 기준
-8. MomentSet 구조 — source_revision 기반 버전 관리
 
 ## 나중에 고쳐도 되는 것
 
@@ -572,8 +528,7 @@ gamification.point_ledger
 | GenerationPlanner 정상 경로 폴링 주기 / lookback 구체 수치 | 실제 트래픽 패턴 확인 후                  |
 | GenerationPlanner reconciliation 범위(일수) / 주기       | 실제 장애 패턴 확인 후                      |
 | 재생성 시 generation_jobs 키 구성 (Job:Journal = N:1 여부) | 재생성 기능 설계 시                       |
-| 점진적(구간별) Moment 추출로 전환할 시점                | 하루 대화량이 LLM 컨텍스트 한계에 근접할 때 |
-| Moment 추출의 실제 호출 시점 (동기 vs 배치, 누가 언제 호출하는지) | Insight(Stage 5) 또는 아카이브(Stage 3) 중 먼저 구현하는 쪽에서 |
+| Moment 재도입 시 키 구조·호출 시점 (동기 vs 배치)       | Insight(Stage 5) 또는 아카이브(Stage 3) 중 먼저 구현하는 쪽에서 |
 | Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시                 |
 | 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후                  |
 | 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시                      |
