@@ -1,6 +1,6 @@
 # 모음 (Moeum) — 아키텍처 결정 문서
 
-> 최종 업데이트: 2026-07-19 (v2)
+> 최종 업데이트: 2026-10-08
 
 ---
 
@@ -16,7 +16,7 @@ AI와 일상 대화를 통해 자연스럽게 기록하고, 하루가 끝날 때
 ```
 사용자 메시지 (Message, role=user)  = 원본 기록, 절대 불변, 가장 중요한 자산
 AI 대화 응답 (Message, role=assistant) = 사용자 경험상 대화이지만 기술적으로는 AI 파생 결과
-Moment                               = Conversation이 소유하는 핵심 도메인 데이터
+Moment                               = Conversation이 소유할 구조화된 기억 조각 (구현 보류, 아래 "Moment (보류)" 참고)
 AI 생성 결과 (Journal, Insight)      = 언제든 재생성 가능한 파생 데이터
 ```
 
@@ -42,8 +42,10 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 | 용도               | 모델                | 이유                             |
 |--------------------|---------------------|----------------------------------|
 | 일상 대화 반응     | Gemini Flash (계열) | 빈도 높음, 무료 티어로 개발 가능 |
-| Moment 추출 (배치) | Gemini Flash (계열) | 구조화 출력, 저비용              |
+| Moment 추출 (보류) | Gemini Flash (계열) | 구조화 출력, 저비용              |
 | 일기 생성 초안     | Claude Haiku 4.5    | 하루 1회, 한국어 품질            |
+
+일기 생성은 Claude Haiku가 목표 모델이지만, 결제 설정 전까지 기본값은 Gemini다(`moeum.journal.provider=gemini`). 두 구현 모두 존재하며 설정값만 바꾸면 전환된다.
 | Insight 생성       | Claude Sonnet 4.6   | 주·월 1회, 품질 우선             |
 
 모델 계열명(Flash)만 여기서 고정하고 구체 버전 alias는 설정값(`moeum.gemini.model`)으로 둔다 — Gemini 모델 alias는 구세대가 조기 폐기되는 경우가 있어(2026-08-08: `gemini-2.5-flash`가 신규 API 키에 404, `gemini-flash-latest`로 교체) 문서에 특정 버전을 못박지 않는다.
@@ -53,7 +55,7 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 - 컨텍스트 재전송 비용은 Gemini 2.5+의 암묵적 캐싱(implicit caching)이 자동으로 완화한다 — 별도 구현 필요 없음, 요청 최소 2,048 토큰 이상이고 이전 요청과 동일한 prefix일 때 자동 히트. 우리 요청 구조(고정 시스템 지시 + 계속 자라나는 대화 이력을 매번 그대로 재전송)가 이미 이 조건에 맞는 형태라 별도 코드 변경이 필요 없다. `GeminiConversationResponder`가 응답의 `cachedContentTokenCount`를 로그로 남겨 실제 히트 여부를 관측한다. 컨텍스트 자체를 깎지 않음(무료 티어도 핵심 기록 경험은 동일하게 유지)
 - 유저당 일일 메시지/토큰 quota를 하드 캡으로 둠(요금제와 무관, 어뷰징·버그로 인한 비용 폭주 방지 — Stage 6 요금제별 Rate Limit과는 별개의 안전장치)
 - 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 함
-- 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축)
+- 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축) — 아직 미구현(요청에 `maxOutputTokens` 미설정)
 - 시스템 프롬프트 최소화
 - 개발 중 전체를 Gemini 무료 티어로 처리
 
@@ -101,7 +103,7 @@ backend/
 │  ├─ messaging/        # 이벤트 발행/구독 인프라
 │  ├─ security/         # JWT, 인증 필터
 │  └─ observability/    # 로깅, 메트릭, 트레이싱
-└─ shared-kernel/       # UserId, Money, DomainEvent, TimeProvider
+└─ shared-kernel/       # UserId, TimeProvider (허용 목록은 PRINCIPLES.md 참고)
 ```
 
 ### 각 모듈 내부 레이어
@@ -206,15 +208,13 @@ GenerationExecutor (주기적 실행)
 
 Reconciliation이 며칠 전 활동을 뒤늦게 발견하면, 그 활동이 실제 발생했던 시점이 아니라 **발견(Planning) 시점의 현재 DiaryPreference**로 diary day가 계산된다 — preference를 시점별로 이력 관리(effective-dated)하지 않기로 한 결정의 직접적인 결과다. 정상 경로(5분 주기)가 정상 동작하는 한 발생 범위는 "정상 Planning 실패 + 그 사이 preference 변경 + reconciliation에서 뒤늦게 발견"이 겹치는 좁은 경우로 제한된다. V1에서는 이 리스크를 감수하고 effective-dated preference를 만들지 않는다.
 
-**Moment 추출 — Insight/아카이브가 필요할 때만 호출한다**
+**Moment (보류)**
 
-Moment 추출은 Conversation의 어떤 상태 변화에도 자동으로 반응하지 않는다. Insight 배치나 아카이브 드릴다운 API가 필요한 시점에 Conversation의 Moment 추출 기능을 호출하면, 그 순간 `conversation.messages`를 읽어 구조화된 Moment를 뽑고 저장한다. 같은 revision으로 이미 추출된 적 있으면 새로 추출하지 않고 기존 결과를 반환한다(멱등).
-
-게이팅(구독 여부 등)은 호출하는 쪽(Insight, 아카이브)의 책임이다. Moment 추출 기능 자체는 구독 개념을 모른다.
-
-**Moment 추출을 하는 이유**
+Moment는 원본 대화에서 뽑아낸 구조화된 "기억 조각"(시각, 타입, 감정)이다. 필요한 이유는 두 가지다.
 1. **모델 비용 분업**: 원본은 저비용 모델(Gemini Flash)이 읽고, 비싼 모델의 입력 일부를 구조화된 Moment로 대체할 수 있는 경로를 제공한다.
 2. **재사용**: 같은 Moment를 Insight(감정 패턴 분석 근거)와 아카이브(사용자가 직접 열람하는 "기억 조각")가 공유한다.
+
+2026-10-08(#27) 구현을 제거했다. 호출부·구독자가 없는 선제 구현이었고, `conversation_day_id`(자정 기준)에 키가 묶여 있어 일기(diary day 기준)와 구간이 맞지 않았다. 하루 경계 통일 이후, 실제로 처음 쓰는 기능(Stage 3 아카이브 드릴다운 또는 Stage 5 Insight)에서 키 구조와 호출 시점을 다시 설계한다. 그때도 지킬 원칙: Conversation이 소유·생성하고, 게이팅(구독 여부 등)은 호출하는 쪽의 책임이다.
 
 **모듈 의존 방향 (단방향 엄수)**
 
@@ -222,7 +222,7 @@ Moment 추출은 Conversation의 어떤 상태 변화에도 자동으로 반응�
 identity        ← 독립 (다른 모듈에 의존하지 않음)
 conversation    → shared-kernel(UserId)  [Identity API는 필요 시만]
 journal         → conversation.publicapi (ConversationActivityQuery) — 자체 스케줄러로 호출, 이벤트 구독 없음
-insight         → journal integration event, conversation의 Moment 조회 publicapi
+insight         → journal integration event, conversation의 Moment 조회 publicapi (Moment 재도입 시)
 gamification    → journal integration event
 notification    → 여러 모듈의 integration event
 ```
@@ -260,7 +260,7 @@ identity.accounts
 
 conversation.messages
 conversation.conversation_days
-conversation.moments
+conversation.moments          -- Moment 재도입 시
 
 journal.journals
 journal.journal_revisions
@@ -300,7 +300,8 @@ google_id   TEXT              -- auth 연결은 별도 칼럼
 AI가 생성한 모든 결과에 적용한다. 대화 응답(message.role=assistant)도 포함.
 
 ```
--- 일기/Insight: 별도 generation_log 테이블
+-- 일기/Insight: 생성 Job 테이블에 기록 (현재 journal.generation_jobs)
+-- 별도 통합 generation_log(호출 원장) 테이블은 아직 없음 — LLM 계층 재편 시 검토
 generation_id    UUID
 provider         TEXT        -- 'anthropic', 'google'
 model            TEXT        -- 'claude-haiku-4-5'
@@ -339,25 +340,17 @@ purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 
 ## AI 추상화 인터페이스
 
-provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`, `platform/llm/moment`로 서브패키지 분리(2026-07-25, moment는 2026-09-22 추가). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
+provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`로 서브패키지 분리(2026-07-25). `platform/llm/moment`는 2026-09-22 추가됐다가 #27에서 Moment와 함께 제거. `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
 
-세 서브패키지 모두 `RestClient` + Resilience4j `@CircuitBreaker` 구조로 구현되어 있다: `platform/llm/conversation`은 `GeminiConversationResponder`(Stage 1, #17), `platform/llm/moment`는 `GeminiMomentExtractor`, `platform/llm/journal`은 `GeminiJournalGenerator`/`ClaudeJournalGenerator` 둘 다 구현돼 있고 `moeum.journal.provider`(기본값 `gemini`)로 선택한다(Claude는 결제 설정 후 전환할 임시 대기 상태). 상세는 `DEVELOPMENT_STAGES.md` 참고.
+두 서브패키지 모두 `RestClient` + Resilience4j `@CircuitBreaker` 구조로 구현되어 있다: `platform/llm/conversation`은 `GeminiConversationResponder`(Stage 1, #17), `platform/llm/journal`은 `GeminiJournalGenerator`/`ClaudeJournalGenerator` 둘 다 구현돼 있고 `moeum.journal.provider`(기본값 `gemini`)로 선택한다(Claude는 결제 설정 후 전환할 임시 대기 상태). 상세는 `DEVELOPMENT_STAGES.md` 참고.
 
 ```kotlin
 // platform/llm/conversation
 interface ConversationResponder {
     fun respond(request: ConversationRequest): ConversationResponse
 }
-// ConversationRequest(messages: List<LlmMessage>, systemPrompt: String?)
+// ConversationRequest(messages: List<LlmMessage>) — 시스템 지시는 구현체가 소유
 // ConversationResponse(generationId, content, model, provider, promptVersion, inputTokens, outputTokens)
-
-// platform/llm/moment
-interface MomentExtractor {
-    fun extract(request: MomentExtractionRequest): MomentExtractionResponse
-}
-// MomentExtractionRequest(rawTranscript: String, localDate: String) — conversation.messages를 그 자리에서 읽어 만든 원본 텍스트
-// MomentExtractionResponse(generationId, moments: List<ExtractedMoment>, model, provider, promptVersion, inputTokens, outputTokens)
-// ExtractedMoment(type, summary, emotion?, confidence?, occurredAt?) — conversation.moments 스키마와 1:1 대응
 
 // platform/llm/journal
 interface JournalGenerator {
@@ -383,7 +376,7 @@ interface JournalGenerator {
 Aggregate가 발생시키는 이벤트. 타입 안전. 모듈 외부로 직접 노출하지 않는다.
 
 ```kotlin
-sealed class JournalDomainEvent : DomainEvent()
+sealed class JournalDomainEvent
 
 data class JournalConfirmed(
     val journalId: JournalId,
@@ -393,7 +386,7 @@ data class JournalConfirmed(
 ) : JournalDomainEvent()
 ```
 
-`DomainEvent`는 shared-kernel의 `abstract class DomainEvent`(eventId, occurredAt 자동 생성)를 상속한다. `sealed interface`가 아니라 `sealed class`를 쓰는 이유는 Kotlin에서 interface가 abstract class를 상속할 수 없기 때문이다 — `sealed class`로 exhaustiveness는 유지하면서 공통 필드 자동 생성 혜택을 그대로 받는다.
+이벤트 공통 베이스(eventId, occurredAt 등)는 아직 정의하지 않는다. Stage 0에 만들어 둔 shared-kernel의 `DomainEvent`/`EventEnvelope`는 사용처 없이 남아 있어 #27에서 제거했다. 첫 실제 이벤트(JournalConfirmed)나 Stage 4 Outbox를 구현할 때, 그 요구(직렬화 형태, 시각·ID 생성을 TimeProvider/UUIDv7로 주입)에 맞춰 정의한다.
 
 ### Integration Event (모듈 간 공개 계약)
 
@@ -424,7 +417,7 @@ data class JournalConfirmedV1(
 **핵심 이벤트 목록**
 
 ```
-MomentsPrepared             — Moment 추출 완료 (Insight/아카이브가 호출했을 때만 발생)
+MomentsPrepared             — Moment 추출 완료 (Moment 재도입 시)
 JournalGenerationRequested
 JournalGenerated
 JournalConfirmed
@@ -439,7 +432,6 @@ Integration Event는 생산자 모듈이 소유한다. shared-kernel에 업무 �
 
 ```
 journal/application/publicapi/events/JournalConfirmedV1.kt
-conversation/application/publicapi/events/MomentsPreparedV1.kt
 ```
 
 ---
@@ -468,7 +460,7 @@ traceId       — HTTP 요청 단위 (아직 미도입 — 별도 필터/MDC 설
 correlationId — 전체 업무 흐름. 이벤트 생성 시 기본값으로 새로 채우지 않는다 — 호출부가
                 자기 작업 단위(배치 실행, 요청 등)를 식별하는 값을 그대로 넘겨야 실제로
                 연결된다. 기본값을 두면 매번 새 값이 생겨 아무것도 추적할 수 없다.
-causationId   — 이전 이벤트 ID. 이벤트가 아니라 직접 호출로 트리거된 흐름(예: Moment 추출)은
+causationId   — 이전 이벤트 ID. 이벤트가 아니라 직접 호출로 트리거된 흐름(예: 사용자 요청으로 시작된 생성)은
                 이전 이벤트가 없으므로 null이 맞다
 eventId       — 현재 이벤트. 이건 매번 새로 생성하는 게 맞다(이 이벤트 자신의 식별자)
 userId        — 사용자

@@ -32,6 +32,9 @@ class GenerateConversationResponseServiceTest {
         override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> =
             messages.values.filter { it.conversationDayId == conversationDayId }
                 .sortedWith(compareBy({ it.occurredAt }, { it.id.value }))
+        override fun findByOccurredAtRange(from: Instant, to: Instant): List<Message> = error("not used in this test")
+        override fun findByUserIdAndOccurredAtRange(userId: UserId, from: Instant, to: Instant): List<Message> =
+            error("not used in this test")
         override fun save(message: Message): Message {
             messages[message.id] = message
             return message

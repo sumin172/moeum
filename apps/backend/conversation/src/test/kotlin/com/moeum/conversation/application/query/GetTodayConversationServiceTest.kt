@@ -22,7 +22,6 @@ class GetTodayConversationServiceTest {
         val days = mutableMapOf<Pair<UserId, LocalDate>, ConversationDay>()
         override fun findByUserIdAndLocalDate(userId: UserId, localDate: LocalDate): ConversationDay? =
             days[userId to localDate]
-        override fun findById(id: ConversationDayId): ConversationDay? = days.values.find { it.id == id }
         override fun save(conversationDay: ConversationDay): ConversationDay {
             days[conversationDay.userId to conversationDay.localDate] = conversationDay
             return conversationDay
@@ -45,6 +44,9 @@ class GetTodayConversationServiceTest {
         override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> =
             messages.filter { it.conversationDayId == conversationDayId }
                 .sortedWith(compareBy({ it.occurredAt }, { it.id.value }))
+        override fun findByOccurredAtRange(from: Instant, to: Instant): List<Message> = error("not used in this test")
+        override fun findByUserIdAndOccurredAtRange(userId: UserId, from: Instant, to: Instant): List<Message> =
+            error("not used in this test")
         override fun save(message: Message): Message {
             messages.add(message)
             return message

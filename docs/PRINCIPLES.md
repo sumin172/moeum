@@ -27,7 +27,7 @@ conversationQueryService.getMessagesForJournalGeneration(id)
 **4. 모든 사용자 입력에 timezone과 local_date를 저장한다**
 - 나중에 추가하면 과거 데이터 전부 재계산
 - Message의 timezone/local_date는 저장 시점에 한 번 계산되고 이후 절대 갱신되지 않는 값(불변 기록)
-- ConversationDay.timezone은 예외 — 메시지가 추가될 때마다 최신 관측 zone으로 갱신되는 living 값(Journal이 "이 zone 기준 자정이 지났는지" 판단하는 근거). 단 ConversationDay.local_date는 이때도 절대 재계산하지 않는다 — local_date가 그 row의 정체성(UNIQUE 키)이라 timezone과 분리해서 다뤄야 충돌 위험이 없다
+- ConversationDay.timezone은 예외 — 메시지가 추가될 때마다 최신 관측 zone으로 갱신되는 living 값(`ConversationActivityQuery`가 노출하고, Journal이 diary day를 계산하는 입력). 단 ConversationDay.local_date는 이때도 절대 재계산하지 않는다 — local_date가 그 row의 정체성(UNIQUE 키)이라 timezone과 분리해서 다뤄야 충돌 위험이 없다
 
 **5. UserId는 auth provider ID와 분리한다**
 - 내부 UUID를 별도 생성
@@ -47,7 +47,7 @@ provider, model, prompt_version, generation_id, generated_at
 
 **8. API 멱등성은 Stage 1부터 적용한다**
 - 메시지 생성: `UNIQUE (user_id, client_message_id)`
-- 일기 생성 Job: `UNIQUE (request_key)` — `{conversationDayId}:{sourceRevision}:{type}:{promptVersion}`
+- 일기 생성 Job: `UNIQUE (user_id, diary_date)` — 최초 생성 Job 멱등키 (재생성 지원 시 키 구성 재설계)
 - 모바일 재시도로 인한 중복은 서버에서 막는다
 
 **9. 삭제 정책은 데이터 유형별로 정의한다**
@@ -70,7 +70,7 @@ provider, model, prompt_version, generation_id, generated_at
 ## 단계별 도입 원칙
 
 **Stage 0에 구조 정의: Domain Event vs Integration Event**
-- Domain Event: 모듈 내부 sealed interface, 강타입
+- Domain Event: 모듈 내부 sealed class, 강타입 (공통 베이스 타입은 첫 실제 이벤트 구현 시 정의)
 - Integration Event: 모듈 외부 공개 계약, 명시적 버전, 생산자 모듈이 소유
 - `Map<String, Any>` payload는 Outbox 직렬화에만, 애플리케이션 코드에서는 금지
 - Integration Event 계약 버전 필드(eventVersion)는 처음부터 포함 (인프라 고도화와 무관)
@@ -146,9 +146,9 @@ DDD 레이어링(`domain/application/infrastructure/interfaces`)이 항상 1차 
 data class UserId(val value: UUID)
 data class Money(val amount: Long, val currency: String)
 interface TimeProvider
-abstract class DomainEvent
-data class EventEnvelope
 ```
+
+`DomainEvent`/`EventEnvelope` 같은 이벤트 공통 타입은 허용 대상이지만, 실제로 쓰는 이벤트가 생길 때 추가한다(사용처 없이 만들어 둔 것은 #27에서 제거).
 
 User Entity, Journal Entity, 도메인 enum 전체 → 각 모듈 내부에
 

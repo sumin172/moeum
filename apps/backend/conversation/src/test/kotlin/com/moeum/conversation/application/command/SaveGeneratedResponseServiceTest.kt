@@ -23,6 +23,9 @@ class SaveGeneratedResponseServiceTest {
         override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? = null
         override fun findPage(conversationDayId: ConversationDayId, after: MessageId?, limit: Int): List<Message> = emptyList()
         override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> = emptyList()
+        override fun findByOccurredAtRange(from: Instant, to: Instant): List<Message> = error("not used in this test")
+        override fun findByUserIdAndOccurredAtRange(userId: UserId, from: Instant, to: Instant): List<Message> =
+            error("not used in this test")
         override fun save(message: Message): Message {
             messages[message.id] = message
             return message

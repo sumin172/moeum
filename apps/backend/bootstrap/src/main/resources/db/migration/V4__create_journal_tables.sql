@@ -6,7 +6,7 @@ CREATE TABLE journal.diary_preferences (
 );
 
 -- diary_date: Journal이 계산한 diary day. ConversationDay.local_date와 다른 개념(generation_jobs.diary_date와 동일 정의).
--- UNIQUE(user_id, diary_date)는 V1 한정(재생성 지원 시 재검토, docs/DEVELOPMENT_STAGES.md 참고).
+-- UNIQUE(user_id, diary_date)는 재생성 미지원 단계 한정(재생성 지원 시 재검토, docs/DEVELOPMENT_STAGES.md 참고).
 CREATE TABLE journal.journals (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
@@ -38,7 +38,7 @@ CREATE INDEX idx_journal_journal_revisions_journal_id ON journal.journal_revisio
 
 -- window_start/window_end/timezone_at_scheduling/generation_time_at_scheduling: Planning 시점에 확정되어
 -- 이후 preference/timezone 변경으로 재계산되지 않는다(docs/ARCHITECTURE.md invariant 3 참고).
--- UNIQUE(user_id, diary_date)는 V1 최초 생성 Job에 대한 멱등키일 뿐 영구 제약이 아니다.
+-- UNIQUE(user_id, diary_date)는 최초 생성 Job에 대한 멱등키일 뿐(재생성 미지원 단계) 영구 제약이 아니다.
 CREATE TABLE journal.generation_jobs (
     id UUID PRIMARY KEY,
     journal_id UUID NULL,

@@ -33,7 +33,7 @@ class GeminiConversationResponder(
     @CircuitBreaker(name = "geminiConversationClient", fallbackMethod = "fallback")
     override fun respond(request: ConversationRequest): ConversationResponse {
         val requestBody = GeminiGenerateContentRequest(
-            systemInstruction = GeminiSystemInstruction(parts = listOf(GeminiPart(request.systemPrompt ?: SYSTEM_INSTRUCTION))),
+            systemInstruction = GeminiSystemInstruction(parts = listOf(GeminiPart(SYSTEM_INSTRUCTION))),
             contents = request.messages.map { it.toGeminiContent() },
         )
 
