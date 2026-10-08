@@ -34,6 +34,7 @@ import java.util.UUID
     AbstractIntegrationTest.FakeGoogleVerifierConfig::class,
     AbstractIntegrationTest.FakeConversationResponderConfig::class,
     AbstractIntegrationTest.FakeLlmProviderConfig::class,
+    AbstractIntegrationTest.EventRecorderConfig::class,
 )
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -45,6 +46,8 @@ import java.util.UUID
         "moeum.llm.routes.integration-test.provider=fake",
         "moeum.llm.routes.integration-test.model=fake-model",
         "moeum.llm.routes.integration-test.max-output-tokens=100",
+        // 일기 생성도 실제 provider 대신 FakeLlmProvider로(생성 흐름을 끝까지 검증하기 위함)
+        "moeum.llm.routes.journal-generation.provider=fake",
     ],
 )
 abstract class AbstractIntegrationTest {
@@ -112,5 +115,11 @@ abstract class AbstractIntegrationTest {
     class FakeLlmProviderConfig {
         @Bean
         fun fakeLlmProvider(): FakeLlmProvider = FakeLlmProvider()
+    }
+
+    @TestConfiguration
+    class EventRecorderConfig {
+        @Bean
+        fun integrationEventRecorder(): IntegrationEventRecorder = IntegrationEventRecorder()
     }
 }

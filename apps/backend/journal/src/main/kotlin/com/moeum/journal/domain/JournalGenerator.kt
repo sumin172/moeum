@@ -14,8 +14,7 @@ interface JournalGenerator {
 data class GeneratedJournal(
     val generationId: UUID,
     val title: String,
-    // journals.content(JSONB)에 그대로 저장되는 JSON
-    val content: String,
+    val body: String,
     val model: String,
     val provider: String,
     val promptVersion: String,

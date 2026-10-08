@@ -15,6 +15,7 @@ import java.time.Instant
 class GenerationPlanner(
     private val conversationActivityQuery: ConversationActivityQuery,
     private val generationJobRepository: GenerationJobRepository,
+    private val markJournalOutdatedService: MarkJournalOutdatedService,
     private val timeProvider: TimeProvider,
 ) {
     private val log = LoggerFactory.getLogger(GenerationPlanner::class.java)
@@ -25,6 +26,10 @@ class GenerationPlanner(
     fun plan(from: Instant, to: Instant, planningType: String) {
         val activeDays = conversationActivityQuery.findActiveDays(from, to)
         val createdCount = activeDays.count { planJob(it) }
+        // 이미 확정된 하루에 새 발화가 생겼는지도 같은 관측으로 판단한다(Job은 그대로 두고 일기만 OUTDATED)
+        activeDays.forEach { day ->
+            day.lastUserMessageId?.let { markJournalOutdatedService.markIfMissed(day.userId, day.dayDate, it) }
+        }
 
         log.info(
             "Journal 생성 Planning 완료: planningType={}, from={}, to={}, dayCount={}, createdCount={}, duplicateCount={}",

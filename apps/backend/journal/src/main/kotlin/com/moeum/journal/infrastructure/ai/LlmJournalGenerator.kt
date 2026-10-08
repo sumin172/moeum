@@ -53,7 +53,7 @@ class LlmJournalGenerator(
         return GeneratedJournal(
             generationId = result.generationId,
             title = payload.title,
-            content = jsonMapper.writeValueAsString(JournalContentPayload(body = payload.body)),
+            body = payload.body,
             model = result.model,
             provider = result.provider,
             promptVersion = result.promptVersion,
@@ -67,7 +67,3 @@ private fun buildTranscript(diaryDate: LocalDate, messages: List<MessageSnapshot
     "날짜: $diaryDate\n" + messages.joinToString("\n") { "[${it.occurredAt}] ${it.role}: ${it.content}" }
 
 private data class JournalPayload(val title: String, val body: String)
-
-// journals.content(JSONB)에 그대로 저장되는 최소 구조 — title은 journals.title 컬럼으로 분리 저장하므로 제외한다.
-// 실제 소비처(아카이브 상세 조회)가 생기기 전까지는 이 이상 구조화하지 않는다.
-private data class JournalContentPayload(val body: String)

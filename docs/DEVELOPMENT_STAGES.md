@@ -198,7 +198,11 @@ Journal
 - `JournalGenerator`(journal 포트, 구현은 `LlmJournalGenerator`)로 일기 초안 생성 — provider·모델은 `moeum.llm.routes.journal-generation`으로 선택(현재 Gemini). Claude는 provider 구현만 있고 결제 설정 후 전환·실호출 검증 예정
 - 구조화 출력 (현재는 `{"title", "body"}` 최소 구조, JSON 모드 + 파싱 실패 시 재시도로 보장. JSON Schema 강제 등 본격 구조화는 소비처(아카이브 상세, Stage 3)가 생긴 뒤 설계 — Stage 3 "할 것" 참고)
 - AI 생성 메타데이터 저장
-- 일기 확정
+- 일기 조회·수정·확정 API (#41) — `GET /api/journals/{diaryDate}`(일기 + 생성 상태), `PUT /api/journals/{diaryDate}`(수정, version 필수), `POST /api/journals/{diaryDate}/confirm`(확정), `POST /api/journals/{diaryDate}/generation-attempts`(실패한 생성 다시 요청)
+  - 수정은 구독 기능(`Feature.JOURNAL_EDIT`, free는 403). 조회·확정·생성 재시도는 모두 가능 — `ARCHITECTURE.md` "기능 권한과 구독"
+  - 수정하면 DRAFT로 돌아가 다시 확정해야 한다. 수정 내용은 리비전(edited_by = USER)으로 남는다
+  - 확정 시 `JournalConfirmedV1` 발행(in-process). 이미 확정된 일기를 다시 확정하면 아무것도 하지 않는다
+  - 다른 기기에서 먼저 바뀌었으면(요청 version이 낡음, 또는 동시 저장) 409
 
 **상태 분리 — Journal 생명주기 ≠ 생성 Job 상태**
 
@@ -302,6 +306,10 @@ Moment(구조화된 기억 조각: 시각/타입/감정)는 Insight(Stage 5, 감
 - occurredAt을 클라이언트 작성 시각으로 받으므로, Journal이 이미 그 날짜의 일기를 생성한 뒤에 오프라인 큐잉됐던 메시지가 도착하는 상황이 구조적으로 항상 가능하다(비행기 모드 등으로 지연이 몇 시간~며칠까지 벌어질 수 있음)
 - 이 경우도 저장은 그대로 허용하고, 위 OUTDATED 전환 정책으로 처리한다
 
+**OUTDATED 반영 경로 (#41)**
+- conversation은 journal을 알 수 없으므로(단방향 의존) 이벤트 구독 대신, Journal Planner가 "새 메시지가 저장된 하루"를 볼 때(`ActiveDay.lastUserMessageId`) 확정 일기의 `source_last_message_id`와 비교해 OUTDATED로 바꾼다. 반영까지 최대 Planner 주기(5분)
+- 기준은 유저 메시지만 — 확정 뒤 늦게 도착한 AI 응답(작업 재시도)으로 OUTDATED가 되지 않게 한다
+
 **미확정 일기 정책 (결정 필요)**
 - 선택지: N일 후 자동 확정 or 영구 DRAFT 유지
 - Insight 집계에 DRAFT 포함 여부
@@ -387,6 +395,8 @@ Job claim (PROCESSING, attempt_count+1, version+1, 리스) → 커밋
 - AI 생성 실패 시 FAILED 상태로 기록되고 재시도 가능하다
 - 모바일/웹 동시 수정 시 @Version 낙관적 락이 충돌을 감지한다
 - JournalConfirmed Integration Event가 발행된다 (현재는 in-process)
+
+2026-10-08: 위 기준 모두 통합 테스트로 충족 확인(#41 `JournalFlowIntegrationTest` — 대화 → 생성 → 조회 → free 수정 거부 → 확정 + JournalConfirmedV1 → 구독 지급 → 낡은 version 409 → 수정 → 재확정 → 새 메시지 → OUTDATED). 생성 실패는 자동 재시도(#31) + 사용자 재요청(#41). 실제 LLM으로의 기동 스모크 테스트는 남아 있다. 남은 결정 항목: 미확정 일기 자동 확정 여부.
 
 ---
 

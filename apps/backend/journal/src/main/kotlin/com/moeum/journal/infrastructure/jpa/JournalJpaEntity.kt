@@ -38,6 +38,8 @@ class JournalJpaEntity(
     @Version
     @Column(nullable = false)
     var version: Long = 0,
+    @Column(name = "source_last_message_id")
+    val sourceLastMessageId: UUID? = null,
     @Column(name = "confirmed_at")
     val confirmedAt: Instant? = null,
     @Column(name = "deleted_at")

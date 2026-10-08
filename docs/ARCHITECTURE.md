@@ -233,6 +233,7 @@ Moment는 원본 대화에서 뽑아낸 구조화된 "기억 조각"(시각, 타
 identity        ← 독립 (다른 모듈에 의존하지 않음)
 conversation    → shared-kernel(UserId)  [Identity API는 필요 시만]
 journal         → conversation.publicapi (ConversationActivityQuery) — 자체 스케줄러로 호출, 이벤트 구독 없음
+                → identity.publicapi (FeatureAccessQuery) — 일기 수정 권한(구독 기능) 확인
 insight         → journal integration event, conversation의 Moment 조회 publicapi (Moment 재도입 시)
 gamification    → journal integration event
 notification    → 여러 모듈의 integration event
@@ -244,8 +245,26 @@ notification    → 여러 모듈의 integration event
 
 Identity publicapi 호출이 필요한 경우만:
 - 사용자 탈퇴 여부 확인
-- 구독 상태 실시간 검증
+- 구독 상태 실시간 검증 — `FeatureAccessQuery` (아래 "기능 권한과 구독")
 - 동의 정보 조회
+
+**기능 권한과 구독 (2026-10-08, #41)**
+
+```kotlin
+// identity/application/publicapi
+enum class Feature { JOURNAL_EDIT /* 앞으로 유료 기능은 여기에 추가 */ }
+interface FeatureAccessQuery { fun isEnabled(userId: UserId, feature: Feature): Boolean }
+```
+
+- 업무 모듈은 구독 등급이 아니라 **기능**을 묻는다 — 요금제 구성(체험판·프로모션)이 바뀌어도 업무 코드는 그대로다.
+- 요금제별 기능은 설정(`moeum.features.plans`, 기본: FREE = 없음, PREMIUM = JOURNAL_EDIT).
+- 구독(`identity.subscriptions`)은 "누가 언제까지 어떤 요금제인가"만 표현하고 결제와 무관하다. 구독이 없으면 FREE. `source`: COMPLIMENTARY(결제 없이 지급) | PAID(Stage 6).
+- 구독 상태는 JWT에 넣지 않고 매번 조회한다(PRINCIPLES #10).
+- **무료 구독 지급** (관리자 도구 전까지): `GrantComplimentarySubscriptionService.grant(userId, Plan.PREMIUM, endsAt?)` 또는 SQL —
+  ```sql
+  INSERT INTO identity.subscriptions (id, user_id, plan, source, starts_at, ends_at, created_at)
+  VALUES (gen_random_uuid(), '<user-id>', 'PREMIUM', 'COMPLIMENTARY', now(), NULL, now());  -- ends_at NULL = 무기한
+  ```
 
 JWT claim 구조는 `platform/security`에서 정의한다.
 
@@ -283,7 +302,8 @@ Journal 결과를 Conversation이 알아야 한다면 이벤트로 역방향 전
 
 ```
 identity.users
-identity.accounts
+identity.auth_sessions
+identity.subscriptions
 
 conversation.messages
 conversation.day_preferences
@@ -443,25 +463,27 @@ data class JournalConfirmed(
 ) : JournalDomainEvent()
 ```
 
-이벤트 공통 베이스(eventId, occurredAt 등)는 아직 정의하지 않는다. Stage 0에 만들어 둔 shared-kernel의 `DomainEvent`/`EventEnvelope`는 사용처 없이 남아 있어 #27에서 제거했다. 첫 실제 이벤트(JournalConfirmed)나 Stage 4 Outbox를 구현할 때, 그 요구(직렬화 형태, 시각·ID 생성을 TimeProvider/UUIDv7로 주입)에 맞춰 정의한다.
+Domain Event 공통 베이스는 아직 두지 않는다(모듈 내부 이벤트가 생길 때 정의). Integration Event는 첫 실제 이벤트(`JournalConfirmedV1`, #41)와 함께 공통 계약 `shared-kernel/IntegrationEvent`(eventId, eventType, eventVersion, occurredAt, correlationId, causationId)를 정의했다 — 시각은 TimeProvider, eventId는 UUIDv7로 생산자가 채운다.
 
 ### Integration Event (모듈 간 공개 계약)
 
 다른 모듈 또는 향후 다른 서비스에 공개하는 계약. 명시적 버전 관리.
 
 ```kotlin
+// shared-kernel — 모든 Integration Event의 공통 계약
+interface IntegrationEvent { eventId; eventType; eventVersion; occurredAt; correlationId; causationId? }
+
+// journal/application/publicapi/events — 생산자 모듈이 소유
 data class JournalConfirmedV1(
-    val eventId: UUID,
-    val eventType: String = "JournalConfirmed",
-    val eventVersion: Int = 1,
-    val occurredAt: Instant,
-    val correlationId: UUID,
-    val causationId: UUID?,
+    override val eventId: UUID,          // UUIDv7, 소비자 멱등 기준
+    override val occurredAt: Instant,
+    override val correlationId: UUID,    // 확정 요청마다 새로 — 흐름을 시작한 쪽이 넘긴다
+    override val causationId: UUID? = null,
     val journalId: UUID,
     val userId: UUID,
-    val revision: Long,
-    val localDate: LocalDate
-)
+    val diaryDate: LocalDate,
+    val revision: Int,                   // 수정 후 재확정하면 같은 일기로 다시 발행된다 — 소비자는 journalId(+revision)로 중복 판단
+) : IntegrationEvent  // eventType = "JournalConfirmed", eventVersion = 1
 ```
 
 `Map<String, Any>`는 Outbox 직렬화 결과에만 사용. 애플리케이션 코드에서는 타입 있는 이벤트를 사용한다.

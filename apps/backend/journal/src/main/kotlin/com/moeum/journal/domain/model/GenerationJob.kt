@@ -54,6 +54,9 @@ data class GenerationJob(
     fun failedPermanently(errorCode: String, now: Instant): GenerationJob =
         copy(state = state.failedPermanently(errorCode), updatedAt = now)
 
+    // 재시도를 모두 소진한 작업을 사용자가 다시 요청한 경우
+    fun restarted(now: Instant): GenerationJob = copy(state = state.restarted(now), updatedAt = now)
+
     companion object {
         fun pending(userId: UserId, diaryDate: LocalDate, dayEnd: Instant, now: Instant): GenerationJob =
             GenerationJob(

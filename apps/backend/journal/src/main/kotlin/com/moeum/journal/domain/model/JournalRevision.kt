@@ -12,7 +12,7 @@ data class JournalRevision(
     val userId: UserId,
     val revisionNo: Int,
     val title: String,
-    val content: String,
+    val body: String,
     val editedBy: JournalRevisionEditor,
     val createdAt: Instant,
 ) {
@@ -23,7 +23,7 @@ data class JournalRevision(
             userId: UserId,
             revisionNo: Int,
             title: String,
-            content: String,
+            body: String,
             editedBy: JournalRevisionEditor,
             now: Instant,
         ): JournalRevision =
@@ -33,7 +33,7 @@ data class JournalRevision(
                 userId = userId,
                 revisionNo = revisionNo,
                 title = title,
-                content = content,
+                body = body,
                 editedBy = editedBy,
                 createdAt = now,
             )

@@ -24,7 +24,7 @@ class ConversationActivityQueryServiceTest {
     fun `구간 안에 저장된 메시지를 사용자별 하루로 묶고, 하루가 끝나는 시각을 함께 준다`() {
         val day = LocalDate.of(2026, 8, 2)
         messageRepository.append(userMessage(userId, "a", Instant.parse("2026-08-02T01:00:00Z"), day))
-        messageRepository.append(userMessage(userId, "b", Instant.parse("2026-08-02T02:00:00Z"), day))
+        val last = messageRepository.append(userMessage(userId, "b", Instant.parse("2026-08-02T02:00:00Z"), day))
 
         val activeDays = service.findActiveDays(Instant.parse("2026-08-02T00:00:00Z"), Instant.parse("2026-08-02T03:00:00Z"))
 
@@ -32,6 +32,8 @@ class ConversationActivityQueryServiceTest {
         assertThat(activeDays.single().dayDate).isEqualTo(day)
         // 기본 경계 02:00 KST → 8/2 하루는 8/3 02:00 KST(= 8/2 17:00Z)에 끝난다
         assertThat(activeDays.single().dayEnd).isEqualTo(Instant.parse("2026-08-02T17:00:00Z"))
+        // OUTDATED 판단용 — 이번 구간 유저 메시지 중 가장 나중에 저장된 것
+        assertThat(activeDays.single().lastUserMessageId).isEqualTo(last.id.value)
     }
 
     @Test

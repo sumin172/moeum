@@ -9,6 +9,8 @@ CREATE TABLE journal.journals (
     content JSONB NOT NULL,
     current_revision INT NOT NULL DEFAULT 1,
     version BIGINT NOT NULL DEFAULT 0,
+    -- 생성에 쓴 원본 중 가장 큰 유저 메시지 id(UUIDv7). 확정 후 그 하루에 이보다 큰 id의 유저 메시지가 생기면 OUTDATED
+    source_last_message_id UUID NULL,
     confirmed_at TIMESTAMPTZ NULL,
     deleted_at TIMESTAMPTZ NULL,
     purge_after TIMESTAMPTZ NULL,

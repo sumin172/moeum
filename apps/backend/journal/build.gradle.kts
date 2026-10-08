@@ -26,6 +26,8 @@ dependencies {
     implementation(project(":shared-kernel"))
     implementation(project(":platform"))
     implementation(project(":conversation"))
+    // 기능 권한(FeatureAccessQuery) — identity publicapi만 쓴다
+    implementation(project(":identity"))
 
     implementation(libs.spring.boot.starter.data.jpa)
     // LLM 응답(JSON) 파싱. 런타임 JsonMapper는 bootstrap의 web starter가 제공한다.

@@ -14,6 +14,8 @@ class FakeLlmProvider : LlmProvider {
 
     override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
         if (request.messages.any { it.content == "fail" }) throw LlmException("테스트용 실패")
-        return LlmProviderResult(text = "ok", model = route.model, inputTokens = 7, outputTokens = 3, finishReason = "STOP")
+        // 일기 생성은 JSON 응답을 기대한다
+        val text = if (request.purpose == "journal-generation") """{"title":"테스트 일기","body":"오늘의 기록"}""" else "ok"
+        return LlmProviderResult(text = text, model = route.model, inputTokens = 7, outputTokens = 3, finishReason = "STOP")
     }
 }

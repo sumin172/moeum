@@ -4,6 +4,7 @@ import com.moeum.conversation.application.publicapi.ActiveDay
 import com.moeum.conversation.application.publicapi.ConversationActivityQuery
 import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.journal.support.InMemoryGenerationJobRepository
+import com.moeum.journal.support.InMemoryJournalRepository
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
@@ -30,8 +31,9 @@ class GenerationPlannerTest {
         val dayEnd = Instant.parse("2026-08-02T17:00:00Z")
         val jobRepository = InMemoryGenerationJobRepository()
         val planner = GenerationPlanner(
-            FakeActivityQuery(listOf(ActiveDay(userId, LocalDate.of(2026, 8, 2), dayEnd))),
+            FakeActivityQuery(listOf(ActiveDay(userId, LocalDate.of(2026, 8, 2), dayEnd, lastUserMessageId = null))),
             jobRepository,
+            MarkJournalOutdatedService(InMemoryJournalRepository()),
             timeProvider,
         )
 
@@ -45,9 +47,9 @@ class GenerationPlannerTest {
 
     @Test
     fun `같은 하루를 다시 계획하면 기존 Job을 그대로 두고 새로 만들지 않는다`() {
-        val day = ActiveDay(userId, LocalDate.of(2026, 8, 2), Instant.parse("2026-08-02T17:00:00Z"))
+        val day = ActiveDay(userId, LocalDate.of(2026, 8, 2), Instant.parse("2026-08-02T17:00:00Z"), lastUserMessageId = null)
         val jobRepository = InMemoryGenerationJobRepository()
-        val planner = GenerationPlanner(FakeActivityQuery(listOf(day)), jobRepository, timeProvider)
+        val planner = GenerationPlanner(FakeActivityQuery(listOf(day)), jobRepository, MarkJournalOutdatedService(InMemoryJournalRepository()), timeProvider)
 
         planner.plan(now.minusSeconds(600), now, "RECENT")
         planner.plan(now.minusSeconds(3 * 86400), now, "RECONCILIATION")

@@ -43,7 +43,8 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
 
         val journal = saveGeneratedJournalService.save(
             job,
-            GeneratedJournal(UUID.randomUUID(), "제목", """{"body":"본문"}""", "m", "p", "v", 10, 5),
+            GeneratedJournal(UUID.randomUUID(), "제목", "본문", "m", "p", "v", 10, 5),
+            sourceLastMessageId = null,
         )
 
         val revisionOwner = jdbcTemplate.queryForObject(
@@ -54,5 +55,10 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
             "SELECT status FROM journal.generation_jobs WHERE id = ?", String::class.java, job.id.value,
         )
         assertThat(jobStatus).isEqualTo(JobStatus.COMPLETED.name)
+        // 본문은 JSONB {"body"} 구조로 저장된다
+        val content = jdbcTemplate.queryForObject(
+            "SELECT content->>'body' FROM journal.journals WHERE id = ?", String::class.java, journal.id.value,
+        )
+        assertThat(content).isEqualTo("본문")
     }
 }
