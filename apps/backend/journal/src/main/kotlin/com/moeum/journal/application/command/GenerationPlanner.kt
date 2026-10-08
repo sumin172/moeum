@@ -1,33 +1,20 @@
 package com.moeum.journal.application.command
 
+import com.moeum.conversation.application.publicapi.ActiveDay
 import com.moeum.conversation.application.publicapi.ConversationActivityQuery
-import com.moeum.journal.domain.DiaryPreferenceRepository
-import com.moeum.journal.domain.DiaryWindow
 import com.moeum.journal.domain.GenerationJobRepository
-import com.moeum.journal.domain.calculateDiaryWindow
-import com.moeum.journal.domain.model.DiaryPreference
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.kernel.TimeProvider
-import com.moeum.kernel.UserId
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalTime
-
-private data class PlannedBucket(
-    val userId: UserId,
-    val timezone: String,
-    val generationTime: LocalTime,
-    val window: DiaryWindow,
-)
 
 @Service
 class GenerationPlanner(
     private val conversationActivityQuery: ConversationActivityQuery,
-    private val diaryPreferenceRepository: DiaryPreferenceRepository,
     private val generationJobRepository: GenerationJobRepository,
     private val timeProvider: TimeProvider,
 ) {
@@ -35,44 +22,23 @@ class GenerationPlanner(
 
     // from/to는 호출부가 결정한다(Planner가 now()를 스스로 들여다보지 않는다). "최근 활동 빠르게 반영"과
     // "장애로 놓친 것 회수"는 이 함수를 다른 범위로 호출하는 것뿐, 별도 로직이 아니다.
+    // 하루의 경계는 Conversation이 메시지 저장 시점에 이미 정했다 — Planner는 그 하루마다 Job을 만들 뿐이다.
     fun plan(from: Instant, to: Instant, planningType: String) {
-        val activities = conversationActivityQuery.findActivities(from, to)
-        val generationTimeByUser = activities.map { it.userId }.distinct()
-            .associateWith { generationTimeOf(it) }
-
-        val buckets = activities
-            .map { activity ->
-                val generationTime = generationTimeByUser.getValue(activity.userId)
-                PlannedBucket(
-                    userId = activity.userId,
-                    timezone = activity.timezone,
-                    generationTime = generationTime,
-                    window = calculateDiaryWindow(activity.occurredAt, activity.timezone, generationTime),
-                )
-            }
-            .distinctBy { it.userId to it.window.diaryDate }
-
-        val createdCount = buckets.count { planJob(it) }
+        val activeDays = conversationActivityQuery.findActiveDays(from, to)
+        val createdCount = activeDays.count { planJob(it) }
 
         log.info(
-            "Journal 생성 Planning 완료: planningType={}, from={}, to={}, activityCount={}, bucketCount={}, createdCount={}, duplicateCount={}",
-            planningType, from, to, activities.size, buckets.size, createdCount, buckets.size - createdCount,
+            "Journal 생성 Planning 완료: planningType={}, from={}, to={}, dayCount={}, createdCount={}, duplicateCount={}",
+            planningType, from, to, activeDays.size, createdCount, activeDays.size - createdCount,
         )
     }
 
-    private fun generationTimeOf(userId: UserId): LocalTime =
-        diaryPreferenceRepository.findByUserId(userId)?.generationTime ?: DiaryPreference.DEFAULT_GENERATION_TIME
-
     // UNIQUE(user_id, diary_date) 충돌은 "이미 계획됨"을 뜻하는 정상 경로다 — 예외가 아니라 흐름 제어로 다룬다.
-    private fun planJob(bucket: PlannedBucket): Boolean {
+    private fun planJob(day: ActiveDay): Boolean {
         val job = GenerationJob.pending(
-            userId = bucket.userId,
-            diaryDate = bucket.window.diaryDate,
-            windowStart = bucket.window.windowStart,
-            windowEnd = bucket.window.windowEnd,
-            scheduledAt = bucket.window.windowEnd,
-            timezoneAtScheduling = bucket.timezone,
-            generationTimeAtScheduling = bucket.generationTime,
+            userId = day.userId,
+            diaryDate = day.dayDate,
+            scheduledAt = day.dayEnd,
             now = timeProvider.now(),
         )
         return try {

@@ -43,7 +43,7 @@ class GenerationExecutor(
         }
 
         try {
-            val messages = conversationActivityQuery.findMessages(job.userId, job.windowStart, job.windowEnd)
+            val messages = conversationActivityQuery.findMessages(job.userId, job.diaryDate)
             val generation = journalGenerator.generate(
                 JournalGenerationRequest(rawTranscript = buildTranscript(messages), localDate = job.diaryDate.toString()),
             )

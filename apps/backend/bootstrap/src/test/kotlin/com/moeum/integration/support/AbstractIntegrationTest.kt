@@ -2,18 +2,25 @@ package com.moeum.integration.support
 
 import com.moeum.identity.domain.GoogleIdTokenVerifierPort
 import com.moeum.identity.domain.model.GoogleProfile
+import com.moeum.identity.interfaces.dto.GoogleLoginRequest
+import com.moeum.identity.interfaces.dto.GoogleLoginResponse
 import com.moeum.platform.llm.conversation.ConversationRequest
 import com.moeum.platform.llm.conversation.ConversationResponder
 import com.moeum.platform.llm.conversation.ConversationResponse
+import org.assertj.core.api.Assertions.assertThat
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.resttestclient.TestRestTemplate
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate
+import org.springframework.boot.resttestclient.postForEntity
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
@@ -31,6 +38,21 @@ abstract class AbstractIntegrationTest {
 
     @Autowired
     lateinit var restTemplate: TestRestTemplate
+
+    protected fun issueJwt(): String {
+        val response = restTemplate.postForEntity<GoogleLoginResponse>(
+            "/api/auth/google",
+            GoogleLoginRequest(idToken = "dummy-${UUID.randomUUID()}"),
+        )
+        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+        return response.body!!.jwt
+    }
+
+    protected fun authHeaders(jwt: String): HttpHeaders =
+        HttpHeaders().apply {
+            setBearerAuth(jwt)
+            contentType = MediaType.APPLICATION_JSON
+        }
 
     companion object {
         // Testcontainers Singleton Container 패턴.

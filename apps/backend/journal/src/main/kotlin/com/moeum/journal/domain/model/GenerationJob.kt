@@ -3,7 +3,6 @@ package com.moeum.journal.domain.model
 import com.moeum.kernel.UserId
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.util.UUID
 
 enum class GenerationJobStatus { PENDING, PROCESSING, COMPLETED, FAILED }
@@ -12,13 +11,10 @@ data class GenerationJob(
     val id: GenerationJobId,
     val journalId: JournalId?,
     val userId: UserId,
+    // Conversation의 dayDate(사용자 하루 경계 기준 하루)와 같은 값
     val diaryDate: LocalDate,
-    val windowStart: Instant,
-    val windowEnd: Instant,
+    // 이 하루가 끝나는 시각 — 이후 Executor가 claim할 수 있다
     val scheduledAt: Instant,
-    // Planning 시점에 확정되며, 이후 preference/timezone 변경으로 재계산되지 않는다(docs/ARCHITECTURE.md invariant 3).
-    val timezoneAtScheduling: String,
-    val generationTimeAtScheduling: LocalTime,
     val status: GenerationJobStatus,
     val attemptCount: Int,
     val provider: String? = null,
@@ -60,11 +56,7 @@ data class GenerationJob(
         fun pending(
             userId: UserId,
             diaryDate: LocalDate,
-            windowStart: Instant,
-            windowEnd: Instant,
             scheduledAt: Instant,
-            timezoneAtScheduling: String,
-            generationTimeAtScheduling: LocalTime,
             now: Instant,
         ): GenerationJob =
             GenerationJob(
@@ -72,11 +64,7 @@ data class GenerationJob(
                 journalId = null,
                 userId = userId,
                 diaryDate = diaryDate,
-                windowStart = windowStart,
-                windowEnd = windowEnd,
                 scheduledAt = scheduledAt,
-                timezoneAtScheduling = timezoneAtScheduling,
-                generationTimeAtScheduling = generationTimeAtScheduling,
                 status = GenerationJobStatus.PENDING,
                 attemptCount = 0,
                 createdAt = now,

@@ -3,20 +3,16 @@ package com.moeum.integration
 import com.moeum.conversation.interfaces.dto.MessageResponse
 import com.moeum.conversation.interfaces.dto.SaveMessageRequest
 import com.moeum.conversation.interfaces.dto.TodayConversationResponse
-import com.moeum.identity.interfaces.dto.GoogleLoginRequest
-import com.moeum.identity.interfaces.dto.GoogleLoginResponse
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.web.PlatformErrorCode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.resttestclient.exchange
-import org.springframework.boot.resttestclient.postForEntity
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
-import org.springframework.http.MediaType
 import java.time.Instant
 import java.util.UUID
 
@@ -25,21 +21,6 @@ import java.util.UUID
  * 로그인 → JWT 발급 → 필터 체인 인증 → 메시지 저장(Flyway/JPA 실물) → 조회까지 실제 경로로 검증한다.
  */
 class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
-
-    private fun issueJwt(): String {
-        val response = restTemplate.postForEntity<GoogleLoginResponse>(
-            "/api/auth/google",
-            GoogleLoginRequest(idToken = "dummy-${UUID.randomUUID()}"),
-        )
-        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-        return response.body!!.jwt
-    }
-
-    private fun authHeaders(jwt: String): HttpHeaders =
-        HttpHeaders().apply {
-            setBearerAuth(jwt)
-            contentType = MediaType.APPLICATION_JSON
-        }
 
     @Test
     fun `로그인부터 메시지 저장, 오늘 대화 조회까지 실제 DB로 검증한다`() {
