@@ -5,14 +5,13 @@ import com.moeum.conversation.application.publicapi.ConversationActivityQuery
 import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.JournalGenerator
-import com.moeum.journal.domain.JournalRepository
 import com.moeum.journal.domain.JournalRevisionRepository
 import com.moeum.journal.domain.model.GenerationJob
-import com.moeum.journal.domain.model.Journal
-import com.moeum.journal.domain.model.JournalId
 import com.moeum.journal.domain.model.JournalRevision
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.journal.support.InMemoryGenerationJobRepository
+import com.moeum.journal.support.InMemoryJournalRepository
+import com.moeum.kernel.UuidV7
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
@@ -27,6 +26,7 @@ import java.util.UUID
 class GenerationExecutorTest {
 
     private val userId = UserId.generate()
+    private val lastUserMessageId = UuidV7.generate()
     private val diaryDate = LocalDate.of(2026, 8, 2)
     private val dayEnd = Instant.parse("2026-08-02T17:00:00Z")
     private var now = dayEnd.plusSeconds(30)
@@ -34,14 +34,8 @@ class GenerationExecutorTest {
         override fun now(): Instant = now
     }
     private val jobRepository = InMemoryGenerationJobRepository()
-    private val journals = mutableListOf<Journal>()
-
-    private val journalRepository = object : JournalRepository {
-        override fun findById(id: JournalId): Journal? = journals.find { it.id == id }
-        override fun findByUserIdAndDiaryDate(userId: UserId, diaryDate: LocalDate): Journal? =
-            journals.find { it.userId == userId && it.diaryDate == diaryDate }
-        override fun save(journal: Journal): Journal = journal.also { journals += it }
-    }
+    private val journalRepository = InMemoryJournalRepository()
+    private val journals get() = journalRepository.journals.values.toList()
     private val revisions = mutableListOf<JournalRevision>()
     private val revisionRepository = object : JournalRevisionRepository {
         override fun append(revision: JournalRevision): JournalRevision = revision.also { revisions += it }
@@ -49,7 +43,7 @@ class GenerationExecutorTest {
     private val activityQuery = object : ConversationActivityQuery {
         override fun findActiveDays(from: Instant, to: Instant): List<ActiveDay> = error("not used in this test")
         override fun findMessages(userId: UserId, dayDate: LocalDate): List<MessageSnapshot> =
-            listOf(MessageSnapshot("USER", "오늘 산책을 했다", dayEnd.minusSeconds(3600)))
+            listOf(MessageSnapshot(lastUserMessageId, "USER", "오늘 산책을 했다", dayEnd.minusSeconds(3600)))
     }
 
     private class ScriptedGenerator(private val failures: Int) : JournalGenerator {
@@ -57,7 +51,7 @@ class GenerationExecutorTest {
         override fun generate(userId: UserId, diaryDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
             calls++
             if (calls <= failures) throw LlmException("생성 실패")
-            return GeneratedJournal(UUID.randomUUID(), "산책", "{\"body\":\"산책을 했다\"}", "gemini", "google", "v1", 100, 50)
+            return GeneratedJournal(UUID.randomUUID(), "산책", "산책을 했다", "gemini", "google", "v1", 100, 50)
         }
     }
 
@@ -85,6 +79,8 @@ class GenerationExecutorTest {
         assertThat(completed.state.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(completed.journalId).isEqualTo(journals.single().id)
         assertThat(journals.single().diaryDate).isEqualTo(diaryDate)
+        // 생성에 쓴 원본의 마지막 유저 메시지를 OUTDATED 판단 기준으로 남긴다
+        assertThat(journals.single().sourceLastMessageId).isEqualTo(lastUserMessageId)
         // 사용자 소유 데이터는 user_id를 직접 갖는다
         assertThat(revisions.single().userId).isEqualTo(userId)
     }

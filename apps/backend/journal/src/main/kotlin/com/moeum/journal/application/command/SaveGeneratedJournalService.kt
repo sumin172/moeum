@@ -13,6 +13,7 @@ import com.moeum.journal.domain.model.JournalRevisionId
 import com.moeum.kernel.TimeProvider
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.util.UUID
 
 @Service
 class SaveGeneratedJournalService(
@@ -24,7 +25,8 @@ class SaveGeneratedJournalService(
     // 일기와 작업 완료를 한 트랜잭션에서 저장한다. 리스를 뺏긴 워커면 작업 저장이 낙관적 락 충돌로 실패해
     // 트랜잭션 전체가 롤백되므로 일기가 중복 저장되지 않는다.
     @Transactional
-    fun save(job: GenerationJob, generation: GeneratedJournal): Journal {
+    // sourceLastMessageId: 생성에 쓴 원본 중 가장 큰 유저 메시지 id — OUTDATED 판단 기준으로 남긴다
+    fun save(job: GenerationJob, generation: GeneratedJournal, sourceLastMessageId: UUID?): Journal {
         val now = timeProvider.now()
 
         val journal = journalRepository.save(
@@ -33,7 +35,8 @@ class SaveGeneratedJournalService(
                 userId = job.userId,
                 diaryDate = job.diaryDate,
                 title = generation.title,
-                content = generation.content,
+                body = generation.body,
+                sourceLastMessageId = sourceLastMessageId,
             ),
         )
 
@@ -44,7 +47,7 @@ class SaveGeneratedJournalService(
                 userId = journal.userId,
                 revisionNo = journal.currentRevision,
                 title = journal.title,
-                content = journal.content,
+                body = journal.body,
                 editedBy = JournalRevisionEditor.AI,
                 now = now,
             ),

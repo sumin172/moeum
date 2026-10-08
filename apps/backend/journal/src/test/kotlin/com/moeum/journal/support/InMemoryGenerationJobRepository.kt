@@ -2,10 +2,12 @@ package com.moeum.journal.support
 
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
+import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import java.time.Instant
+import java.time.LocalDate
 
 // UNIQUE(user_id, diary_date), 낙관적 락(version), 선점 규칙(JobClaimSql)을 메모리에서 흉내 낸다.
 class InMemoryGenerationJobRepository : GenerationJobRepository {
@@ -23,6 +25,9 @@ class InMemoryGenerationJobRepository : GenerationJobRepository {
         jobs[job.id] = saved
         return saved
     }
+
+    override fun findByUserIdAndDiaryDate(userId: UserId, diaryDate: LocalDate): GenerationJob? =
+        jobs.values.find { it.userId == userId && it.diaryDate == diaryDate }
 
     override fun claimNext(now: Instant, leaseExpiresAt: Instant): GenerationJob? {
         val job = jobs.values

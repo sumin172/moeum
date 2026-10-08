@@ -6,6 +6,7 @@ import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.conversation.domain.DayPreferenceRepository
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.findOrDefault
+import com.moeum.conversation.domain.model.MessageRole
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import org.springframework.stereotype.Service
@@ -29,12 +30,17 @@ class ConversationActivityQueryService(
         return messagesByDay.map { (key, messages) ->
             val (userId, dayDate) = key
             val latestZone = ZoneId.of(messages.maxBy { it.occurredAt }.timezone)
-            ActiveDay(userId = userId, dayDate = dayDate, dayEnd = preferences.getValue(userId).endOf(dayDate, latestZone))
+            ActiveDay(
+                userId = userId,
+                dayDate = dayDate,
+                dayEnd = preferences.getValue(userId).endOf(dayDate, latestZone),
+                lastUserMessageId = messages.filter { it.role == MessageRole.USER }.maxOfOrNull { it.id.value },
+            )
         }
     }
 
     override fun findMessages(userId: UserId, dayDate: LocalDate): List<MessageSnapshot> =
         messageRepository.findAllByUserIdAndDayDate(userId, dayDate).map {
-            MessageSnapshot(role = it.role.name, content = it.content, occurredAt = it.occurredAt)
+            MessageSnapshot(id = it.id.value, role = it.role.name, content = it.content, occurredAt = it.occurredAt)
         }
 }

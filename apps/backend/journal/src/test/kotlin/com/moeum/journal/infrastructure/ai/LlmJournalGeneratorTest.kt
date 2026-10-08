@@ -28,8 +28,8 @@ class LlmJournalGeneratorTest {
     private val userId = UserId.generate()
     private val diaryDate = LocalDate.of(2026, 8, 2)
     private val messages = listOf(
-        MessageSnapshot("USER", "오늘 한강에서 산책했어", Instant.parse("2026-08-02T10:00:00Z")),
-        MessageSnapshot("ASSISTANT", "좋았겠어요!", Instant.parse("2026-08-02T10:00:05Z")),
+        MessageSnapshot(UUID.randomUUID(), "USER", "오늘 한강에서 산책했어", Instant.parse("2026-08-02T10:00:00Z")),
+        MessageSnapshot(UUID.randomUUID(), "ASSISTANT", "좋았겠어요!", Instant.parse("2026-08-02T10:00:05Z")),
     )
 
     @Test
@@ -44,7 +44,7 @@ class LlmJournalGeneratorTest {
         assertThat(sent.userId).isEqualTo(userId)
         assertThat(sent.messages.single().content).startsWith("날짜: 2026-08-02").contains("USER: 오늘 한강에서 산책했어")
         assertThat(journal.title).isEqualTo("한강 산책")
-        assertThat(jsonMapper.readTree(journal.content)["body"].asString()).isEqualTo("오늘은 한강에서 산책을 했다.")
+        assertThat(journal.body).isEqualTo("오늘은 한강에서 산책을 했다.")
         assertThat(journal.outputTokens).isEqualTo(120)
     }
 

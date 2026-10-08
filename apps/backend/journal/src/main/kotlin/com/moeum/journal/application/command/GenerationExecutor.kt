@@ -44,7 +44,8 @@ class GenerationExecutor(
         try {
             val messages = conversationActivityQuery.findMessages(job.userId, job.diaryDate)
             val generation = journalGenerator.generate(job.userId, job.diaryDate, messages)
-            saveGeneratedJournalService.save(job, generation)
+            val sourceLastMessageId = messages.filter { it.role == USER_ROLE }.maxOfOrNull { it.id }
+            saveGeneratedJournalService.save(job, generation, sourceLastMessageId)
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 일기 생성 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
         } catch (e: Exception) {
@@ -63,3 +64,6 @@ class GenerationExecutor(
         }
     }
 }
+
+// MessageSnapshot.role 값(conversation의 MessageRole.USER.name)
+private const val USER_ROLE = "USER"

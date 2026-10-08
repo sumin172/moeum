@@ -11,6 +11,7 @@ import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.time.LocalDate
 
 private const val TABLE = "journal.generation_jobs"
 
@@ -26,6 +27,9 @@ class GenerationJobRepositoryImpl(
 
     override fun save(job: GenerationJob): GenerationJob =
         jpaRepository.save(job.toEntity()).toDomain()
+
+    override fun findByUserIdAndDiaryDate(userId: UserId, diaryDate: LocalDate): GenerationJob? =
+        jpaRepository.findByUserIdAndDiaryDate(userId.value, diaryDate)?.toDomain()
 
     @Transactional
     override fun claimNext(now: Instant, leaseExpiresAt: Instant): GenerationJob? =

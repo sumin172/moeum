@@ -8,23 +8,23 @@ import org.springframework.stereotype.Component
 @Component
 class JournalRevisionRepositoryImpl(
     private val entityManager: EntityManager,
+    private val contentCodec: JournalContentCodec,
 ) : JournalRevisionRepository {
 
     // 추가만 하는 이력이므로 merge(SELECT 후 INSERT) 대신 persist로 바로 INSERT한다
     override fun append(revision: JournalRevision): JournalRevision {
-        entityManager.persist(revision.toEntity())
+        entityManager.persist(
+            JournalRevisionJpaEntity(
+                id = revision.id.value,
+                journalId = revision.journalId.value,
+                userId = revision.userId.value,
+                revisionNo = revision.revisionNo,
+                title = revision.title,
+                content = contentCodec.toJson(revision.body),
+                editedBy = revision.editedBy,
+                createdAt = revision.createdAt,
+            ),
+        )
         return revision
     }
 }
-
-private fun JournalRevision.toEntity(): JournalRevisionJpaEntity =
-    JournalRevisionJpaEntity(
-        id = id.value,
-        journalId = journalId.value,
-        userId = userId.value,
-        revisionNo = revisionNo,
-        title = title,
-        content = content,
-        editedBy = editedBy,
-        createdAt = createdAt,
-    )
