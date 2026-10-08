@@ -36,7 +36,7 @@ class GetTodayConversationService(
 
         val messages = messageRepository.findPage(userId, dayDate, after, limit)
         val userMessageIds = messages.filter { it.role == MessageRole.USER }.map { it.id }
-        val responseJobs = responseJobRepository.findAllByUserMessageIdIn(userMessageIds).associateBy { it.userMessageId }
+        val responseJobs = responseJobRepository.findAllByUserIdAndUserMessageIdIn(userId, userMessageIds).associateBy { it.userMessageId }
         return TodayConversation(dayDate = dayDate, messages = messages, responseJobs = responseJobs)
     }
 }

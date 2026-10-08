@@ -41,7 +41,7 @@ class SaveMessageService(
         val zoneId = parseTimezone(command.timezone)
 
         messageRepository.findByUserIdAndClientMessageId(userId, command.clientMessageId)?.let { existing ->
-            val job = responseJobRepository.findByUserMessageId(existing.id)
+            val job = responseJobRepository.findByUserIdAndUserMessageId(userId, existing.id)
                 ?: error("응답 작업이 없는 유저 메시지: messageId=${existing.id.value}")
             return SaveMessageResult(existing, job, isNewlyCreated = false)
         }

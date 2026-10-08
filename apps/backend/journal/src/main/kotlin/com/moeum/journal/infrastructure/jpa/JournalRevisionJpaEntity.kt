@@ -19,6 +19,8 @@ class JournalRevisionJpaEntity(
     val id: UUID,
     @Column(name = "journal_id", nullable = false)
     val journalId: UUID,
+    @Column(name = "user_id", nullable = false)
+    val userId: UUID,
     @Column(name = "revision_no", nullable = false)
     val revisionNo: Int,
     @Column(nullable = false)

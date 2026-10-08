@@ -42,8 +42,9 @@ class GenerationExecutorTest {
             journals.find { it.userId == userId && it.diaryDate == diaryDate }
         override fun save(journal: Journal): Journal = journal.also { journals += it }
     }
+    private val revisions = mutableListOf<JournalRevision>()
     private val revisionRepository = object : JournalRevisionRepository {
-        override fun save(revision: JournalRevision): JournalRevision = revision
+        override fun save(revision: JournalRevision): JournalRevision = revision.also { revisions += it }
     }
     private val activityQuery = object : ConversationActivityQuery {
         override fun findActiveDays(from: Instant, to: Instant): List<ActiveDay> = error("not used in this test")
@@ -84,6 +85,8 @@ class GenerationExecutorTest {
         assertThat(completed.state.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(completed.journalId).isEqualTo(journals.single().id)
         assertThat(journals.single().diaryDate).isEqualTo(diaryDate)
+        // 사용자 소유 데이터는 user_id를 직접 갖는다
+        assertThat(revisions.single().userId).isEqualTo(userId)
     }
 
     @Test

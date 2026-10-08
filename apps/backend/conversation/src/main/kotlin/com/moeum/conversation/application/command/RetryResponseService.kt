@@ -28,10 +28,11 @@ class RetryResponseService(
 ) {
     @Transactional
     fun retry(userId: UserId, messageId: MessageId): RetryResponseResult {
-        val message = messageRepository.findById(messageId)
-            ?.takeIf { it.userId == userId && it.role == MessageRole.USER }
+        // 남의 메시지는 user_id 조건으로 아예 조회되지 않는다
+        val message = messageRepository.findByUserIdAndId(userId, messageId)
+            ?.takeIf { it.role == MessageRole.USER }
             ?: throw MessageNotFoundException("응답을 요청할 수 있는 메시지가 없습니다: messageId=${messageId.value}")
-        val job = responseJobRepository.findByUserMessageId(messageId)
+        val job = responseJobRepository.findByUserIdAndUserMessageId(userId, messageId)
             ?: error("응답 작업이 없는 유저 메시지: messageId=${messageId.value}")
 
         return when (job.state.status) {

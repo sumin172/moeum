@@ -7,8 +7,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
+// 사용자 소유 데이터라 조회는 항상 user_id를 포함한다 — 탈퇴 연쇄 삭제·export, 향후 user_id 파티셔닝(파티션 하나만 조회) 대비.
 interface MessageRepository {
-    fun findById(id: MessageId): Message?
+    fun findByUserIdAndId(userId: UserId, id: MessageId): Message?
     fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message?
     fun findPage(userId: UserId, dayDate: LocalDate, after: MessageId?, limit: Int): List<Message>
     fun findAllByUserIdAndDayDate(userId: UserId, dayDate: LocalDate): List<Message>

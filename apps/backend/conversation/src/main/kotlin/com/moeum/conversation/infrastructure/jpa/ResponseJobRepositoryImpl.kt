@@ -30,12 +30,12 @@ class ResponseJobRepositoryImpl(
     override fun save(job: ResponseJob): ResponseJob =
         jpaRepository.save(job.toEntity()).toDomain()
 
-    override fun findByUserMessageId(userMessageId: MessageId): ResponseJob? =
-        jpaRepository.findByUserMessageId(userMessageId.value)?.toDomain()
+    override fun findByUserIdAndUserMessageId(userId: UserId, userMessageId: MessageId): ResponseJob? =
+        jpaRepository.findByUserIdAndUserMessageId(userId.value, userMessageId.value)?.toDomain()
 
-    override fun findAllByUserMessageIdIn(userMessageIds: Collection<MessageId>): List<ResponseJob> =
+    override fun findAllByUserIdAndUserMessageIdIn(userId: UserId, userMessageIds: Collection<MessageId>): List<ResponseJob> =
         if (userMessageIds.isEmpty()) emptyList()
-        else jpaRepository.findAllByUserMessageIdIn(userMessageIds.map { it.value }).map { it.toDomain() }
+        else jpaRepository.findAllByUserIdAndUserMessageIdIn(userId.value, userMessageIds.map { it.value }).map { it.toDomain() }
 
     @Transactional
     override fun claimNext(now: Instant, leaseExpiresAt: Instant): ResponseJob? =

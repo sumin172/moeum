@@ -19,8 +19,8 @@ class MessageRepositoryImpl(
     private val jpaRepository: MessageJpaRepository,
 ) : MessageRepository {
 
-    override fun findById(id: MessageId): Message? =
-        jpaRepository.findById(id.value).map { it.toDomain() }.orElse(null)
+    override fun findByUserIdAndId(userId: UserId, id: MessageId): Message? =
+        jpaRepository.findByUserIdAndId(userId.value, id.value)?.toDomain()
 
     override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
         jpaRepository.findByUserIdAndClientMessageId(userId.value, clientMessageId)?.toDomain()

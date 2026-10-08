@@ -4,6 +4,6 @@ import org.springframework.data.jpa.repository.JpaRepository
 import java.util.UUID
 
 interface ResponseJobJpaRepository : JpaRepository<ResponseJobJpaEntity, UUID> {
-    fun findByUserMessageId(userMessageId: UUID): ResponseJobJpaEntity?
-    fun findAllByUserMessageIdIn(userMessageIds: Collection<UUID>): List<ResponseJobJpaEntity>
+    fun findByUserIdAndUserMessageId(userId: UUID, userMessageId: UUID): ResponseJobJpaEntity?
+    fun findAllByUserIdAndUserMessageIdIn(userId: UUID, userMessageIds: Collection<UUID>): List<ResponseJobJpaEntity>
 }

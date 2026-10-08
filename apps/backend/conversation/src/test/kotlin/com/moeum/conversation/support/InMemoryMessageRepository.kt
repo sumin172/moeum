@@ -11,7 +11,7 @@ import java.util.UUID
 class InMemoryMessageRepository : MessageRepository {
     val messages = linkedMapOf<MessageId, Message>()
 
-    override fun findById(id: MessageId): Message? = messages[id]
+    override fun findByUserIdAndId(userId: UserId, id: MessageId): Message? = messages[id]?.takeIf { it.userId == userId }
 
     override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
         messages.values.find { it.userId == userId && it.clientMessageId == clientMessageId }

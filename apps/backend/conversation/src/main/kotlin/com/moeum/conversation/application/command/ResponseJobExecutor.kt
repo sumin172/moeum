@@ -56,7 +56,7 @@ class ResponseJobExecutor(
         }
 
         try {
-            val userMessage = messageRepository.findById(job.userMessageId)
+            val userMessage = messageRepository.findByUserIdAndId(job.userId, job.userMessageId)
                 ?: error("응답 작업의 유저 메시지가 없습니다: messageId=${job.userMessageId.value}")
             val context = messageRepository.findAllByUserIdAndDayDate(job.userId, job.dayDate)
             val response = conversationResponder.respond(job.userId, context)

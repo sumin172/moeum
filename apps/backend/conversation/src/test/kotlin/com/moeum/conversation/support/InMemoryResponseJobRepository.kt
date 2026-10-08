@@ -4,6 +4,7 @@ import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.domain.model.ResponseJobId
+import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import java.time.Instant
@@ -22,11 +23,11 @@ class InMemoryResponseJobRepository : ResponseJobRepository {
         return saved
     }
 
-    override fun findByUserMessageId(userMessageId: MessageId): ResponseJob? =
-        jobs.values.find { it.userMessageId == userMessageId }
+    override fun findByUserIdAndUserMessageId(userId: UserId, userMessageId: MessageId): ResponseJob? =
+        jobs.values.find { it.userId == userId && it.userMessageId == userMessageId }
 
-    override fun findAllByUserMessageIdIn(userMessageIds: Collection<MessageId>): List<ResponseJob> =
-        jobs.values.filter { it.userMessageId in userMessageIds }
+    override fun findAllByUserIdAndUserMessageIdIn(userId: UserId, userMessageIds: Collection<MessageId>): List<ResponseJob> =
+        jobs.values.filter { it.userId == userId && it.userMessageId in userMessageIds }
 
     override fun claimNext(now: Instant, leaseExpiresAt: Instant): ResponseJob? =
         jobs.values
