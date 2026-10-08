@@ -49,8 +49,38 @@ resilience4j:
           - org.springframework.web.client.HttpServerErrorException
           - org.springframework.web.client.HttpClientErrorException.TooManyRequests
           - com.moeum.platform.llm.moment.MomentExtractionException
+      claudeJournalGenerationClient:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        recordExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+          - org.springframework.web.client.HttpClientErrorException.TooManyRequests
+          - com.moeum.platform.llm.journal.JournalGenerationException
+      geminiJournalGenerationClient:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        recordExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+          - org.springframework.web.client.HttpClientErrorException.TooManyRequests
+          - com.moeum.platform.llm.journal.JournalGenerationException
 
 moeum:
   conversation:
     ai:
       daily-message-limit: 20
+  journal:
+    # Journal 생성 LLM provider: gemini | claude. Claude Haiku 인프라(ClaudeJournalGenerator)는 이미 구현돼
+    # 있지만 결제 설정 전까지는 이미 연동된 Gemini API 키를 재사용한다. claude로 바꾸려면 이 값만 변경하면 된다.
+    provider: gemini

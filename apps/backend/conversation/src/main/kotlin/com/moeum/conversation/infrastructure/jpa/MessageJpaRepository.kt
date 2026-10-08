@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 import java.util.UUID
 
 interface MessageJpaRepository : JpaRepository<MessageJpaEntity, UUID> {
@@ -24,6 +25,14 @@ interface MessageJpaRepository : JpaRepository<MessageJpaEntity, UUID> {
     ): List<MessageJpaEntity>
 
     fun findByConversationDayIdOrderByIdAsc(conversationDayId: UUID): List<MessageJpaEntity>
+
+    fun findByOccurredAtGreaterThanEqualAndOccurredAtLessThan(from: Instant, to: Instant): List<MessageJpaEntity>
+
+    fun findByUserIdAndOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtAsc(
+        userId: UUID,
+        from: Instant,
+        to: Instant,
+    ): List<MessageJpaEntity>
 
     // WHERE 절의 expectedStatus가 원자적 선점(claim) 조건 — 동시에 호출돼도 정확히 하나만 1행을 갱신한다.
     @Transactional

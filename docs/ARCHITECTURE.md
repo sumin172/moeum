@@ -121,8 +121,9 @@ backend/
 
 ```kotlin
 // conversation/application/publicapi
-interface ConversationJournalSourceQuery {
-    fun getJournalSource(conversationDayId: ConversationDayId): JournalSourceSnapshot
+interface ConversationActivityQuery {
+    fun findActivities(from: Instant, to: Instant): List<UserActivity>
+    fun findMessages(userId: UserId, from: Instant, to: Instant): List<MessageSnapshot>
 }
 // 나중에 HTTP 클라이언트로 구현을 교체해도 호출부 코드는 변경 없음
 ```
@@ -148,20 +149,62 @@ Journal 모듈은 Moment를 생성하거나 conversation 테이블에 저장하�
 
 **Journal — 원본 대화로 직접 서사를 생성한다**
 
-Journal은 Moment를 입력으로 쓰지 않는다. Conversation은 "마감"이라는 별도 상태나 이벤트를 갖지 않는다 — 하루의 경계는 `local_date`와 `timezone`으로 항상 계산 가능하다. Journal은 자체 스케줄러로 "생성해도 되는 day"를 스스로 판단하고, Conversation의 publicapi로 그 원본 대화를 조회해 서사를 쓴다.
+Journal은 Moment를 입력으로 쓰지 않는다. Conversation은 "마감"이라는 별도 상태나 이벤트를 갖지 않는다 — Conversation은 언제 어떤 대화가 있었는지만 안다. "하루"의 경계(diary day)는 Journal이 사용자별 `DiaryPreference.generationTime`과 timezone을 기준으로 직접 계산하는, Journal 소유의 개념이다. Journal은 자체 스케줄러로 "지금 생성해야 하는 diary day"를 스스로 판단하고, Conversation의 publicapi로 그 시간대의 원본 대화를 조회해 서사를 쓴다.
 
 ```kotlin
 // conversation/application/publicapi
-interface ConversationJournalSourceQuery {
-    fun getJournalSource(conversationDayId: ConversationDayId): JournalSourceSnapshot
+interface ConversationActivityQuery {
+    fun findActivities(from: Instant, to: Instant): List<UserActivity>
+    fun findMessages(userId: UserId, from: Instant, to: Instant): List<MessageSnapshot>
 }
+// UserActivity(userId, occurredAt, timezone) — 메시지 단위 원시 활동. "diary day"라는 해석은
+// 이 인터페이스에 등장하지 않는다. Conversation은 "언제 무슨 활동이 있었는지"만 답하고,
+// 그걸 diary day로 묶는 건 Journal의 책임이다.
 ```
 
+**핵심 invariant**
+1. 하나의 Conversation 메시지는 최대 하나의 Journal에 포함된다.
+2. 활동이 없는 diary day는 generation_job도 만들지 않는다.
+3. 이미 계획된(generation_jobs에 존재하는) Job의 window는 이후 preference/timezone 변경으로 수정하지 않는다.
+4. 아직 계획되지 않은 활동은, 그 활동을 Planner가 처리하는 시점에 유효한 DiaryPreference/timezone으로 diary day를 계산한다.
+
+**GenerationPlanner — 하나의 순수 함수를 서로 다른 관측 범위로 호출한다**
+
 ```
-Journal 스케줄러가 주기적으로 실행
-  → ConversationJournalSourceQuery로 "생성 대상 day" 조회 (timezone 기준 자정 + 버퍼 지난 day)
-  → 원본 조회 → 서사 생성
+GenerationPlanner.plan(from: Instant, to: Instant):
+  → ConversationActivityQuery.findActivities(from, to)로 구간 내 원시 활동 조회
+  → 활동 각각을 사용자의 현재 timezone + DiaryPreference.generationTime으로 diaryDate로 매핑
+  → distinct(userId, diaryDate)
+  → journal.generation_jobs에 PENDING Job 멱등 insert (UNIQUE(user_id, diary_date) 충돌은 스킵)
 ```
+
+"최근 활동 빠르게 반영"과 "장애로 놓친 것 회수"는 별개 시스템이 아니라, 같은 `plan()`을 다른 스케줄/범위로 호출하는 것뿐이다.
+
+```
+Normal      : 5분마다        plan(from = now - 10m, to = now)
+Reconciliation : 하루 1회    plan(from = now - 3d,  to = now)
+```
+
+lookback(10분)은 스케줄 주기보다 넉넉히 겹치게 잡아 정상 경로 자체의 유실을 막고, reconciliation은 정상 경로가 그 lookback보다 긴 장애로 활동을 놓쳤을 때 조용히 사라지지 않도록 회수한다 — overlapping polling을 선택한 이유(장애 후 재조회로 스스로 복구)가 lookback 길이로 상한이 걸리지 않게 하기 위함이다. `from`/`to`를 인자로 받으므로 "9/21~24 누락분 재plan" 같은 수동 복구도 같은 함수로 처리된다.
+
+**GenerationExecutor**
+
+```
+GenerationExecutor (주기적 실행)
+  → generation_jobs 중 scheduledAt <= now()인 PENDING Job을 claim
+  → ConversationActivityQuery.findMessages(userId, windowStart, windowEnd)로 원본 조회
+  → JournalGenerator 호출 → 서사 생성 → Journal 저장, Job을 COMPLETED로 표시
+```
+
+`generation_jobs`의 `UNIQUE(user_id, diary_date)`는 영구적인 도메인 제약이 아니라 **V1 최초 생성 Job에 대한 멱등성 키**다. 재생성(사용자 요청, 실패 재시도 등)을 지원하게 되면 Job이 "일기 하나"가 아니라 "생성 시도 하나"를 뜻하도록 바뀌어야 하므로, 그 시점에 키 구성이 달라질 수 있다.
+
+**Observability**
+
+`journal.planning.{activities,buckets,jobs.created,jobs.duplicate,duration}` 메트릭을 `planningType`(RECENT | RECONCILIATION) 태그로 구분해 남긴다. Reconciliation 실행에서 `jobs.created > 0`이 나오면 그 자체가 "정상 경로가 최근 며칠간 일부를 놓쳤다"는 신호이므로, 태그를 붙여두면 나중에 이 값에 알림을 거는 것도 코드 변경 없이 가능하다.
+
+**Accepted Risk**
+
+Reconciliation이 며칠 전 활동을 뒤늦게 발견하면, 그 활동이 실제 발생했던 시점이 아니라 **발견(Planning) 시점의 현재 DiaryPreference**로 diary day가 계산된다 — preference를 시점별로 이력 관리(effective-dated)하지 않기로 한 결정의 직접적인 결과다. 정상 경로(5분 주기)가 정상 동작하는 한 발생 범위는 "정상 Planning 실패 + 그 사이 preference 변경 + reconciliation에서 뒤늦게 발견"이 겹치는 좁은 경우로 제한된다. V1에서는 이 리스크를 감수하고 effective-dated preference를 만들지 않는다.
 
 **Moment 추출 — Insight/아카이브가 필요할 때만 호출한다**
 
@@ -178,7 +221,7 @@ Moment 추출은 Conversation의 어떤 상태 변화에도 자동으로 반응�
 ```
 identity        ← 독립 (다른 모듈에 의존하지 않음)
 conversation    → shared-kernel(UserId)  [Identity API는 필요 시만]
-journal         → conversation.publicapi (ConversationJournalSourceQuery) — 자체 스케줄러로 호출, 이벤트 구독 없음
+journal         → conversation.publicapi (ConversationActivityQuery) — 자체 스케줄러로 호출, 이벤트 구독 없음
 insight         → journal integration event, conversation의 Moment 조회 publicapi
 gamification    → journal integration event
 notification    → 여러 모듈의 integration event
@@ -221,6 +264,7 @@ conversation.moments
 
 journal.journals
 journal.journal_revisions
+journal.generation_jobs
 
 insight.emotion_observations
 insight.patterns
@@ -297,7 +341,7 @@ purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 
 provider 축(Gemini/Claude)이 이미 정해져 있어 `platform/llm/conversation`, `platform/llm/journal`, `platform/llm/moment`로 서브패키지 분리(2026-07-25, moment는 2026-09-22 추가). `suspend` 아님 — 실제 구현 시 필요해지면 그때 추가.
 
-`platform/llm/conversation`은 Stage 1(#17)에서 `GeminiConversationResponder`로 구현 완료(`RestClient` + Resilience4j `@CircuitBreaker`, 상세는 `DEVELOPMENT_STAGES.md` Stage 1 참고). `platform/llm/moment`(Gemini)와 `platform/llm/journal`(Claude)은 Stage 2에서 구현 예정, 아직 인터페이스만 존재.
+세 서브패키지 모두 `RestClient` + Resilience4j `@CircuitBreaker` 구조로 구현되어 있다: `platform/llm/conversation`은 `GeminiConversationResponder`(Stage 1, #17), `platform/llm/moment`는 `GeminiMomentExtractor`, `platform/llm/journal`은 `GeminiJournalGenerator`/`ClaudeJournalGenerator` 둘 다 구현돼 있고 `moeum.journal.provider`(기본값 `gemini`)로 선택한다(Claude는 결제 설정 후 전환할 임시 대기 상태). 상세는 `DEVELOPMENT_STAGES.md` 참고.
 
 ```kotlin
 // platform/llm/conversation
@@ -320,7 +364,7 @@ interface JournalGenerator {
     fun generate(request: JournalGenerationRequest): JournalGenerationResponse
 }
 // JournalGenerationRequest(rawTranscript: String, localDate: String) — Moment는 입력에 없다
-// rawTranscript는 ConversationJournalSourceQuery로 조회한 원본 그대로
+// rawTranscript는 ConversationActivityQuery.findMessages(windowStart, windowEnd)로 조회한 원본 그대로
 // JournalGenerationResponse(generationId, title, content, model, provider, promptVersion, inputTokens, outputTokens)
 
 // InsightGenerator — Stage 5에서 정의 (아직 없음)

@@ -121,7 +121,8 @@ conversation.conversation_days
   user_id         UUID
   local_date      DATE          -- 최초 계산값 고정, 정체성(UNIQUE 키)이라 절대 재계산하지 않음
   timezone        TEXT          -- 메시지 저장마다 최신 관측 zone으로 갱신
-                                 -- local_date와 달리 living 값. Journal이 "이 zone 기준 자정 지났는지" 판단하는 근거.
+                                 -- local_date와 달리 living 값. ConversationActivityQuery가 이 값을 lastObservedTimezone으로
+                                 -- 노출하고, diary day 계산(Journal의 책임)의 입력이 된다.
                                  -- 갱신은 local_date를 건드리지 않으므로 정체성 충돌 위험 없음.
                                  -- 한 메시지의 zone 변화로 local_date 자체가 달라지면(실제 자정 넘김) 새 ConversationDay가
                                  -- 열리는 것을 정상으로 받아들임(하루가 여러 row로 쪼개지는 fragmentation은 accepted trade-off)
@@ -182,14 +183,15 @@ conversation.ai_usage_daily
 
 Conversation
 - ConversationDay는 메시지 저장 시 자동 생성·갱신된다(Stage 1). 별도의 "마감" 상태나 배치는 없다 — 하루의 경계는 `local_date` + `timezone`으로 항상 계산 가능하므로, 명시적으로 상태를 전환하는 단계 자체가 불필요하다
-- Journal이 조회할 수 있도록 publicapi(`ConversationJournalSourceQuery`)로 원본 대화와 day 목록(날짜/timezone/source_revision)을 노출한다
+- Journal이 조회할 수 있도록 publicapi(`ConversationActivityQuery`)로 `findActivities(from, to)`(구간 내 원시 활동)와 `findMessages(userId, from, to)`(구간 원본 조회)를 노출한다. "diary day"나 "생성 대상" 같은 Journal의 개념은 이 인터페이스에 등장하지 않는다
 - Moment 추출은 여기서 실행되지 않는다 — Insight 배치나 아카이브 드릴다운이 필요할 때 직접 호출하는 별도 기능이다(아래 "Moment 추출" 참고)
 
 Journal
-- **자체 스케줄러**가 주기적으로 Conversation의 publicapi를 조회해, 각 day의 timezone 기준 자정으로부터 일정 시간(버퍼)이 지났고 아직 일기가 없는 day를 찾아 생성 Job을 만든다
-- 그 조회로 얻은 원본 대화로 서사 생성 — Moment는 입력에 없다
-- Claude Haiku로 일기 초안 생성
-- 구조화 출력 (JSON Schema 검증)
+- `DiaryPreference`(사용자별 `generationTime`)로 "하루를 어디서 끊고 싶은지"를 사용자별로 표현한다
+- **GenerationPlanner**가 `plan(from, to)` 하나로 동작 — 구간 내 활동을 각각 현재 timezone+`generationTime`으로 diaryDate에 매핑하고, `distinct(userId, diaryDate)`한 뒤 `generation_jobs`에 PENDING Job을 멱등 insert한다. 이 함수를 "최근 몇 분"(정상 경로)과 "최근 며칠"(reconciliation)로 다른 범위를 주고 반복 호출하는 것으로 정상/복구를 모두 처리한다(자세한 규칙은 아래 "Journal 생성 스케줄러" 참고)
+- **GenerationExecutor**가 주기적으로 `scheduledAt`이 지난 PENDING Job을 실행 — `ConversationActivityQuery.findMessages(windowStart, windowEnd)`로 원본을 조회해 서사 생성. Moment는 입력에 없다
+- `JournalGenerator`로 일기 초안 생성 — `GeminiJournalGenerator`/`ClaudeJournalGenerator` 둘 다 구현, `moeum.journal.provider`(기본값 `gemini`)로 선택. Claude는 결제 설정 후 전환할 대기 상태
+- 구조화 출력 (현재는 `{"title", "body"}` 최소 구조. JSON Schema 검증 등 본격 구조화는 소비처(아카이브 상세, Stage 3)가 생긴 뒤 설계)
 - AI 생성 메타데이터 저장
 - 일기 확정
 
@@ -214,8 +216,7 @@ AI가 PROCESSING 중에도 Journal은 DRAFT 상태를 유지할 수 있다.
 journal.journals
   id                    UUID PK
   user_id               UUID
-  conversation_day_id   UUID        -- FK 없음, ID 참조만
-  local_date            DATE
+  diary_date            DATE        -- Journal이 계산한 diary day. ConversationDay.local_date와 다른 개념(generation_jobs.diary_date와 동일 정의)
   lifecycle_status      TEXT        -- DRAFT | CONFIRMED | OUTDATED
   title                 TEXT
   content               JSONB
@@ -224,6 +225,8 @@ journal.journals
   confirmed_at          TIMESTAMPTZ NULL
   deleted_at            TIMESTAMPTZ NULL
   purge_after           TIMESTAMPTZ NULL
+
+  UNIQUE (user_id, diary_date)  -- generation_jobs와 마찬가지로 V1 한정(재생성 지원 시 재검토)
 
 journal.journal_revisions
   id            UUID PK
@@ -238,23 +241,37 @@ journal.journal_revisions
 -- journal_revisions는 변경 이력 보존용이다.
 -- 두 값은 동일 트랜잭션에서 갱신한다.
 
+journal.diary_preferences
+  user_id         UUID PK
+  generation_time TIME          -- 이 시각(사용자 timezone 기준)을 diary day 경계로 본다. 기본값은 "구현하면서 결정" 참고
+  created_at      TIMESTAMPTZ
+  updated_at      TIMESTAMPTZ
+
 journal.generation_jobs
-  id                  UUID PK
-  journal_id          UUID NULL
-  conversation_day_id UUID
-  source_revision     BIGINT        -- 어떤 ConversationDay 버전 기준으로 생성했는지
-  request_key         TEXT UNIQUE   -- 멱등키: {conversationDayId}:{sourceRevision}:{type}:{promptVersion}
-  generation_status   TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
-  attempt_count       INT DEFAULT 0
-  provider            TEXT NULL
-  model               TEXT NULL
-  prompt_version      TEXT NULL
-  input_tokens        INT NULL    -- quota 집계용
-  output_tokens       INT NULL    -- quota 집계용
-  generation_id       UUID NULL
-  generated_at        TIMESTAMPTZ NULL
-  error_code          TEXT NULL
-  created_at          TIMESTAMPTZ
+  id                             UUID PK
+  journal_id                     UUID NULL
+  user_id                        UUID
+  diary_date                     DATE          -- Journal이 계산한 diary day. ConversationDay.local_date와 다른 개념
+  window_start                   TIMESTAMPTZ   -- findMessages 조회 구간 시작
+  window_end                     TIMESTAMPTZ   -- findMessages 조회 구간 끝
+  scheduled_at                   TIMESTAMPTZ   -- 이 시각 이후 Executor가 claim 가능
+  timezone_at_scheduling         TEXT          -- Planning 시점 관측 timezone (감사/디버깅용)
+  generation_time_at_scheduling  TIME          -- Planning 시점 DiaryPreference.generationTime 스냅샷
+  generation_status              TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
+  attempt_count                  INT DEFAULT 0
+  provider                       TEXT NULL
+  model                          TEXT NULL
+  prompt_version                 TEXT NULL
+  input_tokens                   INT NULL    -- quota 집계용
+  output_tokens                  INT NULL    -- quota 집계용
+  generation_id                  UUID NULL
+  generated_at                   TIMESTAMPTZ NULL
+  error_code                     TEXT NULL
+  created_at                     TIMESTAMPTZ
+
+  UNIQUE (user_id, diary_date)  -- V1 최초 생성 Job에 대한 멱등키일 뿐, 영구 도메인 제약은 아니다.
+                                 -- 재생성을 지원하게 되면 Job이 "일기 하나"가 아니라 "생성 시도 하나"를 뜻해야 하므로
+                                 -- 그때 키 구성이 달라질 수 있다.
 
 conversation.moment_extraction_jobs
   id                  UUID PK
@@ -310,15 +327,14 @@ Moment를 추출하는 이유:
 
 지금 방식(하루 전체를 한 번에 LLM에 투입)은 LLM 컨텍스트 윈도우 자체의 한계는 해결하지 못한다. 그 지점에 도달하면 "한 번에 추출"이 아니라 대화 도중 구간별로 점진적으로 추출하는 방식으로 재설계해야 한다. 지금은 신호가 없으니 만들지 않는다 (트리거 조건은 "구현하면서 결정" 표 참고).
 
-**request_key 구성**
-일기 확정 후 메시지가 추가되면 source_revision이 증가하므로 같은 날짜라도 새 Job이 생성된다.
-동일 조건 재시도 → 기존 키로 멱등 처리. 내용 변경 재생성 → 새 키로 새 Job.
+**재생성 식별 (V1 범위 밖)**
+
+`generation_jobs.UNIQUE(user_id, diary_date)`는 diary_date당 최초 생성 Job의 멱등키일 뿐, 재생성 Job을 식별하는 메커니즘이 아직 없다. 아래 "일기 확정 후 메시지 추가 정책"의 OUTDATED 전환과, 그 OUTDATED 상태를 실제로 재생성하는 흐름은 별개다. 후자는 V1 범위 밖이며, 구현 시점에 generation_jobs의 키 구성을 다시 설계해야 한다.
 
 **일기 확정 후 메시지 추가 정책**
 - 메시지 추가는 상태와 무관하게 항상 허용된다 (원본 기록 우선)
 - Journal이 CONFIRMED 상태였다면 OUTDATED로 변경
-- 사용자에게 재생성 여부 제공
-- 재생성 요청은 generation_jobs의 request_key로 중복 방지
+- 사용자에게 재생성 여부 제공 (재생성 실행 메커니즘은 V1 범위 밖, 위 참고)
 
 **오프라인 지연 전송과의 상호작용**
 - occurredAt을 클라이언트 작성 시각으로 받으므로, Journal이 이미 그 날짜의 일기를 생성한 뒤에 오프라인 큐잉됐던 메시지가 도착하는 상황이 구조적으로 항상 가능하다(비행기 모드 등으로 지연이 몇 시간~며칠까지 벌어질 수 있음)
@@ -328,32 +344,76 @@ Moment를 추출하는 이유:
 - 선택지: N일 후 자동 확정 or 영구 DRAFT 유지
 - Insight 집계에 DRAFT 포함 여부
 
-**Journal 생성 스케줄러**
+**Journal 생성 스케줄러 — Planner/Executor 분리**
 
-이벤트 리스너가 아니라 Journal 자신의 스케줄러가 주기적으로 대상을 스캔한다. Conversation은 "마감"이라는 신호를 별도로 주지 않으므로, "언제 생성해도 되는지"를 Journal이 스스로 판단해야 한다.
+이벤트 리스너가 아니라 Journal 자신의 스케줄러가 주기적으로 대상을 스캔한다. Conversation은 "마감"이라는 신호를 별도로 주지 않으므로, "언제 생성해도 되는지"를 Journal이 스스로 판단해야 한다. 판단(Planning)과 실행(Execution)은 분리한다.
+
+**핵심 invariant**
+1. 하나의 Conversation 메시지는 최대 하나의 Journal에 포함된다.
+2. 활동이 없는 diary day는 generation_job도 만들지 않는다.
+3. 이미 generation_jobs에 존재하는 Job의 window는 이후 preference/timezone 변경으로 수정하지 않는다.
+4. 아직 계획되지 않은 활동은, Planner가 그 활동을 처리하는 시점에 유효한 DiaryPreference/timezone으로 diary day를 계산한다.
 
 ```kotlin
+// GenerationPlanner — from/to는 호출부가 결정한다(Planner가 now()를 스스로 들여다보지 않음).
+// 대상을 판단하고 Job을 만들 뿐, LLM을 부르지 않는다.
+fun plan(from: Instant, to: Instant) {
+    val activities = conversationActivityQuery.findActivities(from, to)
+    val diaryDays = activities
+        .map { it.userId to diaryDayCalculator.calculate(it, currentPreferenceOf(it.userId)) }
+        .distinct()
+    diaryDays.forEach { (userId, diaryDate) -> planJobFor(userId, diaryDate) }  // PENDING insert 시도, UNIQUE 충돌은 스킵
+}
+
+// 정상 경로: 스케줄 주기보다 lookback을 넉넉히 겹치게 잡아 자체 유실을 막는다
 @Scheduled(fixedDelayString = "PT5M")
-fun scan() {
-    runCatching { generateDueJournals() }
-        .onFailure { e -> log.error("Journal 생성 스케줄 스캔 실패", e) }
+fun planRecent() {
+    val now = clock.instant()
+    runCatching { plan(from = now.minus(Duration.ofMinutes(10)), to = now) }
+        .onFailure { e -> log.error("Journal 생성 Planning(RECENT) 실패", e) }
 }
 
-fun generateDueJournals() {
-    val dueDays = conversationJournalSourceQuery.findDueForJournal(bufferAfterMidnight = Duration.ofHours(4))
-    dueDays.forEach { day -> generateSingleJournal(day) }
+// 복구 경로: 정상 경로의 lookback보다 긴 장애로 놓친 활동을 회수한다. 같은 plan()을 범위만 넓혀 호출할 뿐,
+// generation_jobs와 별도로 비교하는 diff 로직을 두지 않는다 — 멱등 insert가 이미 그 역할을 한다.
+@Scheduled(cron = "0 0 4 * * *")
+fun planReconcile() {
+    val now = clock.instant()
+    runCatching { plan(from = now.minus(Duration.ofDays(3)), to = now) }
+        .onFailure { e -> log.error("Journal 생성 Planning(RECONCILIATION) 실패", e) }
+}
+
+// GenerationExecutor — 이미 내려진 결정을 실행할 뿐이다
+@Scheduled(fixedDelayString = "PT1M")
+fun execute() {
+    runCatching { executeDueJobs() }
+        .onFailure { e -> log.error("Journal 생성 Execution 실패", e) }
+}
+
+fun executeDueJobs() {
+    val dueJobs = generationJobRepository.findPendingDue(now())
+    dueJobs.forEach { job -> executeSingleJob(job) }
 }
 ```
 
-`bufferAfterMidnight`만큼 그 day의 자정(timezone 기준) 이후 기다렸다가 대상으로 잡는다 — 오프라인 지연 메시지가 어느 정도 도착할 시간을 준 뒤에 생성해서 OUTDATED 재생성 빈도를 줄인다. 구체 시간은 "구현하면서 결정" 표 참고.
+Planning이 예정보다 늦게 돌아도(예: 02:00 컷오프인데 02:03에 실행) 문제가 되지 않는다 — 그 시점 활동 기준으로 diaryDate/window를 계산해 Job을 만들 뿐이고, Execution은 `scheduledAt`이 지난 Job만 골라 실행하므로 결과가 달라지지 않는다.
 
-**Job 저장과 LLM 호출 분리**
+lookback(10분)/reconciliation 범위(3일)·주기는 예시 수치다. 구체 값은 "구현하면서 결정" 표 참고. `plan(from, to)`가 순수하게 범위를 인자로 받으므로, "9/21~24 누락분 재plan" 같은 수동 복구도 같은 함수로 그대로 처리된다 — 별도 복구 기능을 만들 필요가 없다.
 
-LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다.
+**Observability**
+
+`journal.planning.{activities,buckets,jobs.created,jobs.duplicate,duration}` 메트릭을 `planningType`(RECENT | RECONCILIATION) 태그로 남긴다. 로그에도 `planningType`, `from`, `to`, `activityCount`, `bucketCount`, `createdCount`, `duplicateCount`를 남긴다. Reconciliation 실행에서 `jobs.created > 0`이 관측되면 그 자체가 "정상 경로가 최근 며칠간 일부를 놓쳤다"는 신호다.
+
+**Accepted Risk**
+
+Reconciliation이 며칠 전 활동을 뒤늦게 발견하면, 그 활동이 실제 발생했던 시점이 아니라 **발견(Planning) 시점의 현재 DiaryPreference**로 diary day가 계산된다 — preference를 시점별로 이력 관리(effective-dated)하지 않기로 한 결정의 직접적인 결과다. 정상 경로가 정상 동작하는 한 발생 범위는 "정상 Planning 실패 + 그 사이 preference 변경 + reconciliation에서 뒤늦게 발견"이 겹치는 좁은 경우로 제한된다. V1에서는 이 리스크를 감수하고 effective-dated preference를 만들지 않는다.
+
+**Executor의 트랜잭션 분리**
+
+LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다. Planner는 Job을 만들기만 하고 LLM을 부르지 않으므로 이 문제에서 자유롭다 — Executor에서만 신경 쓰면 된다.
 
 ```
-새 트랜잭션 → JournalGenerationJob PENDING 저장 → 커밋
-트랜잭션 밖 → ConversationJournalSourceQuery로 원본 조회 → LLM 호출
+PENDING Job claim (PROCESSING으로 전이) → 커밋
+트랜잭션 밖 → ConversationActivityQuery.findMessages(windowStart, windowEnd) → LLM 호출
 새 트랜잭션 → Journal 저장 → Job COMPLETED → 커밋
 실패 시     → 새 트랜잭션 → Job FAILED, errorCode, attemptCount 기록 → 커밋
 ```
@@ -362,7 +422,7 @@ Moment 추출(`MomentExtractionService`)은 스케줄러로 트리거되지 않�
 
 **유실 가능성 인지**
 
-스케줄러가 매 회차마다 "아직 생성 안 된 day"를 다시 스캔하는 방식이라, 특정 회차가 서버 재시작 등으로 건너뛰어도 다음 스캔에서 그대로 다시 잡힌다 — 이벤트 유실 문제 자체가 없다.
+정상 경로는 매 회차 조회 구간이 서로 겹치게(lookback ≥ 스케줄 주기) 스캔하므로, 특정 회차가 서버 재시작 등으로 건너뛰어도 다음 회차의 겹치는 구간에서 그대로 다시 잡힌다. Job은 한 번 INSERT되면 UNIQUE 제약으로 중복 없이 보존되고 Executor가 이후 언제든 claim해서 실행한다. 장애가 lookback보다 길어지면 정상 경로만으로는 회수되지 않으므로, 그 상한을 reconciliation(위 참고)이 메운다 — 두 경로가 같은 `plan()`을 쓰므로 "정상 경로는 유실 없음, 장애는 각자 알아서"가 아니라 "관측 범위가 다른 같은 메커니즘이 상한 없이 복구한다"가 된다.
 
 그래도 다음은 필요하다:
 - Journal 생성 Job에 FAILED/PENDING 상태 기록 (재시도 대상 판단용)
@@ -508,8 +568,12 @@ gamification.point_ledger
 | Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시                        |
 | AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시                        |
 | Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                                  |
-| Journal 생성 스케줄러의 자정 이후 버퍼 시간 구체 수치   | 오프라인 지연 메시지 패턴 관찰 후           |
+| DiaryPreference.generationTime 기본값                   | 사용자 행동 패턴 관찰 후                    |
+| GenerationPlanner 정상 경로 폴링 주기 / lookback 구체 수치 | 실제 트래픽 패턴 확인 후                  |
+| GenerationPlanner reconciliation 범위(일수) / 주기       | 실제 장애 패턴 확인 후                      |
+| 재생성 시 generation_jobs 키 구성 (Job:Journal = N:1 여부) | 재생성 기능 설계 시                       |
 | 점진적(구간별) Moment 추출로 전환할 시점                | 하루 대화량이 LLM 컨텍스트 한계에 근접할 때 |
+| Moment 추출의 실제 호출 시점 (동기 vs 배치, 누가 언제 호출하는지) | Insight(Stage 5) 또는 아카이브(Stage 3) 중 먼저 구현하는 쪽에서 |
 | Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시                 |
 | 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후                  |
 | 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시                      |

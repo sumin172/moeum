@@ -39,9 +39,15 @@ class ModuleDependencyRulesTest {
     }
 
     @Test
-    fun `journal은 conversation에 직접 의존하지 않는다`() {
+    fun `journal은 conversation의 publicapi를 통해서만 접근한다`() {
         noClasses().that().resideInAPackage("com.moeum.journal..")
-            .should().dependOnClassesThat().resideInAPackage("com.moeum.conversation..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                "com.moeum.conversation.domain..",
+                "com.moeum.conversation.infrastructure..",
+                "com.moeum.conversation.application.command..",
+                "com.moeum.conversation.application.query..",
+                "com.moeum.conversation.interfaces..",
+            )
             .allowEmptyShould(true) // Stage 0: journal 패키지에 아직 클래스가 없음
             .check(importedClasses)
     }
