@@ -367,6 +367,9 @@ deleted_at       TIMESTAMPTZ NULL   -- Soft Delete
 purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
 ```
 
+- 사용자 소유 테이블은 모두 `user_id`를 직접 갖는다 — 탈퇴 시 연쇄 삭제·export를 join 없이 (PRINCIPLES #11)
+- 원문은 앱 수준으로 암호화하지 않고, 백업 보존 기간(예: 30일)으로 "삭제 후 최대 N일 안에 백업에서도 제거"를 보장한다 (PRINCIPLES #12, 2026-10-08)
+
 ---
 
 ## AI 추상화 인터페이스

@@ -7,6 +7,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 interface MessageJpaRepository : JpaRepository<MessageJpaEntity, UUID> {
+    fun findByUserIdAndId(userId: UUID, id: UUID): MessageJpaEntity?
+
     fun findByUserIdAndClientMessageId(userId: UUID, clientMessageId: UUID): MessageJpaEntity?
 
     fun findByUserIdAndDayDateAndIdGreaterThanOrderByIdAsc(

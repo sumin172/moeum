@@ -41,6 +41,7 @@ class SaveGeneratedJournalService(
             JournalRevision.of(
                 id = JournalRevisionId.generate(),
                 journalId = journal.id,
+                userId = journal.userId,
                 revisionNo = journal.currentRevision,
                 title = journal.title,
                 content = journal.content,

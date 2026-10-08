@@ -18,6 +18,7 @@ CREATE TABLE journal.journals (
 CREATE TABLE journal.journal_revisions (
     id UUID PRIMARY KEY,
     journal_id UUID NOT NULL,
+    user_id UUID NOT NULL,
     revision_no INT NOT NULL,
     title TEXT NOT NULL,
     content JSONB NOT NULL,
@@ -28,6 +29,8 @@ CREATE TABLE journal.journal_revisions (
 );
 
 CREATE INDEX idx_journal_journal_revisions_journal_id ON journal.journal_revisions (journal_id);
+-- 사용자 단위 삭제·export
+CREATE INDEX idx_journal_journal_revisions_user_id ON journal.journal_revisions (user_id);
 
 -- status/attempt_count/next_attempt_at/lease_expires_at/version: 공통 작업 실행 규칙(platform JobState, JobClaimSql)
 -- next_attempt_at: 첫 시도는 그 하루가 끝나는 시각, 실패하면 재시도 시각

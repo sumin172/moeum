@@ -4,6 +4,7 @@ import com.moeum.journal.domain.JournalRevisionRepository
 import com.moeum.journal.domain.model.JournalId
 import com.moeum.journal.domain.model.JournalRevision
 import com.moeum.journal.domain.model.JournalRevisionId
+import com.moeum.kernel.UserId
 import org.springframework.stereotype.Component
 
 @Component
@@ -19,6 +20,7 @@ private fun JournalRevisionJpaEntity.toDomain(): JournalRevision =
     JournalRevision(
         id = JournalRevisionId(id),
         journalId = JournalId(journalId),
+        userId = UserId(userId),
         revisionNo = revisionNo,
         title = title,
         content = content,
@@ -30,6 +32,7 @@ private fun JournalRevision.toEntity(): JournalRevisionJpaEntity =
     JournalRevisionJpaEntity(
         id = id.value,
         journalId = journalId.value,
+        userId = userId.value,
         revisionNo = revisionNo,
         title = title,
         content = content,

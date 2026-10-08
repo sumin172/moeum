@@ -499,6 +499,8 @@ gamification.point_ledger
 5. 데이터 유형별 삭제·보존 정책 — deleted_at + purge_after + Hard Delete 기준 정의
 6. PostgreSQL schema 분리 — 모듈별
 7. 하루 경계 — 메시지의 day_date를 저장 시점에 확정 (대화 컨텍스트·일기·quota가 같은 하루를 공유)
+8. 사용자 소유 테이블의 user_id와 user_id 포함 조회 — 탈퇴 삭제·export·파티셔닝의 전제 (PRINCIPLES #11)
+9. 원문 암호화 여부 — 앱 수준 암호화 안 함, 백업 보존 기간으로 삭제 보장으로 결정 (PRINCIPLES #12). 바꾸면 전체 재암호화와 검색 재설계가 따라온다
 
 ## 나중에 고쳐도 되는 것
 
@@ -528,3 +530,4 @@ gamification.point_ledger
 | Redis 도입 여부                                         | 세션/캐시 실제 필요 발생 시                 |
 | 무료 티어 quota 구체적 수치 (일일 메시지/토큰 한도)     | 실사용 트래픽 패턴 확인 후                  |
 | 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지      | 검색 품질 불만 발생 시                      |
+| 백업 보존 기간 구체 수치 (탈퇴 후 백업 제거 보장 기간)  | 배포 환경(DB 백업) 구성 시                  |
