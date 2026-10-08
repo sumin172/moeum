@@ -52,12 +52,17 @@ moeum:
       # 교체된 직전 토큰이 이 시간 안에 다시 오면 탈취가 아니라 동시 요청으로 보고 세션을 유지한다
       rotation-grace: 30s
   worker:
-    # false면 이 인스턴스는 스케줄러(AI 응답 작업 poller, 일기 Planner/Executor)를 돌리지 않는다.
-    # API 전용 인스턴스와 워커 인스턴스를 같은 jar로 나눠 띄우기 위한 스위치.
+    # false면 이 인스턴스는 AI 작업을 실행하지 않는다 — 스케줄러(응답 작업 poller, 일기 Planner/Executor)도,
+    # 메시지 저장 직후 즉시 실행도 하지 않고 작업을 쌓기만 한다. API 전용 인스턴스와 워커 인스턴스를 같은 jar로
+    # 나눠 띄우기 위한 스위치. 분리 운영 시 워커의 response-job.poll-interval을 1~2초로 줄여 응답 지연을 맞춘다.
     enabled: true
   conversation:
     ai:
       daily-message-limit: 20
+    # 이상 사용으로 LLM 비용이 튀지 않게 하는 상한(잠정값, ConversationLimitProperties 참고)
+    limits:
+      max-message-length: 4000
+      context-char-budget: 20000
     # AI 응답 생성 작업 재시도/리스 정책 (기본값은 ResponseJobProperties 참고)
     response-job:
       max-attempts: 3

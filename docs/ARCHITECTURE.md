@@ -57,6 +57,8 @@ AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 �
 - 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 함
 - 응답 토큰 상한: 일상 반응 150 토큰 (출력 측 제어, 위 컨텍스트 정책과 별개 축) — `moeum.llm.routes.conversation-response.max-output-tokens`. Gemini 2.5+는 thinking 토큰도 상한에 포함되므로 이 용도는 `thinking-budget: 0`으로 thinking을 끈다. 상한에 걸려 잘린 응답 비율은 원장의 `finish_reason`(MAX_TOKENS)으로 관측한다(#33)
 - 시스템 프롬프트 최소화
+- 이상 사용 상한(#39, `moeum.conversation.limits`, 잠정값): 메시지 하나 최대 4,000자(넘으면 400), AI 응답 컨텍스트 최대 약 20,000자 — 넘으면 오래된 메시지부터 빼고 최근 대화만 보낸다(사용자 발화로 시작하도록 맞춤, 잘림은 로그로 관측). 하루 전체 재전송은 비용이 메시지 수의 제곱으로 늘어나므로 그 상한이다. 정상 사용(quota 하루 20개)에서는 걸리지 않는다
+- 예산을 넘는 긴 하루를 "잘라내기" 대신 "요약으로 이어가기"로 바꾸는 것은 quota 확대·유료 요금제 설계 때(Stage 6) 한다
 - 개발 중 전체를 Gemini 무료 티어로 처리
 
 ---
@@ -507,7 +509,8 @@ PENDING ──claim──▶ PROCESSING ──성공──▶ COMPLETED
 - **늦은 결과 차단(fencing)**: 결과 저장은 claim 때 받은 `version`으로 낙관적 락을 건다. 리스를 뺏긴 워커의 늦은 저장은 충돌로 거부되고, 결과물(assistant 메시지, 일기)과 작업 완료가 한 트랜잭션이라 함께 롤백된다 — 중복 생성이 없다.
 - **트랜잭션 경계**: claim(짧은 트랜잭션) → LLM 호출(트랜잭션 밖) → 결과 저장+완료 또는 실패 기록(각각 새 트랜잭션). LLM 호출 동안 DB 커넥션을 붙잡지 않는다.
 - **재시도 정책**(설정값, 잠정): 대화 응답 3회·10s/60s·리스 2분, 일기 생성 5회·1m/5m/30m/2h·리스 5분, backoff에 지터 20%.
-- **워커 분리 스위치**: `moeum.worker.enabled=false`면 그 인스턴스는 poller와 Planner/Executor 스케줄을 등록하지 않는다. 같은 jar를 API 전용/워커로 나눠 띄울 수 있다.
+- **워커 분리 스위치**: `moeum.worker.enabled=false`면 그 인스턴스는 AI 작업을 실행하지 않는다 — poller와 Planner/Executor 스케줄을 등록하지 않고, 메시지 저장 직후의 즉시 실행(`ResponseJobTrigger`)도 하지 않는다(#39). API 전용 인스턴스는 작업을 쌓기만 하고 워커 인스턴스가 가져간다. 같은 jar를 API 전용/워커로 나눠 띄울 수 있고, 분리 운영 시 워커의 poll 주기를 1~2초로 줄여 응답 지연을 맞춘다.
+- **동시 호출 상한은 인스턴스 단위**다(`moeum.llm.max-concurrent-calls`). Gemini rate limit은 API 키 단위이므로, 인스턴스를 여러 대로 늘리는 시점에 인스턴스당 상한을 나눠 잡거나 분산 limiter를 검토한다.
 
 **대화 응답 작업 흐름**
 - 유저 메시지와 응답 작업을 **같은 트랜잭션**에서 만든다. 커밋 직후 `@Async`로 바로 한 번 실행을 시도하고(지연 최소화), 그 실행이 서버 재시작 등으로 유실돼도 poller(기본 10초)가 회수한다.

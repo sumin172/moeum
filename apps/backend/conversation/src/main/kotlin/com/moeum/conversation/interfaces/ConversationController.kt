@@ -1,6 +1,6 @@
 package com.moeum.conversation.interfaces
 
-import com.moeum.conversation.application.command.ResponseJobExecutor
+import com.moeum.conversation.application.command.ResponseJobTrigger
 import com.moeum.conversation.application.command.RetryResponseService
 import com.moeum.conversation.application.command.SaveMessageCommand
 import com.moeum.conversation.application.command.SaveMessageService
@@ -33,7 +33,7 @@ class ConversationController(
     private val saveMessageService: SaveMessageService,
     private val getTodayConversationService: GetTodayConversationService,
     private val retryResponseService: RetryResponseService,
-    private val responseJobExecutor: ResponseJobExecutor,
+    private val responseJobTrigger: ResponseJobTrigger,
 ) {
     private val log = LoggerFactory.getLogger(ConversationController::class.java)
 
@@ -55,7 +55,7 @@ class ConversationController(
         }
         // 이번 호출이 실제로 새 행을 커밋했을 때만 바로 실행을 시도한다. 여기서 유실돼도 poller가 회수한다.
         if (result.isNewlyCreated) {
-            responseJobExecutor.executeAsync(result.responseJob.id)
+            responseJobTrigger.requestImmediateExecution(result.responseJob.id)
         }
         return MessageResponse.from(result.message, result.responseJob)
     }
@@ -66,7 +66,7 @@ class ConversationController(
     fun retryResponse(@AuthenticationPrincipal userId: UserId, @PathVariable messageId: UUID): MessageResponse {
         val result = retryResponseService.retry(userId, MessageId(messageId))
         if (result.restarted) {
-            responseJobExecutor.executeAsync(result.responseJob.id)
+            responseJobTrigger.requestImmediateExecution(result.responseJob.id)
         }
         return MessageResponse.from(result.message, result.responseJob)
     }

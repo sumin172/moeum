@@ -65,7 +65,7 @@ class ResponseJobExecutorTest {
     )
 
     private fun enqueue(content: String = "오늘 정말 피곤했다", occurredAt: Instant = start): ResponseJob {
-        val message = messageRepository.save(userMessage(userId, content, occurredAt, dayDate))
+        val message = messageRepository.append(userMessage(userId, content, occurredAt, dayDate))
         return jobRepository.save(ResponseJob.pending(message, start))
     }
 
@@ -85,9 +85,9 @@ class ResponseJobExecutorTest {
 
     @Test
     fun `자정을 넘겨도 같은 하루의 대화만 컨텍스트로 전달한다`() {
-        messageRepository.save(userMessage(userId, "자정 전", Instant.parse("2026-08-08T14:50:00Z"), dayDate))
-        messageRepository.save(userMessage(userId, "전날", Instant.parse("2026-08-07T10:00:00Z"), dayDate.minusDays(1)))
-        messageRepository.save(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-08T14:55:00Z"), dayDate))
+        messageRepository.append(userMessage(userId, "자정 전", Instant.parse("2026-08-08T14:50:00Z"), dayDate))
+        messageRepository.append(userMessage(userId, "전날", Instant.parse("2026-08-07T10:00:00Z"), dayDate.minusDays(1)))
+        messageRepository.append(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-08T14:55:00Z"), dayDate))
         val job = enqueue("자정 후", Instant.parse("2026-08-08T15:10:00Z"))
         val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
 

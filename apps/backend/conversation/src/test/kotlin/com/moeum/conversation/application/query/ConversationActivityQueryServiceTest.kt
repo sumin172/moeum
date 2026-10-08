@@ -23,8 +23,8 @@ class ConversationActivityQueryServiceTest {
     @Test
     fun `구간 안에 저장된 메시지를 사용자별 하루로 묶고, 하루가 끝나는 시각을 함께 준다`() {
         val day = LocalDate.of(2026, 8, 2)
-        messageRepository.save(userMessage(userId, "a", Instant.parse("2026-08-02T01:00:00Z"), day))
-        messageRepository.save(userMessage(userId, "b", Instant.parse("2026-08-02T02:00:00Z"), day))
+        messageRepository.append(userMessage(userId, "a", Instant.parse("2026-08-02T01:00:00Z"), day))
+        messageRepository.append(userMessage(userId, "b", Instant.parse("2026-08-02T02:00:00Z"), day))
 
         val activeDays = service.findActiveDays(Instant.parse("2026-08-02T00:00:00Z"), Instant.parse("2026-08-02T03:00:00Z"))
 
@@ -37,7 +37,7 @@ class ConversationActivityQueryServiceTest {
     @Test
     fun `저장 시각 기준이라 오프라인으로 늦게 도착한 과거 하루의 메시지도 잡힌다`() {
         val pastDay = LocalDate.of(2026, 7, 30)
-        messageRepository.save(
+        messageRepository.append(
             userMessage(
                 userId, "비행기에서 쓴 메시지", Instant.parse("2026-07-30T05:00:00Z"), pastDay,
                 createdAt = Instant.parse("2026-08-02T09:30:00Z"),
@@ -52,9 +52,9 @@ class ConversationActivityQueryServiceTest {
     @Test
     fun `하루의 원본 메시지를 발화 순서대로 돌려준다`() {
         val day = LocalDate.of(2026, 8, 2)
-        messageRepository.save(userMessage(userId, "둘째", Instant.parse("2026-08-02T05:00:00Z"), day))
-        messageRepository.save(userMessage(userId, "첫째", Instant.parse("2026-08-02T03:00:00Z"), day))
-        messageRepository.save(userMessage(userId, "다른 날", Instant.parse("2026-08-03T05:00:00Z"), day.plusDays(1)))
+        messageRepository.append(userMessage(userId, "둘째", Instant.parse("2026-08-02T05:00:00Z"), day))
+        messageRepository.append(userMessage(userId, "첫째", Instant.parse("2026-08-02T03:00:00Z"), day))
+        messageRepository.append(userMessage(userId, "다른 날", Instant.parse("2026-08-03T05:00:00Z"), day.plusDays(1)))
 
         assertThat(service.findMessages(userId, day).map { it.content }).containsExactly("첫째", "둘째")
     }

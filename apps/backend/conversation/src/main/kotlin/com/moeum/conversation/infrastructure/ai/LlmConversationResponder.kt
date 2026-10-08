@@ -4,11 +4,13 @@ import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.ConversationResponse
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageRole
+import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
 import com.moeum.kernel.UserId
 import com.moeum.platform.llm.LlmClient
 import com.moeum.platform.llm.LlmMessage
 import com.moeum.platform.llm.LlmRequest
 import com.moeum.platform.llm.LlmRole
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
 // moeum.llm.routes.conversation-response로 provider·모델·토큰 상한이 정해진다.
@@ -27,14 +29,24 @@ private const val SYSTEM_PROMPT =
 @Component
 class LlmConversationResponder(
     private val llmClient: LlmClient,
+    private val limits: ConversationLimitProperties,
 ) : ConversationResponder {
 
+    private val log = LoggerFactory.getLogger(LlmConversationResponder::class.java)
+
     override fun respond(userId: UserId, context: List<Message>): ConversationResponse {
+        val fitted = fitToBudget(context, limits.contextCharBudget)
+        if (fitted.size < context.size) {
+            log.info(
+                "AI 컨텍스트가 예산을 넘어 최근 대화만 전달: userId={}, total={}, sent={}, budgetChars={}",
+                userId.value, context.size, fitted.size, limits.contextCharBudget,
+            )
+        }
         val result = llmClient.generate(
             LlmRequest(
                 purpose = CONVERSATION_RESPONSE_PURPOSE,
                 systemPrompt = SYSTEM_PROMPT,
-                messages = context.map { LlmMessage(role = it.role.toLlmRole(), content = it.content) },
+                messages = fitted.map { LlmMessage(role = it.role.toLlmRole(), content = it.content) },
                 promptVersion = PROMPT_VERSION,
                 userId = userId,
             ),
@@ -49,6 +61,18 @@ class LlmConversationResponder(
             outputTokens = result.outputTokens,
         )
     }
+}
+
+// 최근 메시지부터 거꾸로 담아 예산(글자 수) 안에서 가장 긴 최근 구간을 남긴다. 마지막(가장 최근) 메시지는 예산을 넘어도
+// 항상 포함한다(메시지 길이 상한이 예산보다 작아 정상 설정에서는 일어나지 않는다).
+// 잘린 앞부분이 AI 응답으로 시작하면 그것도 뺀다 — 대화는 사용자 발화로 시작해야 자연스럽다.
+internal fun fitToBudget(context: List<Message>, budgetChars: Int): List<Message> {
+    var used = 0
+    val kept = context.asReversed().takeWhile { message ->
+        used += message.content.length
+        used <= budgetChars
+    }.ifEmpty { context.takeLast(1) }.asReversed()
+    return if (kept.size == context.size) kept else kept.dropWhile { it.role == MessageRole.ASSISTANT }.ifEmpty { kept }
 }
 
 private fun MessageRole.toLlmRole(): LlmRole =

@@ -1,32 +1,21 @@
 package com.moeum.journal.infrastructure.jpa
 
 import com.moeum.journal.domain.JournalRevisionRepository
-import com.moeum.journal.domain.model.JournalId
 import com.moeum.journal.domain.model.JournalRevision
-import com.moeum.journal.domain.model.JournalRevisionId
-import com.moeum.kernel.UserId
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 
 @Component
 class JournalRevisionRepositoryImpl(
-    private val jpaRepository: JournalRevisionJpaRepository,
+    private val entityManager: EntityManager,
 ) : JournalRevisionRepository {
 
-    override fun save(revision: JournalRevision): JournalRevision =
-        jpaRepository.save(revision.toEntity()).toDomain()
+    // 추가만 하는 이력이므로 merge(SELECT 후 INSERT) 대신 persist로 바로 INSERT한다
+    override fun append(revision: JournalRevision): JournalRevision {
+        entityManager.persist(revision.toEntity())
+        return revision
+    }
 }
-
-private fun JournalRevisionJpaEntity.toDomain(): JournalRevision =
-    JournalRevision(
-        id = JournalRevisionId(id),
-        journalId = JournalId(journalId),
-        userId = UserId(userId),
-        revisionNo = revisionNo,
-        title = title,
-        content = content,
-        editedBy = editedBy,
-        createdAt = createdAt,
-    )
 
 private fun JournalRevision.toEntity(): JournalRevisionJpaEntity =
     JournalRevisionJpaEntity(

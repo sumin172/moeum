@@ -15,5 +15,7 @@ interface MessageRepository {
     fun findAllByUserIdAndDayDate(userId: UserId, dayDate: LocalDate): List<Message>
     // [from, to) 구간에 저장(createdAt)된 메시지, 전체 사용자 대상 — Journal이 "새 활동이 생긴 하루"를 찾는 데 쓴다.
     fun findCreatedBetween(from: Instant, to: Instant): List<Message>
-    fun save(message: Message): Message
+    // 메시지는 저장 후 바뀌지 않는다(사용자 원본은 불변, AI 응답도 생성 기록) — 수정용 save 없이 추가만 한다.
+    // 삭제가 생기면 deleted_at만 바꾸는 전용 메서드로 한다.
+    fun append(message: Message): Message
 }

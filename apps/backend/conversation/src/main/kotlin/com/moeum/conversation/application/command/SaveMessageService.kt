@@ -9,6 +9,7 @@ import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.domain.parseTimezone
+import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import org.springframework.stereotype.Service
@@ -31,12 +32,16 @@ class SaveMessageService(
     private val messageRepository: MessageRepository,
     private val responseJobRepository: ResponseJobRepository,
     private val aiQuotaGuard: AiQuotaGuard,
+    private val limits: ConversationLimitProperties,
     private val timeProvider: TimeProvider,
 ) {
     @Transactional
     fun save(userId: UserId, command: SaveMessageCommand): SaveMessageResult {
         if (command.content.isBlank()) {
             throw InvalidConversationRequestException("메시지 내용은 비어있을 수 없습니다")
+        }
+        if (command.content.length > limits.maxMessageLength) {
+            throw InvalidConversationRequestException("메시지는 ${limits.maxMessageLength}자를 넘을 수 없습니다")
         }
         val zoneId = parseTimezone(command.timezone)
 
@@ -60,7 +65,7 @@ class SaveMessageService(
             clientMessageId = command.clientMessageId,
             now = now,
         )
-        val saved = messageRepository.save(message)
+        val saved = messageRepository.append(message)
         // 응답 작업은 메시지와 같은 트랜잭션에서 만든다 — 커밋 후 비동기 실행이 유실돼도 poller가 다시 집어 간다.
         val job = if (aiQuotaGuard.tryConsume(userId, dayDate)) {
             ResponseJob.pending(saved, now)

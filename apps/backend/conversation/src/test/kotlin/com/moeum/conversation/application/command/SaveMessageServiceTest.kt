@@ -2,6 +2,7 @@ package com.moeum.conversation.application.command
 
 import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.model.DayPreference
+import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
 import com.moeum.conversation.support.FixedTimeProvider
 import com.moeum.conversation.support.InMemoryDayPreferenceRepository
 import com.moeum.conversation.support.InMemoryMessageRepository
@@ -28,7 +29,10 @@ class SaveMessageServiceTest {
     private val service = newService()
 
     private fun newService(quotaLimit: Int = 20) =
-        SaveMessageService(dayPreferenceRepository, messageRepository, responseJobRepository, quotaGuard(quotaLimit), FixedTimeProvider(now))
+        SaveMessageService(
+            dayPreferenceRepository, messageRepository, responseJobRepository, quotaGuard(quotaLimit),
+            ConversationLimitProperties(maxMessageLength = 10), FixedTimeProvider(now),
+        )
 
     private fun command(occurredAt: String, content: String = "내용", clientMessageId: UUID = UUID.randomUUID()) =
         SaveMessageCommand(clientMessageId, content, Instant.parse(occurredAt), "Asia/Seoul")
@@ -81,6 +85,13 @@ class SaveMessageServiceTest {
     fun `content가 비어있으면 저장을 거부한다`() {
         assertThatThrownBy { service.save(userId, command("2026-08-02T03:00:00Z", content = "   ")) }
             .isInstanceOf(InvalidConversationRequestException::class.java)
+    }
+
+    @Test
+    fun `최대 길이를 넘는 메시지는 저장을 거부한다`() {
+        assertThatThrownBy { service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(11))) }
+            .isInstanceOf(InvalidConversationRequestException::class.java)
+        assertThat(service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(10))).isNewlyCreated).isTrue()
     }
 
     @Test
