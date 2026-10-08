@@ -4,10 +4,8 @@ import com.moeum.identity.domain.GoogleIdTokenVerifierPort
 import com.moeum.identity.domain.model.GoogleProfile
 import com.moeum.identity.interfaces.dto.GoogleLoginRequest
 import com.moeum.identity.interfaces.dto.GoogleLoginResponse
-import com.moeum.platform.llm.conversation.ConversationRequest
-import com.moeum.platform.llm.conversation.ConversationResponder
-import com.moeum.platform.llm.conversation.ConversationResponse
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
@@ -33,11 +31,24 @@ import java.util.UUID
 @ActiveProfiles("local")
 @AutoConfigureTestRestTemplate
 @Import(AbstractIntegrationTest.FakeGoogleVerifierConfig::class, AbstractIntegrationTest.FakeConversationResponderConfig::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    // 재시도 흐름을 몇 초 안에 끝까지 검증할 수 있도록 응답 작업 backoff와 poll 주기를 줄인다
+    properties = [
+        "moeum.conversation.response-job.backoff=200ms",
+        "moeum.conversation.response-job.poll-interval=PT0.3S",
+    ],
+)
 abstract class AbstractIntegrationTest {
 
     @Autowired
     lateinit var restTemplate: TestRestTemplate
+
+    @Autowired
+    lateinit var conversationResponder: ControllableConversationResponder
+
+    @BeforeEach
+    fun resetResponder() = conversationResponder.reset()
 
     protected fun issueJwt(): String {
         val response = restTemplate.postForEntity<GoogleLoginResponse>(
@@ -83,18 +94,6 @@ abstract class AbstractIntegrationTest {
     class FakeConversationResponderConfig {
         @Bean
         @Primary
-        fun fakeConversationResponder(): ConversationResponder =
-            object : ConversationResponder {
-                override fun respond(request: ConversationRequest): ConversationResponse =
-                    ConversationResponse(
-                        generationId = UUID.randomUUID(),
-                        content = "테스트 응답입니다.",
-                        model = "fake-model",
-                        provider = "fake",
-                        promptVersion = "test",
-                        inputTokens = 1,
-                        outputTokens = 1,
-                    )
-            }
+        fun fakeConversationResponder(): ControllableConversationResponder = ControllableConversationResponder()
     }
 }

@@ -1,22 +1,20 @@
 package com.moeum.journal.domain.model
 
 import com.moeum.kernel.UserId
+import com.moeum.platform.job.JobPolicy
+import com.moeum.platform.job.JobState
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-enum class GenerationJobStatus { PENDING, PROCESSING, COMPLETED, FAILED }
-
+// 사용자 하루 하나의 일기 생성 작업. 첫 시도 시각(state.nextAttemptAt)은 그 하루가 끝나는 시각이다.
 data class GenerationJob(
     val id: GenerationJobId,
     val journalId: JournalId?,
     val userId: UserId,
     // Conversation의 dayDate(사용자 하루 경계 기준 하루)와 같은 값
     val diaryDate: LocalDate,
-    // 이 하루가 끝나는 시각 — 이후 Executor가 claim할 수 있다
-    val scheduledAt: Instant,
-    val status: GenerationJobStatus,
-    val attemptCount: Int,
+    val state: JobState,
     val provider: String? = null,
     val model: String? = null,
     val promptVersion: String? = null,
@@ -24,8 +22,8 @@ data class GenerationJob(
     val outputTokens: Int? = null,
     val generationId: UUID? = null,
     val generatedAt: Instant? = null,
-    val errorCode: String? = null,
     val createdAt: Instant,
+    val updatedAt: Instant,
 ) {
     fun completed(
         journalId: JournalId,
@@ -39,7 +37,7 @@ data class GenerationJob(
     ): GenerationJob =
         copy(
             journalId = journalId,
-            status = GenerationJobStatus.COMPLETED,
+            state = state.completed(),
             provider = provider,
             model = model,
             promptVersion = promptVersion,
@@ -47,27 +45,25 @@ data class GenerationJob(
             outputTokens = outputTokens,
             generationId = generationId,
             generatedAt = now,
+            updatedAt = now,
         )
 
-    fun failed(errorCode: String): GenerationJob =
-        copy(status = GenerationJobStatus.FAILED, attemptCount = attemptCount + 1, errorCode = errorCode)
+    fun failed(errorCode: String, policy: JobPolicy, now: Instant): GenerationJob =
+        copy(state = state.failed(errorCode, policy, now), updatedAt = now)
+
+    fun failedPermanently(errorCode: String, now: Instant): GenerationJob =
+        copy(state = state.failedPermanently(errorCode), updatedAt = now)
 
     companion object {
-        fun pending(
-            userId: UserId,
-            diaryDate: LocalDate,
-            scheduledAt: Instant,
-            now: Instant,
-        ): GenerationJob =
+        fun pending(userId: UserId, diaryDate: LocalDate, dayEnd: Instant, now: Instant): GenerationJob =
             GenerationJob(
                 id = GenerationJobId.generate(),
                 journalId = null,
                 userId = userId,
                 diaryDate = diaryDate,
-                scheduledAt = scheduledAt,
-                status = GenerationJobStatus.PENDING,
-                attemptCount = 0,
+                state = JobState.pending(nextAttemptAt = dayEnd),
                 createdAt = now,
+                updatedAt = now,
             )
     }
 }

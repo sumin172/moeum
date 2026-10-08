@@ -3,6 +3,8 @@ package com.moeum.conversation.application.query
 import com.moeum.conversation.support.FixedTimeProvider
 import com.moeum.conversation.support.InMemoryDayPreferenceRepository
 import com.moeum.conversation.support.InMemoryMessageRepository
+import com.moeum.conversation.support.InMemoryResponseJobRepository
+import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.support.userMessage
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
@@ -15,7 +17,8 @@ class GetTodayConversationServiceTest {
     private val userId = UserId.generate()
     private val messageRepository = InMemoryMessageRepository()
     private val timeProvider = FixedTimeProvider(Instant.parse("2026-08-02T10:00:00Z")) // KST 8/2 19:00
-    private val service = GetTodayConversationService(InMemoryDayPreferenceRepository(), messageRepository, timeProvider)
+    private val responseJobRepository = InMemoryResponseJobRepository()
+    private val service = GetTodayConversationService(InMemoryDayPreferenceRepository(), messageRepository, responseJobRepository, timeProvider)
     private val today = LocalDate.of(2026, 8, 2)
 
     @Test
@@ -70,5 +73,15 @@ class GetTodayConversationServiceTest {
 
         val delta = service.getToday(userId, "Asia/Seoul", previousDay = false, after = firstPage.messages.last().id, limit = 2)
         assertThat(delta.messages).extracting("content").containsExactly("메시지5")
+    }
+
+    @Test
+    fun `유저 메시지마다 AI 응답 작업 상태를 함께 돌려준다`() {
+        val message = messageRepository.save(userMessage(userId, "질문", Instant.parse("2026-08-02T01:00:00Z"), today))
+        val job = responseJobRepository.save(ResponseJob.pending(message, Instant.parse("2026-08-02T01:00:00Z")))
+
+        val result = service.getToday(userId, "Asia/Seoul", previousDay = false, after = null, limit = 50)
+
+        assertThat(result.responseJobs[message.id]).isEqualTo(job)
     }
 }

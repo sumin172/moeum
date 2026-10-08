@@ -3,15 +3,12 @@ package com.moeum.journal.application.command
 import com.moeum.conversation.application.publicapi.ActiveDay
 import com.moeum.conversation.application.publicapi.ConversationActivityQuery
 import com.moeum.conversation.application.publicapi.MessageSnapshot
-import com.moeum.journal.domain.GenerationJobRepository
-import com.moeum.journal.domain.model.GenerationJob
-import com.moeum.journal.domain.model.GenerationJobId
-import com.moeum.journal.domain.model.GenerationJobStatus
+import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
+import com.moeum.platform.job.JobStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.springframework.dao.DataIntegrityViolationException
 import java.time.Instant
 import java.time.LocalDate
 
@@ -20,22 +17,6 @@ class GenerationPlannerTest {
     private class FakeActivityQuery(var activeDays: List<ActiveDay>) : ConversationActivityQuery {
         override fun findActiveDays(from: Instant, to: Instant): List<ActiveDay> = activeDays
         override fun findMessages(userId: UserId, dayDate: LocalDate): List<MessageSnapshot> = error("not used in this test")
-    }
-
-    // UNIQUE(user_id, diary_date)를 흉내 낸다
-    private class InMemoryGenerationJobRepository : GenerationJobRepository {
-        val jobs = mutableListOf<GenerationJob>()
-        override fun save(job: GenerationJob): GenerationJob {
-            if (jobs.any { it.id != job.id && it.userId == job.userId && it.diaryDate == job.diaryDate }) {
-                throw DataIntegrityViolationException("uq_journal_generation_jobs_user_diary_date")
-            }
-            jobs.removeIf { it.id == job.id }
-            jobs.add(job)
-            return job
-        }
-        override fun findPendingDue(now: Instant): List<GenerationJob> = error("not used in this test")
-        override fun compareAndSetStatus(id: GenerationJobId, expected: GenerationJobStatus, updated: GenerationJobStatus): Boolean =
-            error("not used in this test")
     }
 
     private val now = Instant.parse("2026-08-02T10:00:00Z")
@@ -56,10 +37,10 @@ class GenerationPlannerTest {
 
         planner.plan(now.minusSeconds(600), now, "RECENT")
 
-        val job = jobRepository.jobs.single()
+        val job = jobRepository.jobs.values.single()
         assertThat(job.diaryDate).isEqualTo(LocalDate.of(2026, 8, 2))
-        assertThat(job.scheduledAt).isEqualTo(dayEnd)
-        assertThat(job.status).isEqualTo(GenerationJobStatus.PENDING)
+        assertThat(job.state.nextAttemptAt).isEqualTo(dayEnd)
+        assertThat(job.state.status).isEqualTo(JobStatus.PENDING)
     }
 
     @Test

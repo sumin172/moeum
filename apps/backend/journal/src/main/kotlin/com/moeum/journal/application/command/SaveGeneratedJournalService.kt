@@ -21,6 +21,8 @@ class SaveGeneratedJournalService(
     private val generationJobRepository: GenerationJobRepository,
     private val timeProvider: TimeProvider,
 ) {
+    // 일기와 작업 완료를 한 트랜잭션에서 저장한다. 리스를 뺏긴 워커면 작업 저장이 낙관적 락 충돌로 실패해
+    // 트랜잭션 전체가 롤백되므로 일기가 중복 저장되지 않는다.
     @Transactional
     fun save(job: GenerationJob, generation: JournalGenerationResponse): Journal {
         val now = timeProvider.now()

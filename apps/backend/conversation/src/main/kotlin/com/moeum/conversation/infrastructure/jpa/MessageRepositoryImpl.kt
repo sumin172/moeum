@@ -3,7 +3,6 @@ package com.moeum.conversation.infrastructure.jpa
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
-import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.kernel.UserId
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
@@ -19,6 +18,9 @@ private val DISPLAY_ORDER = compareBy<Message>({ it.occurredAt }, { it.id.value 
 class MessageRepositoryImpl(
     private val jpaRepository: MessageJpaRepository,
 ) : MessageRepository {
+
+    override fun findById(id: MessageId): Message? =
+        jpaRepository.findById(id.value).map { it.toDomain() }.orElse(null)
 
     override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
         jpaRepository.findByUserIdAndClientMessageId(userId.value, clientMessageId)?.toDomain()
@@ -41,9 +43,6 @@ class MessageRepositoryImpl(
 
     override fun save(message: Message): Message =
         jpaRepository.save(message.toEntity()).toDomain()
-
-    override fun compareAndSetStatus(id: MessageId, expected: MessageResponseStatus, updated: MessageResponseStatus): Boolean =
-        jpaRepository.compareAndSetStatus(id.value, expected, updated) > 0
 }
 
 private fun MessageJpaEntity.toDomain(): Message =
@@ -57,7 +56,6 @@ private fun MessageJpaEntity.toDomain(): Message =
         localDate = localDate,
         dayDate = dayDate,
         clientMessageId = clientMessageId,
-        responseStatus = responseStatus,
         generationId = generationId,
         model = model,
         promptVersion = promptVersion,
@@ -78,7 +76,6 @@ private fun Message.toEntity(): MessageJpaEntity =
         localDate = localDate,
         dayDate = dayDate,
         clientMessageId = clientMessageId,
-        responseStatus = responseStatus,
         generationId = generationId,
         model = model,
         promptVersion = promptVersion,

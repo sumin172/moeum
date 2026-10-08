@@ -12,7 +12,7 @@ data class TodayConversationResponse(
         fun from(result: TodayConversation): TodayConversationResponse =
             TodayConversationResponse(
                 dayDate = result.dayDate,
-                messages = result.messages.map { MessageResponse.from(it) },
+                messages = result.messages.map { MessageResponse.from(it, result.responseJobs[it.id]) },
             )
     }
 }

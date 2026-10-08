@@ -1,6 +1,5 @@
 package com.moeum.conversation.infrastructure.jpa
 
-import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.conversation.domain.model.MessageRole
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -34,9 +33,6 @@ class MessageJpaEntity(
     val dayDate: LocalDate,
     @Column(name = "client_message_id")
     val clientMessageId: UUID?,
-    @Column(name = "response_status")
-    @Enumerated(EnumType.STRING)
-    val responseStatus: MessageResponseStatus?,
     @Column(name = "generation_id")
     val generationId: UUID? = null,
     @Column
