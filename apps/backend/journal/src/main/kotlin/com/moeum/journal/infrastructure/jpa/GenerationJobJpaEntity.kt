@@ -9,7 +9,6 @@ import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.util.UUID
 
 @Entity
@@ -23,16 +22,8 @@ class GenerationJobJpaEntity(
     val userId: UUID,
     @Column(name = "diary_date", nullable = false)
     val diaryDate: LocalDate,
-    @Column(name = "window_start", nullable = false)
-    val windowStart: Instant,
-    @Column(name = "window_end", nullable = false)
-    val windowEnd: Instant,
     @Column(name = "scheduled_at", nullable = false)
     val scheduledAt: Instant,
-    @Column(name = "timezone_at_scheduling", nullable = false)
-    val timezoneAtScheduling: String,
-    @Column(name = "generation_time_at_scheduling", nullable = false)
-    val generationTimeAtScheduling: LocalTime,
     @Column(name = "generation_status", nullable = false)
     @Enumerated(EnumType.STRING)
     val generationStatus: GenerationJobStatus,

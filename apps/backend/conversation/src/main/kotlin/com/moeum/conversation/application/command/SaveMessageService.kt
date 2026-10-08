@@ -1,16 +1,14 @@
 package com.moeum.conversation.application.command
 
-import com.moeum.conversation.domain.ConversationDayRepository
+import com.moeum.conversation.domain.DayPreferenceRepository
 import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.MessageRepository
-import com.moeum.conversation.domain.model.ConversationDay
-import com.moeum.conversation.domain.model.ConversationDayId
+import com.moeum.conversation.domain.findOrDefault
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.parseTimezone
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -27,12 +25,10 @@ data class SaveMessageResult(val message: Message, val isNewlyCreated: Boolean)
 
 @Service
 class SaveMessageService(
-    private val conversationDayRepository: ConversationDayRepository,
+    private val dayPreferenceRepository: DayPreferenceRepository,
     private val messageRepository: MessageRepository,
     private val timeProvider: TimeProvider,
 ) {
-    private val log = LoggerFactory.getLogger(SaveMessageService::class.java)
-
     @Transactional
     fun save(userId: UserId, command: SaveMessageCommand): SaveMessageResult {
         if (command.content.isBlank()) {
@@ -44,33 +40,20 @@ class SaveMessageService(
             return SaveMessageResult(it, isNewlyCreated = false)
         }
 
-        val localDate = command.occurredAt.atZone(zoneId).toLocalDate()
-        val conversationDay = conversationDayRepository.findByUserIdAndLocalDate(userId, localDate)
-            ?: newConversationDay(userId, localDate, command.timezone)
-
-        conversationDayRepository.save(conversationDay.withMessageAdded(command.timezone))
-
+        val now = timeProvider.now()
+        // dayDate는 발화 시각(occurredAt) 기준이다 — 오프라인으로 늦게 도착한 메시지도 실제 발화한 하루에 들어간다.
+        val dayDate = dayPreferenceRepository.findOrDefault(userId, now).dayDateOf(command.occurredAt, zoneId)
         val message = Message.userMessage(
             id = MessageId.generate(),
-            conversationDayId = conversationDay.id,
             userId = userId,
             content = command.content,
             occurredAt = command.occurredAt,
             timezone = command.timezone,
-            localDate = localDate,
+            localDate = command.occurredAt.atZone(zoneId).toLocalDate(),
+            dayDate = dayDate,
             clientMessageId = command.clientMessageId,
+            now = now,
         )
         return SaveMessageResult(messageRepository.save(message), isNewlyCreated = true)
-    }
-
-    private fun newConversationDay(userId: UserId, localDate: java.time.LocalDate, timezone: String): ConversationDay {
-        log.info("새 ConversationDay 생성: userId={}, localDate={}", userId.value, localDate)
-        return ConversationDay.open(
-            id = ConversationDayId.generate(),
-            userId = userId,
-            localDate = localDate,
-            timezone = timezone,
-            now = timeProvider.now(),
-        )
     }
 }

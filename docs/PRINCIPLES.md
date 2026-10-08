@@ -14,7 +14,7 @@
 **2. 다른 모듈의 테이블을 직접 조회하지 않는다**
 ```kotlin
 // ❌ Journal 모듈에서 conversation 테이블 직접 접근
-conversationMessageRepository.findByConversationDayId(id)
+conversationMessageRepository.findByUserIdAndDayDate(userId, dayDate)
 
 // ✅ Conversation 모듈의 Application Service 경유
 conversationQueryService.getMessagesForJournalGeneration(id)
@@ -27,7 +27,7 @@ conversationQueryService.getMessagesForJournalGeneration(id)
 **4. 모든 사용자 입력에 timezone과 local_date를 저장한다**
 - 나중에 추가하면 과거 데이터 전부 재계산
 - Message의 timezone/local_date는 저장 시점에 한 번 계산되고 이후 절대 갱신되지 않는 값(불변 기록)
-- ConversationDay.timezone은 예외 — 메시지가 추가될 때마다 최신 관측 zone으로 갱신되는 living 값(`ConversationActivityQuery`가 노출하고, Journal이 diary day를 계산하는 입력). 단 ConversationDay.local_date는 이때도 절대 재계산하지 않는다 — local_date가 그 row의 정체성(UNIQUE 키)이라 timezone과 분리해서 다뤄야 충돌 위험이 없다
+- 대화 메시지는 여기에 더해 사용자 하루 경계 기준의 `day_date`도 저장 시점에 한 번 계산해 저장한다(불변). 하루 경계 설정이 나중에 바뀌어도 이미 저장된 메시지의 하루는 바뀌지 않는다 (2026-10-08, #29)
 
 **5. UserId는 auth provider ID와 분리한다**
 - 내부 UUID를 별도 생성
@@ -105,7 +105,7 @@ N+1은 `JOIN FETCH`, `@EntityGraph`, `@BatchSize` 같은 쿼리 기법으로 제
 
 - **JSONB**: 항상 부모와 함께 로딩하는 소규모 값 객체 (Journal 섹션, 감정 점수 등)
 - **명시적 Repository 쿼리**: 독립 생명주기가 있거나 페이지네이션이 필요한 경우
-  - 실제 사례(2026-08-02): `MessageRepository.findPage(conversationDayId, after: MessageId?, limit)` — 커서는 id(UUIDv7, 서버 발급 순 정렬)로 비교해 안정적으로 페이징하고, 반환 시엔 occurredAt(+id tie-break)으로 재정렬해 표시 순서를 맞춘다. 커서용 정렬 키(삽입 순서)와 표시용 정렬 키(사용자 체감 발화 순서)가 다를 수 있다는 걸 유의
+  - 실제 사례(2026-08-02): `MessageRepository.findPage(userId, dayDate, after: MessageId?, limit)` — 커서는 id(UUIDv7, 서버 발급 순 정렬)로 비교해 안정적으로 페이징하고, 반환 시엔 occurredAt(+id tie-break)으로 재정렬해 표시 순서를 맞춘다. 커서용 정렬 키(삽입 순서)와 표시용 정렬 키(사용자 체감 발화 순서)가 다를 수 있다는 걸 유의
 
 이 원칙은 도메인 특성에서 도출된 것이 아니라, 런타임 규율보다 모델 구조로 문제를 막는 것이 더 신뢰할 수 있다는 설계 철학에서 출발한다. 도메인이 달라져도 동일하게 적용한다.
 
@@ -162,7 +162,7 @@ User Entity, Journal Entity, 도메인 enum 전체 → 각 모듈 내부에
 - LLM 장애 격리: Timeout + 제한적 Retry + Circuit Breaker
 
 **비용 제어 원칙 (2026-07-25 결정)**
-- 대화 컨텍스트는 고정된 "최근 N개 메시지" 대신 해당 ConversationDay(하루) 전체를 사용한다 — LLM API는 무상태라 매 호출마다 컨텍스트를 재전송해야 하며, 하루 단위 경계가 이미 자연스러운 컨텍스트 경계다
+- 대화 컨텍스트는 고정된 "최근 N개 메시지" 대신 사용자 하루(day_date) 전체를 사용한다 — LLM API는 무상태라 매 호출마다 컨텍스트를 재전송해야 하며, 하루 단위 경계가 이미 자연스러운 컨텍스트 경계다
 - 컨텍스트 재전송 비용은 프롬프트/컨텍스트 캐싱으로 낮춘다 — 컨텍스트 자체(핵심 기록 경험)는 요금제와 무관하게 깎지 않는다
 - 유저당 일일 메시지/토큰 quota를 하드 캡으로 둔다 — 요금제 성숙도와 무관한 circuit breaker(어뷰징·버그로 인한 비용 폭주 방지), Stage 6 요금제별 Rate Limit과는 별개
 - 수익화는 컨텍스트 축소가 아니라 Insight(Claude Sonnet) 같은 고비용 기능 게이팅으로 한다

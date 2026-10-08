@@ -19,12 +19,12 @@ class SaveGeneratedResponseService(
         messageRepository.save(
             Message.assistantMessage(
                 id = MessageId.generate(),
-                conversationDayId = userMessage.conversationDayId,
                 userId = userMessage.userId,
                 content = response.content,
                 occurredAt = timeProvider.now(),
                 timezone = userMessage.timezone,
                 localDate = userMessage.localDate,
+                dayDate = userMessage.dayDate,
                 generationId = response.generationId,
                 model = response.model,
                 promptVersion = response.promptVersion,

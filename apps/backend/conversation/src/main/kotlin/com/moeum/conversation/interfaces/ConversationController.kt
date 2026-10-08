@@ -11,7 +11,6 @@ import com.moeum.conversation.interfaces.dto.TodayConversationResponse
 import com.moeum.kernel.UserId
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -21,9 +20,6 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
-class ConversationDayConflictException(message: String) : RuntimeException(message)
-
-private const val MAX_SAVE_ATTEMPTS = 3
 private const val DEFAULT_PAGE_SIZE = "50"
 private const val MAX_PAGE_SIZE = 200
 
@@ -45,23 +41,18 @@ class ConversationController(
             timezone = request.timezone,
         )
 
-        repeat(MAX_SAVE_ATTEMPTS) { attempt ->
-            try {
-                val result = saveMessageService.save(userId, command)
-                // 이번 호출이 실제로 새 행을 커밋했을 때만 트리거
-                if (result.isNewlyCreated) {
-                    generateConversationResponseService.generateAsync(result.message)
-                }
-                return MessageResponse.from(result.message)
-            } catch (_: ObjectOptimisticLockingFailureException) {
-                log.warn("ConversationDay 낙관적 락 충돌, 재시도: userId={}, attempt={}", userId.value, attempt + 1)
-            } catch (_: DataIntegrityViolationException) {
-                log.warn("메시지 저장 유니크 제약 경합, 재시도: userId={}, attempt={}", userId.value, attempt + 1)
-            }
+        val result = try {
+            saveMessageService.save(userId, command)
+        } catch (_: DataIntegrityViolationException) {
+            // 같은 clientMessageId가 동시에 두 번 들어온 경합 — 다시 호출하면 먼저 커밋된 메시지를 돌려받는다.
+            log.warn("메시지 저장 유니크 제약 경합, 재조회: userId={}, clientMessageId={}", userId.value, command.clientMessageId)
+            saveMessageService.save(userId, command)
         }
-        throw ConversationDayConflictException(
-            "메시지 저장이 여러 번 충돌했습니다: userId=${userId.value}, attempts=$MAX_SAVE_ATTEMPTS",
-        )
+        // 이번 호출이 실제로 새 행을 커밋했을 때만 트리거
+        if (result.isNewlyCreated) {
+            generateConversationResponseService.generateAsync(result.message)
+        }
+        return MessageResponse.from(result.message)
     }
 
     @GetMapping("/today")

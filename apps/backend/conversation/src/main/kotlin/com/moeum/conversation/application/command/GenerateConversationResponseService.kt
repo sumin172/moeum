@@ -34,12 +34,12 @@ class GenerateConversationResponseService(
             return
         }
 
-        val attemptCount = aiUsageRepository.recordAttempt(userMessage.userId, userMessage.localDate)
+        val attemptCount = aiUsageRepository.recordAttempt(userMessage.userId, userMessage.dayDate)
         if (attemptCount > aiQuotaProperties.dailyMessageLimit) {
             log.warn(
-                "일일 AI 응답 quota 초과: userId={}, localDate={}, attemptCount={}, limit={}",
+                "일일 AI 응답 quota 초과: userId={}, dayDate={}, attemptCount={}, limit={}",
                 userMessage.userId.value,
-                userMessage.localDate,
+                userMessage.dayDate,
                 attemptCount,
                 aiQuotaProperties.dailyMessageLimit,
             )
@@ -47,7 +47,7 @@ class GenerateConversationResponseService(
             return
         }
 
-        val context = messageRepository.findAllByConversationDayId(userMessage.conversationDayId)
+        val context = messageRepository.findAllByUserIdAndDayDate(userMessage.userId, userMessage.dayDate)
             .map { LlmMessage(role = it.role.name.lowercase(), content = it.content) }
 
         try {
@@ -55,9 +55,9 @@ class GenerateConversationResponseService(
             saveGeneratedResponseService.save(userMessage, response)
         } catch (e: Exception) {
             log.error(
-                "AI 응답 생성 실패: userId={}, conversationDayId={}, messageId={}, error={}",
+                "AI 응답 생성 실패: userId={}, dayDate={}, messageId={}, error={}",
                 userMessage.userId.value,
-                userMessage.conversationDayId.value,
+                userMessage.dayDate,
                 userMessage.id.value,
                 e.message,
                 e,

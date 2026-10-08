@@ -7,8 +7,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 class JwtProviderTest {
@@ -20,7 +18,6 @@ class JwtProviderTest {
 
     private class FixedTimeProvider(private val fixedNow: Instant) : TimeProvider {
         override fun now(): Instant = fixedNow
-        override fun today(zoneId: ZoneId): LocalDate = fixedNow.atZone(zoneId).toLocalDate()
     }
 
     @Test

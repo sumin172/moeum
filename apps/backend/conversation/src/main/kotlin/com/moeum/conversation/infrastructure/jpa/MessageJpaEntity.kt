@@ -17,8 +17,6 @@ import java.util.UUID
 class MessageJpaEntity(
     @Id
     val id: UUID,
-    @Column(name = "conversation_day_id", nullable = false)
-    val conversationDayId: UUID,
     @Column(name = "user_id", nullable = false)
     val userId: UUID,
     @Column(nullable = false)
@@ -32,6 +30,8 @@ class MessageJpaEntity(
     val timezone: String,
     @Column(name = "local_date", nullable = false)
     val localDate: LocalDate,
+    @Column(name = "day_date", nullable = false)
+    val dayDate: LocalDate,
     @Column(name = "client_message_id")
     val clientMessageId: UUID?,
     @Column(name = "response_status")
@@ -47,6 +47,8 @@ class MessageJpaEntity(
     val inputTokens: Int? = null,
     @Column(name = "output_tokens")
     val outputTokens: Int? = null,
+    @Column(name = "created_at", nullable = false)
+    val createdAt: Instant,
     @Column(name = "deleted_at")
     val deletedAt: Instant? = null,
 )

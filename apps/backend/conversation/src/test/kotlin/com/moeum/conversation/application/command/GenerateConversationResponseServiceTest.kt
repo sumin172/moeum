@@ -1,14 +1,13 @@
 package com.moeum.conversation.application.command
 
 import com.moeum.conversation.domain.AiUsageRepository
-import com.moeum.conversation.domain.MessageRepository
-import com.moeum.conversation.domain.model.ConversationDayId
 import com.moeum.conversation.domain.model.Message
-import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.conversation.domain.model.MessageRole
 import com.moeum.conversation.infrastructure.config.AiQuotaProperties
-import com.moeum.kernel.TimeProvider
+import com.moeum.conversation.support.FixedTimeProvider
+import com.moeum.conversation.support.InMemoryMessageRepository
+import com.moeum.conversation.support.userMessage
 import com.moeum.kernel.UserId
 import com.moeum.platform.llm.conversation.ConversationRequest
 import com.moeum.platform.llm.conversation.ConversationResponder
@@ -18,34 +17,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.UUID
 
 class GenerateConversationResponseServiceTest {
-
-    private class FakeMessageRepository : MessageRepository {
-        val messages = mutableMapOf<MessageId, Message>()
-        override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
-            messages.values.find { it.userId == userId && it.clientMessageId == clientMessageId }
-        override fun findPage(conversationDayId: ConversationDayId, after: MessageId?, limit: Int): List<Message> =
-            messages.values.filter { it.conversationDayId == conversationDayId }
-        override fun findAllByConversationDayId(conversationDayId: ConversationDayId): List<Message> =
-            messages.values.filter { it.conversationDayId == conversationDayId }
-                .sortedWith(compareBy({ it.occurredAt }, { it.id.value }))
-        override fun findByOccurredAtRange(from: Instant, to: Instant): List<Message> = error("not used in this test")
-        override fun findByUserIdAndOccurredAtRange(userId: UserId, from: Instant, to: Instant): List<Message> =
-            error("not used in this test")
-        override fun save(message: Message): Message {
-            messages[message.id] = message
-            return message
-        }
-        override fun compareAndSetStatus(id: MessageId, expected: MessageResponseStatus, updated: MessageResponseStatus): Boolean {
-            val current = messages[id] ?: return false
-            if (current.responseStatus != expected) return false
-            messages[id] = current.withResponseStatus(updated)
-            return true
-        }
-    }
 
     private class FakeAiUsageRepository(private val startingCount: Int = 0) : AiUsageRepository {
         var callCount = 0
@@ -59,35 +33,22 @@ class GenerateConversationResponseServiceTest {
         private val result: Result<ConversationResponse>,
     ) : ConversationResponder {
         var called = false
+        var lastRequest: ConversationRequest? = null
         override fun respond(request: ConversationRequest): ConversationResponse {
             called = true
+            lastRequest = request
             return result.getOrThrow()
         }
     }
 
-    private class FixedTimeProvider(private val fixedNow: Instant) : TimeProvider {
-        override fun now(): Instant = fixedNow
-        override fun today(zoneId: ZoneId): LocalDate = fixedNow.atZone(zoneId).toLocalDate()
-    }
-
     private val userId = UserId.generate()
-    private val conversationDayId = ConversationDayId.generate()
-    private val localDate = LocalDate.of(2026, 8, 8)
+    private val dayDate = LocalDate.of(2026, 8, 8)
 
     private fun newUserMessage(): Message =
-        Message.userMessage(
-            id = MessageId.generate(),
-            conversationDayId = conversationDayId,
-            userId = userId,
-            content = "오늘 정말 피곤했다",
-            occurredAt = Instant.parse("2026-08-08T10:00:00Z"),
-            timezone = "Asia/Seoul",
-            localDate = localDate,
-            clientMessageId = UUID.randomUUID(),
-        )
+        userMessage(userId, "오늘 정말 피곤했다", Instant.parse("2026-08-08T10:00:00Z"), dayDate)
 
     private fun newService(
-        messageRepository: FakeMessageRepository,
+        messageRepository: InMemoryMessageRepository,
         aiUsageRepository: AiUsageRepository = FakeAiUsageRepository(),
         conversationResponder: ConversationResponder,
         dailyMessageLimit: Int = 20,
@@ -104,7 +65,7 @@ class GenerateConversationResponseServiceTest {
 
     @Test
     fun `Gemini 호출이 성공하면 assistant 메시지를 저장하고 유저 메시지를 COMPLETED로 갱신한다`() {
-        val messageRepository = FakeMessageRepository()
+        val messageRepository = InMemoryMessageRepository()
         val userMessage = newUserMessage()
         messageRepository.save(userMessage)
         val response = ConversationResponse(
@@ -127,12 +88,12 @@ class GenerateConversationResponseServiceTest {
         assertThat(savedUserMessage.responseStatus).isEqualTo(MessageResponseStatus.COMPLETED)
         val assistantMessage = messageRepository.messages.values.single { it.role == MessageRole.ASSISTANT }
         assertThat(assistantMessage.content).isEqualTo("많이 힘드셨겠어요.")
-        assertThat(assistantMessage.conversationDayId).isEqualTo(conversationDayId)
+        assertThat(assistantMessage.dayDate).isEqualTo(dayDate)
     }
 
     @Test
     fun `Gemini 호출이 실패하면 유저 메시지를 FAILED로 갱신하고 assistant 메시지는 저장하지 않는다`() {
-        val messageRepository = FakeMessageRepository()
+        val messageRepository = InMemoryMessageRepository()
         val userMessage = newUserMessage()
         messageRepository.save(userMessage)
         val service = newService(
@@ -149,7 +110,7 @@ class GenerateConversationResponseServiceTest {
 
     @Test
     fun `일일 quota를 초과하면 Gemini를 호출하지 않고 유저 메시지를 FAILED로 갱신한다`() {
-        val messageRepository = FakeMessageRepository()
+        val messageRepository = InMemoryMessageRepository()
         val userMessage = newUserMessage()
         messageRepository.save(userMessage)
         val responder = FakeConversationResponder(
@@ -173,7 +134,7 @@ class GenerateConversationResponseServiceTest {
 
     @Test
     fun `같은 메시지에 대해 동시에 두 번 호출돼도 Gemini는 한 번만 불린다`() {
-        val messageRepository = FakeMessageRepository()
+        val messageRepository = InMemoryMessageRepository()
         val userMessage = newUserMessage()
         messageRepository.save(userMessage)
         val response = ConversationResponse(UUID.randomUUID(), "답변", "gemini-2.5-flash", "google", "v1", 1, 1)
@@ -185,5 +146,24 @@ class GenerateConversationResponseServiceTest {
         service.generateAsync(userMessage)
 
         assertThat(messageRepository.messages.values.count { it.role == MessageRole.ASSISTANT }).isEqualTo(1)
+    }
+
+    @Test
+    fun `자정을 넘겨도 같은 하루의 대화만 컨텍스트로 전달한다`() {
+        val messageRepository = InMemoryMessageRepository()
+        // 모두 8/8 하루(경계 02:00): KST 23:50, 다음날 00:10 / 다른 하루와 다른 사용자의 메시지는 빠져야 한다
+        messageRepository.save(userMessage(userId, "자정 전", Instant.parse("2026-08-08T14:50:00Z"), dayDate))
+        val afterMidnight = userMessage(userId, "자정 후", Instant.parse("2026-08-08T15:10:00Z"), dayDate)
+        messageRepository.save(afterMidnight)
+        messageRepository.save(userMessage(userId, "전날", Instant.parse("2026-08-07T10:00:00Z"), dayDate.minusDays(1)))
+        messageRepository.save(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-08T14:55:00Z"), dayDate))
+        val responder = FakeConversationResponder(
+            Result.success(ConversationResponse(UUID.randomUUID(), "답변", "gemini-2.5-flash", "google", "v1", 1, 1)),
+        )
+        val service = newService(messageRepository = messageRepository, conversationResponder = responder)
+
+        service.generateAsync(afterMidnight)
+
+        assertThat(responder.lastRequest!!.messages.map { it.content }).containsExactly("자정 전", "자정 후")
     }
 }
