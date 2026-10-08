@@ -7,7 +7,6 @@ import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.kernel.TimeProvider
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
@@ -38,7 +37,7 @@ class GenerationPlanner(
         val job = GenerationJob.pending(
             userId = day.userId,
             diaryDate = day.dayDate,
-            scheduledAt = day.dayEnd,
+            dayEnd = day.dayEnd,
             now = timeProvider.now(),
         )
         return try {
@@ -49,19 +48,16 @@ class GenerationPlanner(
         }
     }
 
-    @Scheduled(fixedDelayString = "PT5M")
+    // 정상 경로: 스케줄 주기(5분)보다 lookback을 넉넉히 겹치게 잡아 자체 유실을 막는다.
     fun planRecent() {
         val now = timeProvider.now()
-        runCatching { plan(from = now.minus(Duration.ofMinutes(10)), to = now, planningType = "RECENT") }
-            .onFailure { e -> log.error("Journal 생성 Planning(RECENT) 실패", e) }
+        plan(from = now.minus(Duration.ofMinutes(10)), to = now, planningType = "RECENT")
     }
 
     // 정상 경로(lookback 10분)보다 긴 장애로 놓친 활동을 회수한다. generation_jobs와 별도로 비교하는 diff
     // 로직을 두지 않고, 같은 plan()을 범위만 넓혀 호출한다 — 멱등 insert가 이미 그 역할을 한다.
-    @Scheduled(cron = "0 0 4 * * *")
     fun planReconcile() {
         val now = timeProvider.now()
-        runCatching { plan(from = now.minus(Duration.ofDays(3)), to = now, planningType = "RECONCILIATION") }
-            .onFailure { e -> log.error("Journal 생성 Planning(RECONCILIATION) 실패", e) }
+        plan(from = now.minus(Duration.ofDays(3)), to = now, planningType = "RECONCILIATION")
     }
 }

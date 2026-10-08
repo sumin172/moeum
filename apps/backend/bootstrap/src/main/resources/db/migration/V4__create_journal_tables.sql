@@ -29,16 +29,20 @@ CREATE TABLE journal.journal_revisions (
 
 CREATE INDEX idx_journal_journal_revisions_journal_id ON journal.journal_revisions (journal_id);
 
--- scheduled_at: 그 하루가 끝나는 시각. 이후 Executor가 claim할 수 있다.
+-- status/attempt_count/next_attempt_at/lease_expires_at/version: 공통 작업 실행 규칙(platform JobState, JobClaimSql)
+-- next_attempt_at: 첫 시도는 그 하루가 끝나는 시각, 실패하면 재시도 시각
 -- UNIQUE(user_id, diary_date)는 최초 생성 Job에 대한 멱등키일 뿐(재생성 미지원 단계) 영구 제약이 아니다.
 CREATE TABLE journal.generation_jobs (
     id UUID PRIMARY KEY,
     journal_id UUID NULL,
     user_id UUID NOT NULL,
     diary_date DATE NOT NULL,
-    scheduled_at TIMESTAMPTZ NOT NULL,
-    generation_status TEXT NOT NULL,
+    status TEXT NOT NULL,
     attempt_count INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL,
+    lease_expires_at TIMESTAMPTZ NULL,
+    last_error_code TEXT NULL,
+    version BIGINT NOT NULL DEFAULT 0,
     provider TEXT NULL,
     model TEXT NULL,
     prompt_version TEXT NULL,
@@ -46,14 +50,15 @@ CREATE TABLE journal.generation_jobs (
     output_tokens INT NULL,
     generation_id UUID NULL,
     generated_at TIMESTAMPTZ NULL,
-    error_code TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT fk_journal_generation_jobs_journal
         FOREIGN KEY (journal_id) REFERENCES journal.journals (id),
     CONSTRAINT uq_journal_generation_jobs_user_diary_date UNIQUE (user_id, diary_date)
 );
 
--- GenerationExecutor의 "scheduledAt <= now()인 PENDING Job" 조회 패턴에 맞춘 부분 인덱스.
-CREATE INDEX idx_journal_generation_jobs_pending_scheduled_at
-    ON journal.generation_jobs (scheduled_at)
-    WHERE generation_status = 'PENDING';
+-- 작업 선점(JobClaimSql) 대상만 담는 부분 인덱스
+CREATE INDEX idx_journal_generation_jobs_pending ON journal.generation_jobs (next_attempt_at)
+    WHERE status = 'PENDING';
+CREATE INDEX idx_journal_generation_jobs_processing ON journal.generation_jobs (lease_expires_at)
+    WHERE status = 'PROCESSING';

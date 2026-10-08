@@ -177,14 +177,14 @@ interface ConversationActivityQuery {
 1. 메시지 하나는 정확히 하나의 하루(`day_date`)에 속하고, 일기는 (user, 하루)당 하나다 — 따라서 메시지는 최대 하나의 Journal에 포함된다.
 2. 활동이 없는 하루는 generation_job도 만들지 않는다.
 3. 메시지의 `day_date`는 저장 시점에 확정되며, 이후 하루 경계 변경으로 재계산하지 않는다.
-4. 하루 경계 변경은 다음 하루부터 적용된다 — 이미 시작된 하루의 끝(= 예약된 Job의 `scheduled_at`)은 바뀌지 않는다.
+4. 하루 경계 변경은 다음 하루부터 적용된다 — 이미 시작된 하루의 끝(= 예약된 Job의 첫 `next_attempt_at`)은 바뀌지 않는다.
 
 **GenerationPlanner — 하나의 순수 함수를 서로 다른 관측 범위로 호출한다**
 
 ```
 GenerationPlanner.plan(from: Instant, to: Instant):
   → ConversationActivityQuery.findActiveDays(from, to)로 새 활동이 생긴 (사용자, 하루) 조회
-  → journal.generation_jobs에 PENDING Job 멱등 insert (scheduled_at = 하루가 끝나는 시각,
+  → journal.generation_jobs에 PENDING Job 멱등 insert (next_attempt_at = 하루가 끝나는 시각,
     UNIQUE(user_id, diary_date) 충돌은 스킵)
 ```
 
@@ -200,13 +200,14 @@ lookback(10분)은 스케줄 주기보다 넉넉히 겹치게 잡아 정상 경�
 **GenerationExecutor**
 
 ```
-GenerationExecutor (주기적 실행)
-  → generation_jobs 중 scheduledAt <= now()인 PENDING Job을 claim
+GenerationExecutor (주기적 실행, 아래 "AI 작업 실행 규칙"을 따른다)
+  → 실행할 차례인 Job을 하나씩 claim (하루가 끝났거나 재시도 차례인 PENDING, 리스가 만료된 PROCESSING)
   → ConversationActivityQuery.findMessages(userId, diaryDate)로 그 하루의 원본 조회
-  → JournalGenerator 호출 → 서사 생성 → Journal 저장, Job을 COMPLETED로 표시
+  → JournalGenerator 호출 → 서사 생성 → Journal 저장 + Job COMPLETED (한 트랜잭션)
+  → 실패하면 backoff 뒤로 재시도 예약, 소진되면 FAILED
 ```
 
-`generation_jobs`의 `UNIQUE(user_id, diary_date)`는 영구적인 도메인 제약이 아니라 **V1 최초 생성 Job에 대한 멱등성 키**다. 재생성(사용자 요청, 실패 재시도 등)을 지원하게 되면 Job이 "일기 하나"가 아니라 "생성 시도 하나"를 뜻하도록 바뀌어야 하므로, 그 시점에 키 구성이 달라질 수 있다.
+`generation_jobs`의 `UNIQUE(user_id, diary_date)`는 영구적인 도메인 제약이 아니라 **V1 최초 생성 Job에 대한 멱등성 키**다. 실패 재시도는 같은 Job의 시도 횟수(`attempt_count`)로 처리하므로 이 키와 충돌하지 않는다(#31). 사용자가 요청하는 재생성을 지원하게 되면 Job이 "일기 하나"가 아니라 "생성 요청 하나"를 뜻하도록 바뀌어야 하므로, 그 시점에 키 구성이 달라질 수 있다.
 
 **Observability**
 
@@ -222,7 +223,7 @@ Moment는 원본 대화에서 뽑아낸 구조화된 "기억 조각"(시각, 타
 1. **모델 비용 분업**: 원본은 저비용 모델(Gemini Flash)이 읽고, 비싼 모델의 입력 일부를 구조화된 Moment로 대체할 수 있는 경로를 제공한다.
 2. **재사용**: 같은 Moment를 Insight(감정 패턴 분석 근거)와 아카이브(사용자가 직접 열람하는 "기억 조각")가 공유한다.
 
-2026-10-08(#27) 구현을 제거했다. 호출부·구독자가 없는 선제 구현이었고, `conversation_day_id`(자정 기준)에 키가 묶여 있어 일기(diary day 기준)와 구간이 맞지 않았다. 하루 경계가 통일(#29)됐으므로 재도입 시 (user_id, day_date)를 기준으로 삼고, 실제로 처음 쓰는 기능(Stage 3 아카이브 드릴다운 또는 Stage 5 Insight)에서 키 구조와 호출 시점을 다시 설계한다. 그때도 지킬 원칙: Conversation이 소유·생성하고, 게이팅(구독 여부 등)은 호출하는 쪽의 책임이다.
+2026-10-08(#27) 구현을 제거했다. 호출부·구독자가 없는 선제 구현이었고, `conversation_day_id`(자정 기준)에 키가 묶여 있어 일기(diary day 기준)와 구간이 맞지 않았다. 하루 경계가 통일(#29)됐으므로 재도입 시 (user_id, day_date)를 기준으로 삼고, 실제로 처음 쓰는 기능(Stage 3 아카이브 드릴다운 또는 Stage 5 Insight)에서 키 구조와 호출 시점을 다시 설계한다. 그때도 지킬 원칙: Conversation이 소유·생성하고, 게이팅(구독 여부 등)은 호출하는 쪽의 책임이다. 추출을 비동기 작업으로 돌린다면 별도 상태 테이블을 새로 설계하지 않고 공통 "AI 작업 실행 규칙"(`platform/job`: 선점·재시도·리스 회수·fencing, #31)을 따른다.
 
 **모듈 의존 방향 (단방향 엄수)**
 
@@ -445,6 +446,32 @@ journal/application/publicapi/events/JournalConfirmedV1.kt
 
 ---
 
+## AI 작업 실행 규칙 (2026-10-08, #31)
+
+LLM을 부르는 비동기 작업(대화 응답 `conversation.response_jobs`, 일기 생성 `journal.generation_jobs`)은 같은 실행 규칙을 따른다. 테이블은 각 모듈이 소유하고, 상태 전이(`platform/job/JobState`)·재시도 정책(`JobPolicy`)·선점 SQL(`JobClaimSql`)만 공유한다.
+
+```
+PENDING ──claim──▶ PROCESSING ──성공──▶ COMPLETED
+   ▲                   │
+   └─실패, 재시도 남음──┤
+                       └─실패, 재시도 소진──▶ FAILED ──사용자 재요청(대화 응답만)──▶ PENDING
+```
+
+- **선점**: `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`. 여러 워커·인스턴스가 동시에 돌아도 같은 작업을 잡지 않는다. claim마다 `attempt_count`와 `version`이 1 오르고 리스(`lease_expires_at`)가 잡힌다.
+- **워커가 죽은 경우**: PROCESSING인데 리스가 지난 작업은 다른 워커가 다시 claim한다. 이렇게 시도 횟수가 상한을 넘으면 실행하지 않고 FAILED(`ATTEMPTS_EXHAUSTED`).
+- **늦은 결과 차단(fencing)**: 결과 저장은 claim 때 받은 `version`으로 낙관적 락을 건다. 리스를 뺏긴 워커의 늦은 저장은 충돌로 거부되고, 결과물(assistant 메시지, 일기)과 작업 완료가 한 트랜잭션이라 함께 롤백된다 — 중복 생성이 없다.
+- **트랜잭션 경계**: claim(짧은 트랜잭션) → LLM 호출(트랜잭션 밖) → 결과 저장+완료 또는 실패 기록(각각 새 트랜잭션). LLM 호출 동안 DB 커넥션을 붙잡지 않는다.
+- **재시도 정책**(설정값, 잠정): 대화 응답 3회·10s/60s·리스 2분, 일기 생성 5회·1m/5m/30m/2h·리스 5분, backoff에 지터 20%.
+- **워커 분리 스위치**: `moeum.worker.enabled=false`면 그 인스턴스는 poller와 Planner/Executor 스케줄을 등록하지 않는다. 같은 jar를 API 전용/워커로 나눠 띄울 수 있다.
+
+**대화 응답 작업 흐름**
+- 유저 메시지와 응답 작업을 **같은 트랜잭션**에서 만든다. 커밋 직후 `@Async`로 바로 한 번 실행을 시도하고(지연 최소화), 그 실행이 서버 재시작 등으로 유실돼도 poller(기본 10초)가 회수한다.
+- quota는 작업을 만들 때(새 메시지)와 사용자 재요청 때 1씩 쓴다. 서버 자동 재시도는 사용자 책임이 아니므로 세지 않는다. 한도를 넘긴 메시지는 저장하되 작업을 처음부터 FAILED(`QUOTA_EXCEEDED`)로 만든다.
+- 사용자 재시도는 메시지 재전송(`clientMessageId`)과 분리된 명시적 요청이다: `POST /api/conversations/messages/{messageId}/response-attempts` → 202. 메시지 저장의 멱등성을 그대로 두고, 클라이언트의 자동 네트워크 재전송이 LLM을 다시 부르는 일을 막기 위함. FAILED일 때만 다시 시작하고(자동 재시도 횟수 초기화), 대기·처리 중이면 현재 상태를 그대로 돌려준다(409: 이미 완료, 429: quota 초과, 404: 없거나 남의 메시지).
+- 메시지 응답에 `responseStatus`, `responseFailureReason`(`QUOTA_EXCEEDED` | `GENERATION_FAILED`), `retryable`을 담는다. 클라이언트는 상태 문자열을 해석하지 않고 `retryable`로 재시도 버튼을 띄운다.
+
+---
+
 ## 장애 허용 범위
 
 | 허용 가능         | 허용 불가               |
@@ -459,6 +486,7 @@ LLM 장애가 메시지 저장에 영향을 주지 않아야 한다.
 사용자 메시지 저장이 먼저 성공해야 한다.
 AI 응답 생성은 메시지 저장 트랜잭션과 분리하며,
 실패해도 사용자 메시지 저장을 롤백하지 않는다.
+응답 작업은 메시지와 함께 저장되므로, 비동기 실행이 유실돼도 응답이 조용히 빠지지 않는다(위 "AI 작업 실행 규칙").
 
 ---
 

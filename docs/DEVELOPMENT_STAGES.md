@@ -78,7 +78,8 @@ Conversation
 - AI 반응 호출 (Gemini, 사용자 하루(day_date)의 전체 메시지를 컨텍스트로 전달)
   - 모델명은 `moeum.gemini.model` 설정값(`GeminiProperties`), 기본값 `gemini-flash-latest` (2026-08-08 결정 — `gemini-2.5-flash`는 신규 API 키에 404 확인되어 폐기)
   - `RestClient` 기반 REST 직접 호출(`GeminiConversationResponder`), 응답 저장 전까지는 트랜잭션을 걸지 않고(외부 HTTP 호출을 트랜잭션 밖에 둠), 응답 저장은 별도 `SaveGeneratedResponseService.save()`(`@Transactional`)로 분리 — 자기 자신 호출로 인한 AOP(`@Transactional`/`@Async`) 무시 문제 회피
-  - `@CircuitBreaker(name="geminiConversationClient")`(Resilience4j) 적용, 반복 실패 시 빠른 실패 + fallback에서 사용자 메시지를 FAILED로 전환(2026-08-08 실제 서킷 오픈 동작 확인)
+  - `@CircuitBreaker(name="geminiConversationClient")`(Resilience4j) 적용, 반복 실패 시 빠른 실패(2026-08-08 실제 서킷 오픈 동작 확인)
+  - 응답 생성은 `conversation.response_jobs` 작업으로 실행 — 자동 재시도, 워커 장애 시 회수, 사용자 재시도 API (#31, `ARCHITECTURE.md` "AI 작업 실행 규칙")
 - AI 응답 저장
 - 오늘/전날 대화 조회 API (`GET /api/conversations/today`, 2026-08-02 결정)
   - `previousDay` 옵션으로 전날 조회, 나머지 파라미터·동작은 오늘 조회와 동일
@@ -105,7 +106,6 @@ conversation.messages
   local_date        DATE        -- 달력상 현지 날짜(원본 사실)
   day_date          DATE        -- 사용자 하루 경계 기준 하루. 저장 시점에 확정, 재계산 안 함 (#29)
   client_message_id UUID NULL   -- 클라이언트 멱등키 (user 메시지만)
-  response_status   TEXT NULL   -- 'user' 메시지만: PENDING | PROCESSING | COMPLETED | FAILED
   generation_id     UUID NULL   -- AI 응답에만 값 있음
   model             TEXT NULL
   prompt_version    TEXT NULL
@@ -129,7 +129,7 @@ conversation.day_preferences            -- 하루 경계 (#29). 설정을 바꾼
 conversation.ai_usage_daily
   user_id         UUID
   usage_date      DATE    -- messages.day_date와 같은 사용자 하루
-  message_count   INT     -- 유저×날짜 일일 quota 카운터, 호출 "시도" 시점에 증가(재시도 남용 방지)
+  message_count   INT     -- 유저×하루 quota 카운터. 새 메시지와 사용자 재시도 요청마다 증가(서버 자동 재시도는 제외, #31)
   input_tokens    BIGINT  -- 현재 미집계(항상 0), 토큰 기준 quota 도입 시 사용 예정
   output_tokens   BIGINT  -- 현재 미집계(항상 0)
 
@@ -137,13 +137,25 @@ conversation.ai_usage_daily
 ```
 `AiUsageRepositoryImpl.recordAttempt`는 Spring Data `@Query`/`@Modifying`이 아니라 `EntityManager.createNativeQuery`로 `INSERT ... ON CONFLICT DO UPDATE ... RETURNING message_count`를 직접 실행한다(2026-08-08 결정) — Spring Data는 `@Modifying` 쿼리의 반환값으로 `RETURNING` 결과를 받을 수 없어 원자적 증가-후-값조회를 리포지토리 메서드 시그니처만으로 표현할 수 없기 때문. 동시성 보호는 Postgres의 `ON CONFLICT` unique-index 기반 원자성에 위임하며(낙관적 락 재시도 아님), 20-스레드 동시 호출 통합테스트로 검증(`AiUsageRepositoryIntegrationTest`).
 
-**response_status 사용**
-- user 메시지 저장 시 PENDING
-- AI 응답 생성 시작 시 PROCESSING
-- 응답 저장 완료 시 COMPLETED
-- AI 호출 실패 시 FAILED
-- "어떤 메시지의 답변이 빠졌는지" 쿼리 가능
-- retry/backoff 복잡도가 높아지면 별도 `response_generation_jobs` 테이블로 분리
+**AI 응답 생성 상태 — `conversation.response_jobs` (#31에서 messages.response_status를 분리)**
+```
+conversation.response_jobs
+  id                UUID PK
+  user_message_id   UUID UNIQUE   -- 유저 메시지당 작업 하나. 재시도는 이 작업의 시도를 늘린다
+  user_id           UUID
+  day_date          DATE
+  status            TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
+  failure_reason    TEXT NULL     -- 사용자에게 보여주는 분류: QUOTA_EXCEEDED | GENERATION_FAILED
+  attempt_count     INT
+  next_attempt_at   TIMESTAMPTZ   -- PENDING일 때 이 시각부터 claim 가능
+  lease_expires_at  TIMESTAMPTZ NULL  -- PROCESSING일 때 이 시각이 지나면 다른 워커가 회수
+  last_error_code   TEXT NULL     -- 기술적 원인(예외 종류)
+  version           BIGINT        -- claim마다 증가, 늦은 결과 저장 차단(fencing)
+  created_at, updated_at
+```
+- 메시지와 같은 트랜잭션에서 생성 → 커밋 후 바로 실행 시도 + poller가 재시도/회수
+- "어떤 메시지의 답변이 빠졌는지"는 FAILED 작업으로 조회
+- 실행 규칙 상세는 `ARCHITECTURE.md` "AI 작업 실행 규칙"
 
 **client_message_id 사용법**
 ```json
@@ -181,8 +193,8 @@ Conversation
 
 Journal
 - 일기의 하루(`diary_date`)는 Conversation의 `day_date`를 그대로 쓴다 — Journal은 하루 경계를 계산하지 않는다(#29 이전엔 `DiaryPreference.generationTime`으로 직접 계산)
-- **GenerationPlanner**가 `plan(from, to)` 하나로 동작 — 새 활동이 생긴 하루마다 그 하루가 끝나는 시각을 `scheduled_at`으로 `generation_jobs`에 PENDING Job을 멱등 insert한다. 이 함수를 "최근 몇 분"(정상 경로)과 "최근 며칠"(reconciliation)로 다른 범위를 주고 반복 호출하는 것으로 정상/복구를 모두 처리한다(자세한 규칙은 아래 "Journal 생성 스케줄러" 참고)
-- **GenerationExecutor**가 주기적으로 `scheduledAt`이 지난 PENDING Job을 실행 — `ConversationActivityQuery.findMessages(userId, diaryDate)`로 그 하루의 원본을 조회해 서사 생성. Moment는 입력에 없다
+- **GenerationPlanner**가 `plan(from, to)` 하나로 동작 — 새 활동이 생긴 하루마다 그 하루가 끝나는 시각을 첫 `next_attempt_at`으로 `generation_jobs`에 PENDING Job을 멱등 insert한다. 이 함수를 "최근 몇 분"(정상 경로)과 "최근 며칠"(reconciliation)로 다른 범위를 주고 반복 호출하는 것으로 정상/복구를 모두 처리한다(자세한 규칙은 아래 "Journal 생성 스케줄러" 참고)
+- **GenerationExecutor**가 주기적으로 실행할 차례인 Job을 하나씩 claim해 실행(공통 "AI 작업 실행 규칙": 재시도·리스 회수·fencing) — `ConversationActivityQuery.findMessages(userId, diaryDate)`로 그 하루의 원본을 조회해 서사 생성. Moment는 입력에 없다
 - `JournalGenerator`로 일기 초안 생성 — `GeminiJournalGenerator`/`ClaudeJournalGenerator` 둘 다 구현, `moeum.journal.provider`(기본값 `gemini`)로 선택. Claude는 결제 설정 후 전환할 대기 상태
 - 구조화 출력 (현재는 `{"title", "body"}` 최소 구조. JSON Schema 검증 등 본격 구조화는 소비처(아카이브 상세, Stage 3)가 생긴 뒤 설계)
 - AI 생성 메타데이터 저장
@@ -196,7 +208,7 @@ journal.journals
   -- OUTDATED: 확정 후 원본 대화가 추가된 경우 (source_last_message_id보다 큰 id의 메시지가 생김)
 
 journal.generation_jobs
-  generation_status TEXT  -- PENDING | PROCESSING | COMPLETED | FAILED
+  status        TEXT  -- PENDING | PROCESSING | COMPLETED | FAILED (공통 작업 상태)
   UNIQUE (user_id, diary_date) -- 최초 생성 Job 멱등키 (아래 스키마 참고)
   attempt_count INT
 ```
@@ -240,9 +252,12 @@ journal.generation_jobs
   journal_id                     UUID NULL
   user_id                        UUID
   diary_date                     DATE          -- messages.day_date와 같은 사용자 하루
-  scheduled_at                   TIMESTAMPTZ   -- 그 하루가 끝나는 시각. 이후 Executor가 claim 가능
-  generation_status              TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
+  status                         TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
   attempt_count                  INT DEFAULT 0
+  next_attempt_at                TIMESTAMPTZ   -- 첫 시도는 그 하루가 끝나는 시각, 실패하면 재시도 시각
+  lease_expires_at               TIMESTAMPTZ NULL
+  last_error_code                TEXT NULL
+  version                        BIGINT        -- claim마다 증가, 늦은 결과 저장 차단(fencing)
   provider                       TEXT NULL
   model                          TEXT NULL
   prompt_version                 TEXT NULL
@@ -250,7 +265,6 @@ journal.generation_jobs
   output_tokens                  INT NULL    -- quota 집계용
   generation_id                  UUID NULL
   generated_at                   TIMESTAMPTZ NULL
-  error_code                     TEXT NULL
   created_at                     TIMESTAMPTZ
 
   UNIQUE (user_id, diary_date)  -- V1 최초 생성 Job에 대한 멱등키일 뿐, 영구 도메인 제약은 아니다.
@@ -262,7 +276,7 @@ journal.generation_jobs
 
 Moment(구조화된 기억 조각: 시각/타입/감정)는 Insight(Stage 5, 감정 패턴 근거)와 아카이브(Stage 3, 사용자가 열람하는 "기억 조각")가 공유할 데이터이고, 원본은 저비용 모델이 읽고 비싼 모델에는 Moment를 넘기는 비용 분업 경로이기도 하다.
 
-2026-10-08(#27) 구현과 테이블을 제거했다. 호출부·구독자가 없는 선제 구현이었고, `conversation_day_id`(자정 기준)에 키가 묶여 일기(diary day 기준)와 구간이 어긋났으며, 같은 day의 두 번째 추출이 부분 유니크 인덱스 위반으로 항상 실패하는 버그도 있었다. 하루 경계가 통일(#29)됐으므로 재도입 시 (user_id, day_date)를 기준으로, 처음 쓰는 기능(Stage 3 또는 Stage 5)에서 키 구조·호출 시점·버전 관리(재추출 시 이전 결과 superseded 처리)를 다시 설계한다. 이전 설계는 git 이력(#21, #23)에 남아 있다.
+2026-10-08(#27) 구현과 테이블을 제거했다. 호출부·구독자가 없는 선제 구현이었고, `conversation_day_id`(자정 기준)에 키가 묶여 일기(diary day 기준)와 구간이 어긋났으며, 같은 day의 두 번째 추출이 부분 유니크 인덱스 위반으로 항상 실패하는 버그도 있었다. 하루 경계가 통일(#29)됐으므로 재도입 시 (user_id, day_date)를 기준으로, 처음 쓰는 기능(Stage 3 또는 Stage 5)에서 키 구조·호출 시점·버전 관리(재추출 시 이전 결과 superseded 처리)를 다시 설계한다. 이전 설계는 git 이력(#21, #23)에 남아 있다. 추출을 비동기 작업으로 돌린다면 별도 상태 테이블을 새로 설계하지 않고 공통 "AI 작업 실행 규칙"(`platform/job`: 선점·재시도·리스 회수·fencing, #31)을 따른다.
 
 **Journal은 원본만으로 생성한다**
 
@@ -300,14 +314,14 @@ Moment(구조화된 기억 조각: 시각/타입/감정)는 Insight(Stage 5, 감
 1. 메시지 하나는 정확히 하나의 하루(`day_date`)에 속하고 일기는 (user, 하루)당 하나다 — 메시지는 최대 하나의 Journal에 포함된다.
 2. 활동이 없는 하루는 generation_job도 만들지 않는다.
 3. 메시지의 `day_date`는 저장 시점에 확정되며, 이후 하루 경계 변경으로 재계산하지 않는다.
-4. 하루 경계 변경은 다음 하루부터 적용된다 — 이미 시작된 하루의 끝(= 예약된 Job의 `scheduled_at`)은 바뀌지 않는다.
+4. 하루 경계 변경은 다음 하루부터 적용된다 — 이미 시작된 하루의 끝(= 예약된 Job의 첫 `next_attempt_at`)은 바뀌지 않는다.
 
 ```kotlin
 // GenerationPlanner — from/to는 호출부가 결정한다(Planner가 now()를 스스로 들여다보지 않음).
 // 대상을 판단하고 Job을 만들 뿐, LLM을 부르지 않는다. 하루 경계는 Conversation이 이미 정했다.
 fun plan(from: Instant, to: Instant) {
     val activeDays = conversationActivityQuery.findActiveDays(from, to)   // 구간에 새 메시지가 "저장된" 하루
-    activeDays.forEach { planJobFor(it.userId, it.dayDate, scheduledAt = it.dayEnd) }  // PENDING insert 시도, UNIQUE 충돌은 스킵
+    activeDays.forEach { planJobFor(it.userId, it.dayDate, firstAttemptAt = it.dayEnd) }  // PENDING insert 시도, UNIQUE 충돌은 스킵
 }
 
 // 정상 경로: 스케줄 주기보다 lookback을 넉넉히 겹치게 잡아 자체 유실을 막는다
@@ -327,20 +341,18 @@ fun planReconcile() {
         .onFailure { e -> log.error("Journal 생성 Planning(RECONCILIATION) 실패", e) }
 }
 
-// GenerationExecutor — 이미 내려진 결정을 실행할 뿐이다
+// GenerationExecutor — 이미 내려진 결정을 실행할 뿐이다. 하나씩 claim하므로 리스는 작업마다 새로 잡힌다.
 @Scheduled(fixedDelayString = "PT1M")
-fun execute() {
-    runCatching { executeDueJobs() }
-        .onFailure { e -> log.error("Journal 생성 Execution 실패", e) }
-}
-
 fun executeDueJobs() {
-    val dueJobs = generationJobRepository.findPendingDue(now())
-    dueJobs.forEach { job -> executeSingleJob(job) }
+    repeat(maxJobsPerRun) {
+        val job = generationJobRepository.claimNext(now, leaseExpiresAt) ?: return
+        execute(job)   // 성공: 일기+완료 저장 / 실패: 재시도 예약 또는 FAILED
+    }
 }
+// 스케줄 등록은 GenerationScheduler(moeum.worker.enabled=true일 때만)가 한다
 ```
 
-Planning이 예정보다 늦게 돌아도(예: 02:00 컷오프인데 02:03에 실행) 문제가 되지 않는다 — 하루는 메시지에 이미 저장돼 있어 Planner가 계산할 것이 없고, Execution은 `scheduledAt`이 지난 Job만 골라 실행하므로 결과가 달라지지 않는다.
+Planning이 예정보다 늦게 돌아도(예: 02:00 컷오프인데 02:03에 실행) 문제가 되지 않는다 — 하루는 메시지에 이미 저장돼 있어 Planner가 계산할 것이 없고, Execution은 `next_attempt_at`이 지난 Job만 골라 실행하므로 결과가 달라지지 않는다.
 
 lookback(10분)/reconciliation 범위(3일)·주기는 예시 수치다. 구체 값은 "구현하면서 결정" 표 참고. `plan(from, to)`가 순수하게 범위를 인자로 받으므로, "9/21~24 누락분 재plan" 같은 수동 복구도 같은 함수로 그대로 처리된다 — 별도 복구 기능을 만들 필요가 없다.
 
@@ -357,19 +369,18 @@ lookback(10분)/reconciliation 범위(3일)·주기는 예시 수치다. 구체 
 LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다. Planner는 Job을 만들기만 하고 LLM을 부르지 않으므로 이 문제에서 자유롭다 — Executor에서만 신경 쓰면 된다.
 
 ```
-PENDING Job claim (PROCESSING으로 전이) → 커밋
+Job claim (PROCESSING, attempt_count+1, version+1, 리스) → 커밋
 트랜잭션 밖 → ConversationActivityQuery.findMessages(userId, diaryDate) → LLM 호출
-새 트랜잭션 → Journal 저장 → Job COMPLETED → 커밋
-실패 시     → 새 트랜잭션 → Job FAILED, errorCode, attemptCount 기록 → 커밋
+새 트랜잭션 → Journal 저장 → Job COMPLETED(claim 때 version으로 낙관적 락) → 커밋
+실패 시     → 새 트랜잭션 → 재시도 남으면 PENDING(next_attempt_at = backoff), 소진되면 FAILED → 커밋
 ```
 
 **유실 가능성 인지**
 
 정상 경로는 매 회차 조회 구간이 서로 겹치게(lookback ≥ 스케줄 주기) 스캔하므로, 특정 회차가 서버 재시작 등으로 건너뛰어도 다음 회차의 겹치는 구간에서 그대로 다시 잡힌다. Job은 한 번 INSERT되면 UNIQUE 제약으로 중복 없이 보존되고 Executor가 이후 언제든 claim해서 실행한다. 장애가 lookback보다 길어지면 정상 경로만으로는 회수되지 않으므로, 그 상한을 reconciliation(위 참고)이 메운다 — 두 경로가 같은 `plan()`을 쓰므로 "정상 경로는 유실 없음, 장애는 각자 알아서"가 아니라 "관측 범위가 다른 같은 메커니즘이 상한 없이 복구한다"가 된다.
 
-그래도 다음은 필요하다:
-- Journal 생성 Job에 FAILED/PENDING 상태 기록 (재시도 대상 판단용)
-- 반복 실패(attempt_count 임계치 초과)에 대한 수동 개입 경로
+실패한 Job은 자동으로 재시도되고(5회, backoff 1m→2h), 서버가 처리 중 죽어도 리스 만료 후 다른 워커가 회수한다(#31). 남은 것:
+- 재시도를 모두 소진한 FAILED 일기 생성 Job에 대한 수동 개입 경로 (관리자 도구 또는 사용자 "일기 다시 만들기" — 미구현)
 
 **이 단계 완료 기준**
 - 대화 → 일기 생성 → 수정 → 확정 흐름이 작동한다
@@ -496,7 +507,6 @@ gamification.point_ledger
 - 이벤트 인프라 고도화 (Kafka, CDC)  ← 이벤트 계약 버전 필드는 처음부터
 - Projection / CQRS
 - 복수 AI 제공자 구현
-- response_generation_jobs 테이블 분리 (retry 복잡도 증가 시)
 
 ---
 
@@ -508,7 +518,6 @@ gamification.point_ledger
 |---------------------------------------------------------|---------------------------------------------|
 | 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT)       | 사용자 행동 패턴 관찰 후                    |
 | Insight 집계에 DRAFT 일기 포함 여부                     | Insight 기능 구현 시                        |
-| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시                        |
 | Moment confidence를 제품 UI에 노출할지                  | UX 설계 시                                  |
 | DayPreference.dayStartTime 기본값 (현재 02:00)          | 사용자 행동 패턴 관찰 후                    |
 | GenerationPlanner 정상 경로 폴링 주기 / lookback 구체 수치 | 실제 트래픽 패턴 확인 후                  |

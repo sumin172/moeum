@@ -3,7 +3,6 @@ package com.moeum.conversation.support
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
-import com.moeum.conversation.domain.model.MessageResponseStatus
 import com.moeum.kernel.UserId
 import java.time.Instant
 import java.time.LocalDate
@@ -11,6 +10,8 @@ import java.util.UUID
 
 class InMemoryMessageRepository : MessageRepository {
     val messages = linkedMapOf<MessageId, Message>()
+
+    override fun findById(id: MessageId): Message? = messages[id]
 
     override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
         messages.values.find { it.userId == userId && it.clientMessageId == clientMessageId }
@@ -31,12 +32,5 @@ class InMemoryMessageRepository : MessageRepository {
     override fun save(message: Message): Message {
         messages[message.id] = message
         return message
-    }
-
-    override fun compareAndSetStatus(id: MessageId, expected: MessageResponseStatus, updated: MessageResponseStatus): Boolean {
-        val current = messages[id] ?: return false
-        if (current.responseStatus != expected) return false
-        messages[id] = current.withResponseStatus(updated)
-        return true
     }
 }

@@ -1,6 +1,7 @@
 package com.moeum.conversation.interfaces
 
-import com.moeum.conversation.application.command.GenerateConversationResponseService
+import com.moeum.conversation.application.command.ResponseJobExecutor
+import com.moeum.conversation.application.command.RetryResponseService
 import com.moeum.conversation.application.command.SaveMessageCommand
 import com.moeum.conversation.application.command.SaveMessageService
 import com.moeum.conversation.application.query.GetTodayConversationService
@@ -12,11 +13,14 @@ import com.moeum.kernel.UserId
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -28,7 +32,8 @@ private const val MAX_PAGE_SIZE = 200
 class ConversationController(
     private val saveMessageService: SaveMessageService,
     private val getTodayConversationService: GetTodayConversationService,
-    private val generateConversationResponseService: GenerateConversationResponseService,
+    private val retryResponseService: RetryResponseService,
+    private val responseJobExecutor: ResponseJobExecutor,
 ) {
     private val log = LoggerFactory.getLogger(ConversationController::class.java)
 
@@ -48,11 +53,22 @@ class ConversationController(
             log.warn("메시지 저장 유니크 제약 경합, 재조회: userId={}, clientMessageId={}", userId.value, command.clientMessageId)
             saveMessageService.save(userId, command)
         }
-        // 이번 호출이 실제로 새 행을 커밋했을 때만 트리거
+        // 이번 호출이 실제로 새 행을 커밋했을 때만 바로 실행을 시도한다. 여기서 유실돼도 poller가 회수한다.
         if (result.isNewlyCreated) {
-            generateConversationResponseService.generateAsync(result.message)
+            responseJobExecutor.executeAsync(result.responseJob.id)
         }
-        return MessageResponse.from(result.message)
+        return MessageResponse.from(result.message, result.responseJob)
+    }
+
+    // 실패한 AI 응답을 다시 요청한다. 대기·처리 중이면 현재 상태를 그대로 돌려준다(중복 요청 무시).
+    @PostMapping("/messages/{messageId}/response-attempts")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    fun retryResponse(@AuthenticationPrincipal userId: UserId, @PathVariable messageId: UUID): MessageResponse {
+        val result = retryResponseService.retry(userId, MessageId(messageId))
+        if (result.restarted) {
+            responseJobExecutor.executeAsync(result.responseJob.id)
+        }
+        return MessageResponse.from(result.message, result.responseJob)
     }
 
     @GetMapping("/today")

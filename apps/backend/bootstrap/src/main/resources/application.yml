@@ -64,10 +64,25 @@ resilience4j:
           - com.moeum.platform.llm.journal.JournalGenerationException
 
 moeum:
+  worker:
+    # false면 이 인스턴스는 스케줄러(AI 응답 작업 poller, 일기 Planner/Executor)를 돌리지 않는다.
+    # API 전용 인스턴스와 워커 인스턴스를 같은 jar로 나눠 띄우기 위한 스위치.
+    enabled: true
   conversation:
     ai:
       daily-message-limit: 20
+    # AI 응답 생성 작업 재시도/리스 정책 (기본값은 ResponseJobProperties 참고)
+    response-job:
+      max-attempts: 3
+      backoff: 10s, 60s
+      lease: 2m
+      poll-interval: PT10S
   journal:
+    # 일기 생성 작업 재시도/리스 정책 (기본값은 GenerationJobProperties 참고)
+    generation-job:
+      max-attempts: 5
+      backoff: 1m, 5m, 30m, 2h
+      lease: 5m
     # Journal 생성 LLM provider: gemini | claude. Claude Haiku 인프라(ClaudeJournalGenerator)는 이미 구현돼
     # 있지만 결제 설정 전까지는 이미 연동된 Gemini API 키를 재사용한다. claude로 바꾸려면 이 값만 변경하면 된다.
     provider: gemini

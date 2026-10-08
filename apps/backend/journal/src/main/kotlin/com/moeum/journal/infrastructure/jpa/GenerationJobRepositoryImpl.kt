@@ -3,26 +3,38 @@ package com.moeum.journal.infrastructure.jpa
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.domain.model.GenerationJobId
-import com.moeum.journal.domain.model.GenerationJobStatus
 import com.moeum.journal.domain.model.JournalId
 import com.moeum.kernel.UserId
+import com.moeum.platform.job.JobClaimSql
+import com.moeum.platform.job.JobState
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+
+private const val TABLE = "journal.generation_jobs"
+
+private const val CLAIM_NEXT_SQL =
+    "UPDATE $TABLE ${JobClaimSql.CLAIM_SET} " +
+        "WHERE id = (SELECT id FROM $TABLE WHERE ${JobClaimSql.CLAIMABLE} ${JobClaimSql.PICK_ONE}) RETURNING *"
 
 @Component
 class GenerationJobRepositoryImpl(
     private val jpaRepository: GenerationJobJpaRepository,
+    private val entityManager: EntityManager,
 ) : GenerationJobRepository {
 
     override fun save(job: GenerationJob): GenerationJob =
         jpaRepository.save(job.toEntity()).toDomain()
 
-    override fun findPendingDue(now: Instant): List<GenerationJob> =
-        jpaRepository.findByGenerationStatusAndScheduledAtLessThanEqual(GenerationJobStatus.PENDING, now)
-            .map { it.toDomain() }
-
-    override fun compareAndSetStatus(id: GenerationJobId, expected: GenerationJobStatus, updated: GenerationJobStatus): Boolean =
-        jpaRepository.compareAndSetStatus(id.value, expected, updated) > 0
+    @Transactional
+    override fun claimNext(now: Instant, leaseExpiresAt: Instant): GenerationJob? =
+        entityManager.createNativeQuery(CLAIM_NEXT_SQL, GenerationJobJpaEntity::class.java)
+            .setParameter("now", now)
+            .setParameter("leaseExpiresAt", leaseExpiresAt)
+            .resultList
+            .firstOrNull()
+            ?.let { (it as GenerationJobJpaEntity).toDomain() }
 }
 
 private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
@@ -31,9 +43,14 @@ private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
         journalId = journalId?.let { JournalId(it) },
         userId = UserId(userId),
         diaryDate = diaryDate,
-        scheduledAt = scheduledAt,
-        status = generationStatus,
-        attemptCount = attemptCount,
+        state = JobState(
+            status = status,
+            attemptCount = attemptCount,
+            nextAttemptAt = nextAttemptAt,
+            leaseExpiresAt = leaseExpiresAt,
+            lastErrorCode = lastErrorCode,
+            version = version,
+        ),
         provider = provider,
         model = model,
         promptVersion = promptVersion,
@@ -41,8 +58,8 @@ private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
         outputTokens = outputTokens,
         generationId = generationId,
         generatedAt = generatedAt,
-        errorCode = errorCode,
         createdAt = createdAt,
+        updatedAt = updatedAt,
     )
 
 private fun GenerationJob.toEntity(): GenerationJobJpaEntity =
@@ -51,9 +68,12 @@ private fun GenerationJob.toEntity(): GenerationJobJpaEntity =
         journalId = journalId?.value,
         userId = userId.value,
         diaryDate = diaryDate,
-        scheduledAt = scheduledAt,
-        generationStatus = status,
-        attemptCount = attemptCount,
+        status = state.status,
+        attemptCount = state.attemptCount,
+        nextAttemptAt = state.nextAttemptAt,
+        leaseExpiresAt = state.leaseExpiresAt,
+        lastErrorCode = state.lastErrorCode,
+        version = state.version,
         provider = provider,
         model = model,
         promptVersion = promptVersion,
@@ -61,6 +81,6 @@ private fun GenerationJob.toEntity(): GenerationJobJpaEntity =
         outputTokens = outputTokens,
         generationId = generationId,
         generatedAt = generatedAt,
-        errorCode = errorCode,
         createdAt = createdAt,
+        updatedAt = updatedAt,
     )

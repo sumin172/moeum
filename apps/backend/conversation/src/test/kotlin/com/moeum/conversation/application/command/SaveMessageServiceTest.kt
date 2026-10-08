@@ -5,6 +5,10 @@ import com.moeum.conversation.domain.model.DayPreference
 import com.moeum.conversation.support.FixedTimeProvider
 import com.moeum.conversation.support.InMemoryDayPreferenceRepository
 import com.moeum.conversation.support.InMemoryMessageRepository
+import com.moeum.conversation.support.InMemoryResponseJobRepository
+import com.moeum.conversation.support.quotaGuard
+import com.moeum.conversation.domain.model.ResponseFailureReason
+import com.moeum.platform.job.JobStatus
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -20,7 +24,11 @@ class SaveMessageServiceTest {
     private val now = Instant.parse("2026-08-02T10:00:00Z")
     private val messageRepository = InMemoryMessageRepository()
     private val dayPreferenceRepository = InMemoryDayPreferenceRepository()
-    private val service = SaveMessageService(dayPreferenceRepository, messageRepository, FixedTimeProvider(now))
+    private val responseJobRepository = InMemoryResponseJobRepository()
+    private val service = newService()
+
+    private fun newService(quotaLimit: Int = 20) =
+        SaveMessageService(dayPreferenceRepository, messageRepository, responseJobRepository, quotaGuard(quotaLimit), FixedTimeProvider(now))
 
     private fun command(occurredAt: String, content: String = "내용", clientMessageId: UUID = UUID.randomUUID()) =
         SaveMessageCommand(clientMessageId, content, Instant.parse(occurredAt), "Asia/Seoul")
@@ -64,7 +72,9 @@ class SaveMessageServiceTest {
 
         assertThat(retried.message.id).isEqualTo(first.message.id)
         assertThat(retried.isNewlyCreated).isFalse()
+        assertThat(retried.responseJob.id).isEqualTo(first.responseJob.id)
         assertThat(messageRepository.messages).hasSize(1)
+        assertThat(responseJobRepository.jobs).hasSize(1)
     }
 
     @Test
@@ -79,5 +89,29 @@ class SaveMessageServiceTest {
 
         assertThatThrownBy { service.save(userId, invalid) }
             .isInstanceOf(InvalidConversationRequestException::class.java)
+    }
+
+    @Test
+    fun `메시지와 함께 바로 실행할 수 있는 AI 응답 작업을 만든다`() {
+        val result = service.save(userId, command("2026-08-02T03:00:00Z"))
+
+        val job = result.responseJob
+        assertThat(job.userMessageId).isEqualTo(result.message.id)
+        assertThat(job.dayDate).isEqualTo(result.message.dayDate)
+        assertThat(job.state.status).isEqualTo(JobStatus.PENDING)
+        assertThat(job.state.nextAttemptAt).isEqualTo(now)
+    }
+
+    @Test
+    fun `하루 quota를 넘긴 메시지는 저장하되 응답 작업은 처음부터 QUOTA_EXCEEDED로 실패시킨다`() {
+        val service = newService(quotaLimit = 1)
+        service.save(userId, command("2026-08-02T03:00:00Z"))
+
+        val overQuota = service.save(userId, command("2026-08-02T03:01:00Z"))
+
+        assertThat(overQuota.isNewlyCreated).isTrue()
+        assertThat(overQuota.responseJob.state.status).isEqualTo(JobStatus.FAILED)
+        assertThat(overQuota.responseJob.failureReason).isEqualTo(ResponseFailureReason.QUOTA_EXCEEDED)
+        assertThat(overQuota.responseJob.retryable).isFalse()
     }
 }

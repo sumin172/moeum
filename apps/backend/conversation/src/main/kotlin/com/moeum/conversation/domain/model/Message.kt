@@ -7,7 +7,6 @@ import java.util.UUID
 
 enum class MessageRole { USER, ASSISTANT }
 
-enum class MessageResponseStatus { PENDING, PROCESSING, COMPLETED, FAILED }
 
 data class Message(
     val id: MessageId,
@@ -21,7 +20,6 @@ data class Message(
     // 사용자 하루 경계(DayPreference)로 계산한 논리적 하루. 저장 시점에 확정되고 이후 재계산하지 않는다.
     val dayDate: LocalDate,
     val clientMessageId: UUID?,
-    val responseStatus: MessageResponseStatus?,
     val generationId: UUID? = null,
     val model: String? = null,
     val promptVersion: String? = null,
@@ -31,7 +29,6 @@ data class Message(
     val createdAt: Instant,
     val deletedAt: Instant? = null,
 ) {
-    fun withResponseStatus(status: MessageResponseStatus): Message = copy(responseStatus = status)
 
     companion object {
         fun userMessage(
@@ -55,7 +52,6 @@ data class Message(
                 localDate = localDate,
                 dayDate = dayDate,
                 clientMessageId = clientMessageId,
-                responseStatus = MessageResponseStatus.PENDING,
                 createdAt = now,
             )
 
@@ -83,7 +79,6 @@ data class Message(
                 localDate = localDate,
                 dayDate = dayDate,
                 clientMessageId = null,
-                responseStatus = null,
                 generationId = generationId,
                 model = model,
                 promptVersion = promptVersion,
