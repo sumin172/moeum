@@ -19,14 +19,16 @@ class JwtProviderImpl(
     private val signingKey = Keys.hmacShaKeyFor(jwtProperties.secret.toByteArray())
     private val expirationSeconds = jwtProperties.expirationSeconds
 
-    override fun issue(userId: UserId): String {
+    override fun issue(userId: UserId): IssuedAccessToken {
         val now = timeProvider.now()
-        return Jwts.builder()
+        val expiresAt = now.plusSeconds(expirationSeconds)
+        val token = Jwts.builder()
             .subject(userId.value.toString())
             .issuedAt(Date.from(now))
-            .expiration(Date.from(now.plusSeconds(expirationSeconds)))
+            .expiration(Date.from(expiresAt))
             .signWith(signingKey)
             .compact()
+        return IssuedAccessToken(token, expiresAt)
     }
 
     override fun parse(token: String): JwtClaims {

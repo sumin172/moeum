@@ -45,6 +45,12 @@ resilience4j:
         baseConfig: llm
 
 moeum:
+  auth:
+    session:
+      # refresh token 수명(로그인·refresh 때마다 연장). access token 수명은 moeum.jwt.expiration-seconds(기본 15분)
+      refresh-token-ttl: 30d
+      # 교체된 직전 토큰이 이 시간 안에 다시 오면 탈취가 아니라 동시 요청으로 보고 세션을 유지한다
+      rotation-grace: 30s
   worker:
     # false면 이 인스턴스는 스케줄러(AI 응답 작업 poller, 일기 Planner/Executor)를 돌리지 않는다.
     # API 전용 인스턴스와 워커 인스턴스를 같은 jar로 나눠 띄우기 위한 스위치.

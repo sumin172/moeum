@@ -10,6 +10,9 @@ class UserRepositoryImpl(
     private val jpaRepository: UserJpaRepository,
 ) : UserRepository {
 
+    override fun findById(id: UserId): User? =
+        jpaRepository.findById(id.value).map { it.toDomain() }.orElse(null)
+
     override fun findByGoogleId(googleId: String): User? =
         jpaRepository.findByGoogleId(googleId)?.toDomain()
 

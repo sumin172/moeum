@@ -10,6 +10,8 @@ data class User(
     val createdAt: Instant,
     val deletedAt: Instant? = null,
 ) {
+    val isDeleted: Boolean get() = deletedAt != null
+
     companion object {
         fun create(id: UserId, googleId: String, email: String, now: Instant): User =
             User(id = id, googleId = googleId, email = email, createdAt = now)

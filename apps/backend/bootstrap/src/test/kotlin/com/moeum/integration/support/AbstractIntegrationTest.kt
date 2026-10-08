@@ -3,7 +3,7 @@ package com.moeum.integration.support
 import com.moeum.identity.domain.GoogleIdTokenVerifierPort
 import com.moeum.identity.domain.model.GoogleProfile
 import com.moeum.identity.interfaces.dto.GoogleLoginRequest
-import com.moeum.identity.interfaces.dto.GoogleLoginResponse
+import com.moeum.identity.interfaces.dto.AuthTokenResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
@@ -58,14 +58,17 @@ abstract class AbstractIntegrationTest {
     @BeforeEach
     fun resetResponder() = conversationResponder.reset()
 
-    protected fun issueJwt(): String {
-        val response = restTemplate.postForEntity<GoogleLoginResponse>(
+    // 새 사용자로 로그인한다(FakeGoogleVerifier는 idToken마다 다른 구글 계정으로 본다)
+    protected fun login(idToken: String = "dummy-${UUID.randomUUID()}", deviceId: UUID = UUID.randomUUID()): AuthTokenResponse {
+        val response = restTemplate.postForEntity<AuthTokenResponse>(
             "/api/auth/google",
-            GoogleLoginRequest(idToken = "dummy-${UUID.randomUUID()}"),
+            GoogleLoginRequest(idToken = idToken, deviceId = deviceId),
         )
         assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-        return response.body!!.jwt
+        return response.body!!
     }
+
+    protected fun issueJwt(): String = login().accessToken
 
     protected fun authHeaders(jwt: String): HttpHeaders =
         HttpHeaders().apply {
