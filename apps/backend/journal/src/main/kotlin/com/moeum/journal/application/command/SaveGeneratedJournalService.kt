@@ -37,7 +37,7 @@ class SaveGeneratedJournalService(
             ),
         )
 
-        journalRevisionRepository.save(
+        journalRevisionRepository.append(
             JournalRevision.of(
                 id = JournalRevisionId.generate(),
                 journalId = journal.id,

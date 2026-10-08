@@ -40,9 +40,9 @@ class GetTodayConversationServiceTest {
 
     @Test
     fun `오늘 하루의 메시지를 발화 순서대로 반환한다`() {
-        messageRepository.save(userMessage(userId, "나중 메시지", Instant.parse("2026-08-02T09:00:00Z"), today))
-        messageRepository.save(userMessage(userId, "먼저 메시지", Instant.parse("2026-08-02T01:00:00Z"), today))
-        messageRepository.save(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-02T02:00:00Z"), today))
+        messageRepository.append(userMessage(userId, "나중 메시지", Instant.parse("2026-08-02T09:00:00Z"), today))
+        messageRepository.append(userMessage(userId, "먼저 메시지", Instant.parse("2026-08-02T01:00:00Z"), today))
+        messageRepository.append(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-02T02:00:00Z"), today))
 
         val result = service.getToday(userId, "Asia/Seoul", previousDay = false, after = null, limit = 50)
 
@@ -52,7 +52,7 @@ class GetTodayConversationServiceTest {
     @Test
     fun `previousDay가 true이면 전날 하루를 반환한다`() {
         val yesterday = today.minusDays(1)
-        messageRepository.save(userMessage(userId, "어제 메시지", Instant.parse("2026-08-01T09:00:00Z"), yesterday))
+        messageRepository.append(userMessage(userId, "어제 메시지", Instant.parse("2026-08-01T09:00:00Z"), yesterday))
 
         val result = service.getToday(userId, "Asia/Seoul", previousDay = true, after = null, limit = 50)
 
@@ -63,13 +63,13 @@ class GetTodayConversationServiceTest {
     @Test
     fun `커서 없이 조회하면 최근 limit개를 반환하고, after 커서로 그 이후 새 메시지만 받아온다`() {
         (1..4).forEach { i ->
-            messageRepository.save(userMessage(userId, "메시지$i", Instant.parse("2026-08-02T0$i:00:00Z"), today))
+            messageRepository.append(userMessage(userId, "메시지$i", Instant.parse("2026-08-02T0$i:00:00Z"), today))
         }
 
         val firstPage = service.getToday(userId, "Asia/Seoul", previousDay = false, after = null, limit = 2)
         assertThat(firstPage.messages).extracting("content").containsExactly("메시지3", "메시지4")
 
-        messageRepository.save(userMessage(userId, "메시지5", Instant.parse("2026-08-02T05:00:00Z"), today))
+        messageRepository.append(userMessage(userId, "메시지5", Instant.parse("2026-08-02T05:00:00Z"), today))
 
         val delta = service.getToday(userId, "Asia/Seoul", previousDay = false, after = firstPage.messages.last().id, limit = 2)
         assertThat(delta.messages).extracting("content").containsExactly("메시지5")
@@ -77,7 +77,7 @@ class GetTodayConversationServiceTest {
 
     @Test
     fun `유저 메시지마다 AI 응답 작업 상태를 함께 돌려준다`() {
-        val message = messageRepository.save(userMessage(userId, "질문", Instant.parse("2026-08-02T01:00:00Z"), today))
+        val message = messageRepository.append(userMessage(userId, "질문", Instant.parse("2026-08-02T01:00:00Z"), today))
         val job = responseJobRepository.save(ResponseJob.pending(message, Instant.parse("2026-08-02T01:00:00Z")))
 
         val result = service.getToday(userId, "Asia/Seoul", previousDay = false, after = null, limit = 50)

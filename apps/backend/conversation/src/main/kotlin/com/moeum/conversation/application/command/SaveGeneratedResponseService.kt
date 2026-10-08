@@ -22,7 +22,7 @@ class SaveGeneratedResponseService(
     fun save(job: ResponseJob, userMessage: Message, response: ConversationResponse) {
         val now = timeProvider.now()
         responseJobRepository.save(job.completed(now))
-        messageRepository.save(
+        messageRepository.append(
             Message.assistantMessage(
                 id = MessageId.generate(),
                 userId = userMessage.userId,

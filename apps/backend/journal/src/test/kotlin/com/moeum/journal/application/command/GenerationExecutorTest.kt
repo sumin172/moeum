@@ -44,7 +44,7 @@ class GenerationExecutorTest {
     }
     private val revisions = mutableListOf<JournalRevision>()
     private val revisionRepository = object : JournalRevisionRepository {
-        override fun save(revision: JournalRevision): JournalRevision = revision.also { revisions += it }
+        override fun append(revision: JournalRevision): JournalRevision = revision.also { revisions += it }
     }
     private val activityQuery = object : ConversationActivityQuery {
         override fun findActiveDays(from: Instant, to: Instant): List<ActiveDay> = error("not used in this test")

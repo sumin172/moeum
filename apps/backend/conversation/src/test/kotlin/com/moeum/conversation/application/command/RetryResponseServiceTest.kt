@@ -31,7 +31,7 @@ class RetryResponseServiceTest {
         RetryResponseService(messageRepository, jobRepository, quotaGuard(quotaLimit, usage), FixedTimeProvider(now))
 
     private fun messageWithJob(transform: (ResponseJob) -> ResponseJob): ResponseJob {
-        val message = messageRepository.save(userMessage(userId, "질문", now, dayDate))
+        val message = messageRepository.append(userMessage(userId, "질문", now, dayDate))
         return jobRepository.save(transform(ResponseJob.pending(message, now)))
     }
 

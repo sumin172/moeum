@@ -29,7 +29,7 @@ class InMemoryMessageRepository : MessageRepository {
     override fun findCreatedBetween(from: Instant, to: Instant): List<Message> =
         messages.values.filter { it.createdAt >= from && it.createdAt < to }
 
-    override fun save(message: Message): Message {
+    override fun append(message: Message): Message {
         messages[message.id] = message
         return message
     }

@@ -4,6 +4,7 @@ import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.kernel.UserId
+import jakarta.persistence.EntityManager
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
 import java.time.Instant
@@ -17,6 +18,7 @@ private val DISPLAY_ORDER = compareBy<Message>({ it.occurredAt }, { it.id.value 
 @Component
 class MessageRepositoryImpl(
     private val jpaRepository: MessageJpaRepository,
+    private val entityManager: EntityManager,
 ) : MessageRepository {
 
     override fun findByUserIdAndId(userId: UserId, id: MessageId): Message? =
@@ -41,8 +43,12 @@ class MessageRepositoryImpl(
     override fun findCreatedBetween(from: Instant, to: Instant): List<Message> =
         jpaRepository.findByCreatedAtGreaterThanEqualAndCreatedAtLessThan(from, to).map { it.toDomain() }
 
-    override fun save(message: Message): Message =
-        jpaRepository.save(message.toEntity()).toDomain()
+    // 직접 할당한 UUID라 Spring Data save()는 merge로 처리되어 INSERT 전에 SELECT가 한 번 더 나간다.
+    // 추가만 하는 데이터이므로 persist로 바로 INSERT한다(호출부 트랜잭션 안에서 실행된다).
+    override fun append(message: Message): Message {
+        entityManager.persist(message.toEntity())
+        return message
+    }
 }
 
 private fun MessageJpaEntity.toDomain(): Message =
