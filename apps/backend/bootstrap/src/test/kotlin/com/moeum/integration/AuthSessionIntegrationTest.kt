@@ -1,6 +1,5 @@
 package com.moeum.integration
 
-import com.moeum.conversation.interfaces.dto.TodayConversationResponse
 import com.moeum.identity.interfaces.dto.AuthTokenResponse
 import com.moeum.identity.interfaces.dto.RefreshTokenRequest
 import com.moeum.integration.support.AbstractIntegrationTest
@@ -15,7 +14,7 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.JdbcTemplate
-import java.util.UUID
+import java.util.*
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -44,8 +43,8 @@ class AuthSessionIntegrationTest : AbstractIntegrationTest() {
         val next = refreshed(tokens.refreshToken)
 
         assertThat(next.refreshToken).isNotEqualTo(tokens.refreshToken)
-        val response = restTemplate.exchange<TodayConversationResponse>(
-            "/api/conversations/today?timezone=Asia/Seoul", HttpMethod.GET, HttpEntity<Void>(authHeaders(next.accessToken)),
+        val response = restTemplate.exchange<String>(
+            "/api/conversations/records", HttpMethod.GET, HttpEntity<Void>(authHeaders(next.accessToken)),
         )
         assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
     }

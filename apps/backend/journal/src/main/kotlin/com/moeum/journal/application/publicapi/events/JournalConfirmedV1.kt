@@ -14,7 +14,7 @@ data class JournalConfirmedV1(
     override val causationId: UUID? = null,
     val journalId: UUID,
     val userId: UUID,
-    val diaryDate: LocalDate,
+    val displayDate: LocalDate,
     // 확정된 내용의 리비전 번호
     val revision: Int,
 ) : IntegrationEvent {

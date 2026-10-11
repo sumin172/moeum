@@ -2,17 +2,17 @@ package com.moeum.conversation.support
 
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
-import java.util.UUID
+import java.util.*
 
 fun userMessage(
     userId: UserId,
     content: String,
     occurredAt: Instant,
-    dayDate: LocalDate,
+    recordDayId: RecordDayId,
     timezone: String = "Asia/Seoul",
     createdAt: Instant = occurredAt,
 ): Message =
@@ -23,7 +23,8 @@ fun userMessage(
         occurredAt = occurredAt,
         timezone = timezone,
         localDate = occurredAt.atZone(ZoneId.of(timezone)).toLocalDate(),
-        dayDate = dayDate,
+        recordDayId = recordDayId,
+        sourceSequence = 1,
         clientMessageId = UUID.randomUUID(),
         now = createdAt,
     )

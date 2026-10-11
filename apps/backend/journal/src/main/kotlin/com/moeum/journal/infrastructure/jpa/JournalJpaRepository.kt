@@ -5,5 +5,6 @@ import java.time.LocalDate
 import java.util.UUID
 
 interface JournalJpaRepository : JpaRepository<JournalJpaEntity, UUID> {
-    fun findByUserIdAndDiaryDate(userId: UUID, diaryDate: LocalDate): JournalJpaEntity?
+    fun findByUserIdAndDisplayDateOrderByIdAsc(userId: UUID, displayDate: LocalDate): List<JournalJpaEntity>
+    fun findByUserIdAndRecordDayId(userId: UUID, recordDayId: UUID): JournalJpaEntity?
 }

@@ -5,6 +5,8 @@ import com.moeum.platform.runtime.ExecutionRole
 
 import com.moeum.conversation.domain.AiQuotaExceededException
 import com.moeum.conversation.domain.InvalidConversationRequestException
+import com.moeum.conversation.domain.RecordDayNotFoundException
+import com.moeum.conversation.domain.RecordAssignmentConflictException
 import com.moeum.conversation.domain.MessageNotFoundException
 import com.moeum.conversation.domain.ResponseAlreadyCompletedException
 import com.moeum.platform.web.ErrorResponse
@@ -45,6 +47,12 @@ class ConversationExceptionHandler {
         return error(HttpStatus.TOO_MANY_REQUESTS, ConversationErrorCode.QUOTA_EXCEEDED)
     }
 
+    @ExceptionHandler(RecordDayNotFoundException::class)
+    fun handleRecordMissing(): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse(code = "RECORD_NOT_FOUND", message = "기록이 없습니다"))
+    @ExceptionHandler(RecordAssignmentConflictException::class)
+    fun handleRecordConflict(): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse(code = "RECORD_ASSIGNMENT_CONFLICT", message = "발화의 기록 구간이 일치하지 않습니다"))
     private fun error(status: HttpStatus, code: ConversationErrorCode): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(status).body(ErrorResponse(code = code.code, message = code.description))
 }

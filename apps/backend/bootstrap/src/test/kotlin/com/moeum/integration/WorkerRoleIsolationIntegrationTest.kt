@@ -3,7 +3,9 @@ package com.moeum.integration
 import com.moeum.MoeumApplication
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
+import com.moeum.platform.llm.LlmMessage
 import com.moeum.platform.llm.LlmClient
 import com.moeum.platform.llm.LlmRequest
 import com.moeum.platform.llm.LlmRoute
@@ -56,7 +58,7 @@ class WorkerRoleIsolationIntegrationTest {
                     "--moeum.conversation.response-job.poll-interval=PT0.1S",
                     "--moeum.journal.generation-job.poll-interval=PT0.1S",
                     "--moeum.journal.generation-job.backoff=1h",
-                    "--moeum.journal.planning.initial-delay=PT1H",
+                    "--moeum.journal.delivery.initial-delay=PT1H",
                     "--moeum.runtime.shutdown-timeout=0s",
                     "--logging.level.com.moeum=INFO",
                 ).also { contexts += it }
@@ -93,8 +95,11 @@ class WorkerRoleIsolationIntegrationTest {
                 assertWorker(conversation, "responseJobExecutor", "generationExecutor", 4)
                 await { completedResponses() == 1 }
 
+                val recordId = jdbc.queryForObject("SELECT id FROM conversation.record_days WHERE user_id = ?",java.util.UUID::class.java,userId.value)!!
+                jdbc.update("UPDATE conversation.record_days SET closed_at = now(),close_at = now() WHERE id = ?",recordId)
+                jdbc.update("UPDATE conversation.user_record_states SET active_record_day_id = NULL WHERE user_id = ?",userId.value)
                 val job = api.getBean(GenerationJobRepository::class.java).save(
-                    GenerationJob.pending(userId, LocalDate.now(), Instant.now().minusSeconds(1), Instant.now()),
+                    GenerationJob.pending(userId, RecordDayId(recordId), LocalDate.now(), Instant.now().minusSeconds(1), Instant.now()),
                 )
                 val journal = start("journal-worker")
                 assertWorker(journal, "generationExecutor", "responseJobExecutor", 2)
@@ -121,6 +126,8 @@ class WorkerRoleIsolationIntegrationTest {
                 await {
                     jdbc.queryForObject("SELECT status FROM journal.generation_jobs WHERE id = ?", String::class.java, job.id.value) == "COMPLETED"
                 }
+                assertThat(provider.journalInputs).hasSize(2)
+                assertThat(provider.journalInputs[1]).isEqualTo(provider.journalInputs[0])
                 assertThat(jdbc.queryForObject(
                     "SELECT attempt_count FROM journal.generation_jobs WHERE id = ?", Int::class.java, job.id.value,
                 )).isEqualTo(2)
@@ -151,6 +158,7 @@ class WorkerRoleIsolationIntegrationTest {
     private class BlockingJournalProvider : LlmProvider {
         override val name = "isolation"
         override val vendor = "test"
+        val journalInputs = java.util.concurrent.CopyOnWriteArrayList<List<LlmMessage>>()
         val blockJournal = AtomicBoolean(true)
         val journalStarted = CountDownLatch(1)
         val releaseJournal = CountDownLatch(1)
@@ -158,6 +166,7 @@ class WorkerRoleIsolationIntegrationTest {
 
         override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
             val text = if (request.purpose == "journal-generation") {
+                journalInputs.add(request.messages.toList())
                 journalStarted.countDown()
                 if (blockJournal.get()) releaseJournal.await()
                 """{"title":"산책","body":"오늘 산책했다"}"""

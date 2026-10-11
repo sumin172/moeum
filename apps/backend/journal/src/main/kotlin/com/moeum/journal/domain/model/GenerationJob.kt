@@ -1,5 +1,6 @@
 package com.moeum.journal.domain.model
 
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobPolicy
 import com.moeum.platform.job.JobState
@@ -12,8 +13,9 @@ data class GenerationJob(
     val id: GenerationJobId,
     val journalId: JournalId?,
     val userId: UserId,
-    // Conversation의 dayDate(사용자 하루 경계 기준 하루)와 같은 값
-    val diaryDate: LocalDate,
+    // 기록에 고정된 표시 날짜. 생성 작업의 키는 recordDayId다.
+    val recordDayId: RecordDayId,
+    val displayDate: LocalDate,
     val state: JobState,
     val provider: String? = null,
     val model: String? = null,
@@ -58,12 +60,13 @@ data class GenerationJob(
     fun restarted(now: Instant): GenerationJob = copy(state = state.restarted(now), updatedAt = now)
 
     companion object {
-        fun pending(userId: UserId, diaryDate: LocalDate, dayEnd: Instant, now: Instant): GenerationJob =
+        fun pending(userId: UserId, recordDayId: RecordDayId, displayDate: LocalDate, dayEnd: Instant, now: Instant): GenerationJob =
             GenerationJob(
                 id = GenerationJobId.generate(),
                 journalId = null,
                 userId = userId,
-                diaryDate = diaryDate,
+                recordDayId = recordDayId,
+                displayDate = displayDate,
                 state = JobState.pending(nextAttemptAt = dayEnd),
                 createdAt = now,
                 updatedAt = now,

@@ -41,7 +41,7 @@ class RetryResponseService(
             JobStatus.COMPLETED -> throw ResponseAlreadyCompletedException("이미 응답이 생성된 메시지입니다: messageId=${messageId.value}")
             JobStatus.FAILED -> {
                 // 거부되면 예외로 트랜잭션이 롤백되어 사용량도 늘지 않는다.
-                if (!aiQuotaGuard.tryConsume(userId, job.dayDate)) {
+                if (!aiQuotaGuard.tryConsume(userId, timeProvider.now().atZone(com.moeum.conversation.domain.parseTimezone(message.timezone)).toLocalDate())) {
                     throw AiQuotaExceededException("오늘 AI 응답 요청 한도를 넘었습니다: userId=${userId.value}")
                 }
                 val restarted = responseJobRepository.save(job.restarted(timeProvider.now()))

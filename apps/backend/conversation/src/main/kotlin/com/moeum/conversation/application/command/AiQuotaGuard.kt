@@ -16,13 +16,13 @@ class AiQuotaGuard(
 ) {
     private val log = LoggerFactory.getLogger(AiQuotaGuard::class.java)
 
-    fun tryConsume(userId: UserId, dayDate: LocalDate): Boolean {
-        val count = aiUsageRepository.recordAttempt(userId, dayDate)
+    fun tryConsume(userId: UserId, usageDate: LocalDate): Boolean {
+        val count = aiUsageRepository.recordAttempt(userId, usageDate)
         val allowed = count <= aiQuotaProperties.dailyMessageLimit
         if (!allowed) {
             log.warn(
-                "일일 AI 응답 quota 초과: userId={}, dayDate={}, count={}, limit={}",
-                userId.value, dayDate, count, aiQuotaProperties.dailyMessageLimit,
+                "일일 AI 응답 quota 초과: userId={}, usageDate={}, count={}, limit={}",
+                userId.value, usageDate, count, aiQuotaProperties.dailyMessageLimit,
             )
         }
         return allowed

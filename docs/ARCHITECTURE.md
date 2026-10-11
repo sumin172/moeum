@@ -49,7 +49,7 @@ Conversation은 Journal을 import하지 않는다. 모듈 간 순환 의존은 �
 
 - API: HTTP 처리와 짧은 저장 트랜잭션. LLM 호출·배치 스케줄 등록 없음.
 - conversation-worker: 대화 응답만 실행.
-- journal-worker: 현재 생성 Planner와 일기 작업을 실행. R2부터 Conversation publicapi로 마감/전달 대상을 선점하고 Journal에 작업을 등록·실행.
+- journal-worker: Conversation publicapi로 마감/전달 대상을 선점하고 Journal에 작업을 등록·실행. 원본 스캔 Planner는 사용하지 않는다.
   소유권과 실행 위치는 다르다. Conversation 소유 행의 변경은 반드시 그 publicapi 안에서 한다.
 
 운영은 역할별 프로세스·배포 수·DB 풀·LLM 예산을 분리한다.
@@ -217,5 +217,5 @@ PostgreSQL의 SKIP LOCKED는 큐 형태의 다중 소비자 처리에 사용할 
 현재 코드는 실행 역할 분리를 갖추었으며 원본 스캔 Planner, 날짜 키 기반 생성,
 확정·유료 수정·리비전·LLM 호출 원장을 갖고 있다.
 이 문서는 그 코드를 새 설계로 교체할 기준이다.
-R1은 실행 경로를 교체하고 관련 데드 코드를 제거했다. Flyway 스키마는 변경하지 않았다.
+실행 역할 분리와 RecordDay 마감/전달을 구현했다. Conversation은 사용자 상태 → 기록 순서로 잠그고 입력 귀속·마감·동결을 소유한다. Journal은 기록 ID를 멱등키로 생성 작업과 결과를 소유한다. V1부터 초기 스키마를 구성하고 V3/V4는 이 구조를 사용한다.
 구현·삭제 순서는 [개발 단계](DEVELOPMENT_STAGES.md)를 따른다.

@@ -39,12 +39,12 @@ class LlmJournalGenerator(
     private val jsonMapper: JsonMapper,
 ) : JournalGenerator {
 
-    override fun generate(userId: UserId, diaryDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
+    override fun generate(userId: UserId, displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
         val result = llmClient.generate(
             LlmRequest(
                 purpose = JOURNAL_GENERATION_PURPOSE,
                 systemPrompt = SYSTEM_PROMPT,
-                messages = listOf(LlmMessage(LlmRole.USER, buildTranscript(diaryDate, messages))),
+                messages = listOf(LlmMessage(LlmRole.USER, buildTranscript(displayDate, messages))),
                 promptVersion = PROMPT_VERSION,
                 responseFormat = LlmResponseFormat.JSON,
                 userId = userId,
@@ -67,7 +67,7 @@ class LlmJournalGenerator(
     }
 }
 
-private fun buildTranscript(diaryDate: LocalDate, messages: List<MessageSnapshot>): String =
-    "날짜: $diaryDate\n" + messages.joinToString("\n") { "[${it.occurredAt}] ${it.role}: ${it.content}" }
+private fun buildTranscript(displayDate: LocalDate, messages: List<MessageSnapshot>): String =
+    "날짜: $displayDate\n" + messages.joinToString("\n") { "[${it.occurredAt}] ${it.role}: ${it.content}" }
 
 private data class JournalPayload(val title: String, val body: String)

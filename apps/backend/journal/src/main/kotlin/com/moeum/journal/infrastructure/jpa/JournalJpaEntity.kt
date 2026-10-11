@@ -23,8 +23,10 @@ class JournalJpaEntity(
     private val entityId: UUID,
     @Column(name = "user_id", nullable = false)
     val userId: UUID,
-    @Column(name = "diary_date", nullable = false)
-    val diaryDate: LocalDate,
+    @Column(name = "record_day_id", nullable = false)
+    val recordDayId: UUID,
+    @Column(name = "display_date", nullable = false)
+    val displayDate: LocalDate,
     @Column(name = "lifecycle_status", nullable = false)
     @Enumerated(EnumType.STRING)
     val lifecycleStatus: JournalLifecycleStatus,
@@ -38,8 +40,8 @@ class JournalJpaEntity(
     @Version
     @Column(nullable = false)
     var version: Long = 0,
-    @Column(name = "source_last_message_id")
-    val sourceLastMessageId: UUID? = null,
+    @Column(name = "source_revision", nullable = false)
+    val sourceRevision: Long,
     @Column(name = "confirmed_at")
     val confirmedAt: Instant? = null,
     @Column(name = "deleted_at")

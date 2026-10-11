@@ -1,21 +1,21 @@
--- diary_date: Conversation의 messages.day_date(사용자 하루 경계 기준 하루)와 같은 값.
--- UNIQUE(user_id, diary_date)는 재생성 미지원 단계 한정(재생성 지원 시 재검토, docs/DEVELOPMENT_STAGES.md 참고).
 CREATE TABLE journal.journals (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
-    diary_date DATE NOT NULL,
+    record_day_id UUID NOT NULL,
+    display_date DATE NOT NULL,
     lifecycle_status TEXT NOT NULL,
     title TEXT NOT NULL,
     content JSONB NOT NULL,
     current_revision INT NOT NULL DEFAULT 1,
     version BIGINT NOT NULL DEFAULT 0,
-    -- 생성에 쓴 원본 중 가장 큰 유저 메시지 id(UUIDv7). 확정 후 그 하루에 이보다 큰 id의 유저 메시지가 생기면 OUTDATED
-    source_last_message_id UUID NULL,
+    source_revision BIGINT NOT NULL,
     confirmed_at TIMESTAMPTZ NULL,
     deleted_at TIMESTAMPTZ NULL,
     purge_after TIMESTAMPTZ NULL,
-    CONSTRAINT uq_journal_journals_user_diary_date UNIQUE (user_id, diary_date)
+    CONSTRAINT uq_journal_journals_user_record_day UNIQUE (user_id, record_day_id)
 );
+
+CREATE INDEX idx_journal_user_display_date ON journal.journals (user_id,display_date);
 
 CREATE TABLE journal.journal_revisions (
     id UUID PRIMARY KEY,
@@ -31,17 +31,14 @@ CREATE TABLE journal.journal_revisions (
 );
 
 CREATE INDEX idx_journal_journal_revisions_journal_id ON journal.journal_revisions (journal_id);
--- 사용자 단위 삭제·export
 CREATE INDEX idx_journal_journal_revisions_user_id ON journal.journal_revisions (user_id);
 
--- status/attempt_count/next_attempt_at/lease_expires_at/version: 공통 작업 실행 규칙(platform JobState, JobClaimSql)
--- next_attempt_at: 첫 시도는 그 하루가 끝나는 시각, 실패하면 재시도 시각
--- UNIQUE(user_id, diary_date)는 최초 생성 Job에 대한 멱등키일 뿐(재생성 미지원 단계) 영구 제약이 아니다.
 CREATE TABLE journal.generation_jobs (
     id UUID PRIMARY KEY,
     journal_id UUID NULL,
     user_id UUID NOT NULL,
-    diary_date DATE NOT NULL,
+    record_day_id UUID NOT NULL,
+    display_date DATE NOT NULL,
     status TEXT NOT NULL,
     attempt_count INT NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL,
@@ -59,10 +56,9 @@ CREATE TABLE journal.generation_jobs (
     updated_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT fk_journal_generation_jobs_journal
         FOREIGN KEY (journal_id) REFERENCES journal.journals (id),
-    CONSTRAINT uq_journal_generation_jobs_user_diary_date UNIQUE (user_id, diary_date)
+    CONSTRAINT uq_journal_generation_jobs_user_record_day UNIQUE (user_id, record_day_id)
 );
 
--- 작업 선점(JobClaimSql) 대상만 담는 부분 인덱스
 CREATE INDEX idx_journal_generation_jobs_pending ON journal.generation_jobs (next_attempt_at)
     WHERE status = 'PENDING';
 CREATE INDEX idx_journal_generation_jobs_processing ON journal.generation_jobs (lease_expires_at)

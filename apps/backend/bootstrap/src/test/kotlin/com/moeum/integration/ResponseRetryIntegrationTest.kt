@@ -2,7 +2,7 @@ package com.moeum.integration
 
 import com.moeum.conversation.interfaces.dto.MessageResponse
 import com.moeum.conversation.interfaces.dto.SaveMessageRequest
-import com.moeum.conversation.interfaces.dto.TodayConversationResponse
+import com.moeum.conversation.interfaces.dto.RecordConversationResponse
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.platform.web.ErrorResponse
 import org.assertj.core.api.Assertions.assertThat
@@ -21,16 +21,16 @@ import java.util.UUID
 class ResponseRetryIntegrationTest : AbstractIntegrationTest() {
 
     private fun saveMessage(jwt: String, content: String): MessageResponse =
-        restTemplate.exchange<MessageResponse>(
+        restTemplate.exchange<com.moeum.conversation.interfaces.SaveMessageResponse>(
             "/api/conversations/messages",
             HttpMethod.POST,
             HttpEntity(SaveMessageRequest(UUID.randomUUID(), content, Instant.now(), "Asia/Seoul"), authHeaders(jwt)),
-        ).body!!
+        ).body!!.message!!
 
     private fun awaitUserMessage(jwt: String, id: UUID, condition: (MessageResponse) -> Boolean): MessageResponse {
         repeat(50) {
-            val messages = restTemplate.exchange<TodayConversationResponse>(
-                "/api/conversations/today?timezone=Asia/Seoul", HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
+            val messages = restTemplate.exchange<RecordConversationResponse>(
+                recordUrl(jwt), HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
             ).body!!.messages
             messages.find { it.id == id }?.takeIf(condition)?.let { return it }
             Thread.sleep(200)
@@ -67,8 +67,8 @@ class ResponseRetryIntegrationTest : AbstractIntegrationTest() {
         assertThat(retry.statusCode).isEqualTo(HttpStatus.ACCEPTED)
 
         awaitUserMessage(jwt, saved.id) { it.responseStatus == "COMPLETED" }
-        val assistantReplies = restTemplate.exchange<TodayConversationResponse>(
-            "/api/conversations/today?timezone=Asia/Seoul", HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
+        val assistantReplies = restTemplate.exchange<RecordConversationResponse>(
+            recordUrl(jwt), HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
         ).body!!.messages.filter { it.role == "ASSISTANT" }
         assertThat(assistantReplies).hasSize(1)
     }

@@ -32,7 +32,7 @@ class WorkerConfiguration {
 
     @Bean
     @ConditionalOnRole(ExecutionRole.JOURNAL_WORKER)
-    fun journalPlanningScheduler() = scheduler("journal-planning-")
+    fun journalDeliveryScheduler() = scheduler("journal-delivery-")
 
     private fun scheduler(name: String) = ThreadPoolTaskScheduler().apply {
         poolSize = 1

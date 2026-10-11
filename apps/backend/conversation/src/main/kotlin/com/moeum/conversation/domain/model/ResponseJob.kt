@@ -1,11 +1,11 @@
 package com.moeum.conversation.domain.model
 
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobPolicy
 import com.moeum.platform.job.JobState
 import com.moeum.platform.job.JobStatus
 import java.time.Instant
-import java.time.LocalDate
 
 // 사용자에게 보여주는 실패 분류. 기술적인 원인(예외 종류)은 JobState.lastErrorCode에 남는다.
 enum class ResponseFailureReason { QUOTA_EXCEEDED, GENERATION_FAILED }
@@ -16,7 +16,7 @@ data class ResponseJob(
     val id: ResponseJobId,
     val userMessageId: MessageId,
     val userId: UserId,
-    val dayDate: LocalDate,
+    val recordDayId: RecordDayId,
     val state: JobState,
     val failureReason: ResponseFailureReason? = null,
     val createdAt: Instant,
@@ -45,7 +45,7 @@ data class ResponseJob(
                 id = ResponseJobId.generate(),
                 userMessageId = userMessage.id,
                 userId = userMessage.userId,
-                dayDate = userMessage.dayDate,
+                recordDayId = userMessage.recordDayId,
                 state = JobState.pending(nextAttemptAt = now),
                 createdAt = now,
                 updatedAt = now,

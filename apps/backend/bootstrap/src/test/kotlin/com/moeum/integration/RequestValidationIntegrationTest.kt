@@ -47,10 +47,10 @@ class RequestValidationIntegrationTest : AbstractIntegrationTest() {
         val jwt = issueJwt()
 
         val missing = restTemplate.exchange<ErrorResponse>(
-            "/api/conversations/today", HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
+            "/api/journals", HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
         )
         val wrongType = restTemplate.exchange<ErrorResponse>(
-            "/api/conversations/today?timezone=Asia/Seoul&after=not-a-uuid", HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
+            "/api/conversations/records?limit=not-a-number", HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
         )
 
         assertThat(missing.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)

@@ -1,5 +1,6 @@
 package com.moeum.journal.infrastructure.jpa
 
+import com.moeum.kernel.RecordDayId
 import com.moeum.journal.domain.JournalRepository
 import com.moeum.journal.domain.model.Journal
 import com.moeum.journal.domain.model.JournalId
@@ -12,9 +13,11 @@ class JournalRepositoryImpl(
     private val jpaRepository: JournalJpaRepository,
     private val contentCodec: JournalContentCodec,
 ) : JournalRepository {
+    override fun findByDate(userId: UserId, displayDate: LocalDate): List<Journal> =
+        jpaRepository.findByUserIdAndDisplayDateOrderByIdAsc(userId.value, displayDate).map { it.toDomain() }
 
-    override fun findByUserIdAndDiaryDate(userId: UserId, diaryDate: LocalDate): Journal? =
-        jpaRepository.findByUserIdAndDiaryDate(userId.value, diaryDate)?.toDomain()
+    override fun findByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): Journal? =
+        jpaRepository.findByUserIdAndRecordDayId(userId.value, recordDayId.value)?.toDomain()
 
     // 바로 flush한다 — @Version은 flush 때 올라가므로, 그래야 돌려주는 일기의 version이 DB와 같다.
     // 클라이언트는 응답의 version을 다음 수정·확정 요청에 그대로 보낸다.
@@ -25,13 +28,14 @@ class JournalRepositoryImpl(
         Journal(
             id = JournalId(id),
             userId = UserId(userId),
-            diaryDate = diaryDate,
+            recordDayId = RecordDayId(recordDayId),
+        displayDate = displayDate,
             lifecycleStatus = lifecycleStatus,
             title = title,
             body = contentCodec.bodyOf(content),
             currentRevision = currentRevision,
             version = version,
-            sourceLastMessageId = sourceLastMessageId,
+            sourceRevision = sourceRevision,
             confirmedAt = confirmedAt,
             deletedAt = deletedAt,
             purgeAfter = purgeAfter,
@@ -41,13 +45,14 @@ class JournalRepositoryImpl(
         JournalJpaEntity(
             entityId = id.value,
             userId = userId.value,
-            diaryDate = diaryDate,
+            recordDayId = recordDayId.value,
+            displayDate = displayDate,
             lifecycleStatus = lifecycleStatus,
             title = title,
             content = contentCodec.toJson(body),
             currentRevision = currentRevision,
             version = version,
-            sourceLastMessageId = sourceLastMessageId,
+            sourceRevision = sourceRevision,
             confirmedAt = confirmedAt,
             deletedAt = deletedAt,
             purgeAfter = purgeAfter,

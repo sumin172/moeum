@@ -37,6 +37,8 @@ for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
+@rem Keep the default user cache inside this checkout; explicit environment settings take priority.
+if not defined GRADLE_USER_HOME set DEFAULT_JVM_OPTS=%DEFAULT_JVM_OPTS% "-Dgradle.user.home=%APP_HOME%\.gradle\user-home"
 
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome

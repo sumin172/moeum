@@ -6,6 +6,7 @@ import com.moeum.journal.domain.model.Journal
 import com.moeum.platform.job.JobStatus
 import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 
 data class EditJournalRequest(
     val title: String,
@@ -19,10 +20,11 @@ data class ConfirmJournalRequest(
 )
 
 data class JournalResponse(
-    val diaryDate: LocalDate,
+    val recordDayId: UUID,
+    val displayDate: LocalDate,
     val title: String,
     val body: String,
-    // DRAFT | CONFIRMED | OUTDATED
+    // DRAFT | CONFIRMED
     val lifecycleStatus: String,
     val revision: Int,
     val version: Long,
@@ -33,7 +35,8 @@ data class JournalResponse(
     companion object {
         fun from(journal: Journal, editable: Boolean): JournalResponse =
             JournalResponse(
-                diaryDate = journal.diaryDate,
+                recordDayId = journal.recordDayId.value,
+                displayDate = journal.displayDate,
                 title = journal.title,
                 body = journal.body,
                 lifecycleStatus = journal.lifecycleStatus.name,
@@ -48,7 +51,7 @@ data class JournalResponse(
 data class GenerationStatusResponse(
     // PENDING(하루가 끝나기를 기다리는 중 포함) | PROCESSING | COMPLETED | FAILED
     val status: String,
-    // true면 POST /api/journals/{diaryDate}/generation-attempts로 다시 요청할 수 있다
+    // true면 POST /api/journals/{displayDate}/generation-attempts로 다시 요청할 수 있다
     val retryable: Boolean,
 ) {
     companion object {
@@ -58,7 +61,7 @@ data class GenerationStatusResponse(
 }
 
 data class JournalDayResponse(
-    val diaryDate: LocalDate,
+    val recordDayId: UUID,
     // 아직 생성되지 않았으면 null
     val journal: JournalResponse?,
     // 그 하루에 대화가 없어 생성할 일기가 없으면 null
@@ -67,7 +70,7 @@ data class JournalDayResponse(
     companion object {
         fun from(day: JournalDay): JournalDayResponse =
             JournalDayResponse(
-                diaryDate = day.diaryDate,
+                recordDayId = day.recordDayId.value,
                 journal = day.journal?.let { JournalResponse.from(it, day.editable) },
                 generation = day.generationJob?.let { GenerationStatusResponse.from(it) },
             )

@@ -4,24 +4,19 @@ import com.moeum.conversation.domain.AiQuotaExceededException
 import com.moeum.conversation.domain.MessageNotFoundException
 import com.moeum.conversation.domain.ResponseAlreadyCompletedException
 import com.moeum.conversation.domain.model.ResponseJob
-import com.moeum.conversation.support.FixedTimeProvider
-import com.moeum.conversation.support.InMemoryAiUsageRepository
-import com.moeum.conversation.support.InMemoryMessageRepository
-import com.moeum.conversation.support.InMemoryResponseJobRepository
-import com.moeum.conversation.support.quotaGuard
-import com.moeum.conversation.support.userMessage
+import com.moeum.conversation.support.*
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.time.LocalDate
 
 class RetryResponseServiceTest {
 
     private val userId = UserId.generate()
-    private val dayDate = LocalDate.of(2026, 8, 8)
+    private val recordDayId = RecordDayId.generate()
     private val now = Instant.parse("2026-08-08T10:00:00Z")
     private val messageRepository = InMemoryMessageRepository()
     private val jobRepository = InMemoryResponseJobRepository()
@@ -31,7 +26,7 @@ class RetryResponseServiceTest {
         RetryResponseService(messageRepository, jobRepository, quotaGuard(quotaLimit, usage), FixedTimeProvider(now))
 
     private fun messageWithJob(transform: (ResponseJob) -> ResponseJob): ResponseJob {
-        val message = messageRepository.append(userMessage(userId, "질문", now, dayDate))
+        val message = messageRepository.append(userMessage(userId, "질문", now, recordDayId))
         return jobRepository.save(transform(ResponseJob.pending(message, now)))
     }
 
@@ -46,7 +41,7 @@ class RetryResponseServiceTest {
         assertThat(result.responseJob.state.status).isEqualTo(JobStatus.PENDING)
         assertThat(result.responseJob.state.nextAttemptAt).isEqualTo(now)
         assertThat(result.responseJob.failureReason).isNull()
-        assertThat(usage.counts[userId to dayDate]).isEqualTo(1)
+        assertThat(usage.counts[userId to now.atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate()]).isEqualTo(1)
     }
 
     @Test

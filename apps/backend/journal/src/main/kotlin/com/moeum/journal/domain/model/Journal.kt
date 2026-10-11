@@ -1,22 +1,20 @@
 package com.moeum.journal.domain.model
 
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 enum class JournalLifecycleStatus {
     DRAFT,
-    CONFIRMED,
-
-    // 확정 뒤 그 하루에 새 발화가 생김 — 일기가 원본을 다 담지 못한다. 재생성은 V1 범위 밖이고, 사용자는 수정·재확정할 수 있다.
-    OUTDATED,
+    CONFIRMED
 }
 
 data class Journal(
     val id: JournalId,
     val userId: UserId,
-    val diaryDate: LocalDate,
+    val recordDayId: RecordDayId,
+    val displayDate: LocalDate,
     val lifecycleStatus: JournalLifecycleStatus,
     val title: String,
     // 현재는 journals.content(JSONB) {"body"}로 저장한다. 재설계 R4에서 TEXT로 단순화한다.
@@ -24,13 +22,12 @@ data class Journal(
     val currentRevision: Int,
     // 낙관적 락. 클라이언트는 받은 version을 수정·확정 요청에 그대로 돌려보낸다(다른 기기에서 먼저 바꿨으면 충돌).
     val version: Long,
-    // 생성에 쓴 원본 중 가장 큰 유저 메시지 id(UUIDv7, 저장 순서). OUTDATED 판단 기준.
-    val sourceLastMessageId: UUID?,
+    val sourceRevision: Long,
     val confirmedAt: Instant? = null,
     val deletedAt: Instant? = null,
     val purgeAfter: Instant? = null,
 ) {
-    // 사용자가 고친 내용은 다시 확정해야 한다 — 확정·OUTDATED 상태에서 고쳐도 DRAFT로 돌아간다.
+    // 사용자가 고친 내용은 다시 확정해야 한다 — 확정 상태에서 고쳐도 DRAFT로 돌아간다.
     fun edited(title: String, body: String): Journal =
         copy(
             title = title,
@@ -44,32 +41,28 @@ data class Journal(
 
     val isConfirmed: Boolean get() = lifecycleStatus == JournalLifecycleStatus.CONFIRMED
 
-    // 확정된 일기가 이 유저 메시지를 담지 못했는지. UUIDv7은 앞자리가 시각이라 비교 순서가 저장 순서와 같다
-    // (java.util.UUID.compareTo는 부호 있는 비교지만 v7의 최상위 비트는 서기 6000년대까지 0이다).
-    fun misses(userMessageId: UUID): Boolean =
-        isConfirmed && (sourceLastMessageId == null || userMessageId > sourceLastMessageId)
-
-    fun outdated(): Journal = copy(lifecycleStatus = JournalLifecycleStatus.OUTDATED)
 
     companion object {
         fun draft(
             id: JournalId,
             userId: UserId,
-            diaryDate: LocalDate,
+            recordDayId: RecordDayId,
+            displayDate: LocalDate,
             title: String,
             body: String,
-            sourceLastMessageId: UUID?,
+            sourceRevision: Long,
         ): Journal =
             Journal(
                 id = id,
                 userId = userId,
-                diaryDate = diaryDate,
+                recordDayId = recordDayId,
+                displayDate = displayDate,
                 lifecycleStatus = JournalLifecycleStatus.DRAFT,
                 title = title,
                 body = body,
                 currentRevision = 1,
                 version = 0,
-                sourceLastMessageId = sourceLastMessageId,
+                sourceRevision = sourceRevision,
             )
     }
 }
