@@ -42,7 +42,6 @@ class SaveMessageServiceTest {
         // KST 2026-08-02 01:30 — 달력으로는 8/2지만 하루 경계(02:00) 전이라 8/1 하루에 속한다
         val result = service.save(userId, command("2026-08-01T16:30:00Z"))
 
-        assertThat(result.isNewlyCreated).isTrue()
         assertThat(result.message.localDate).isEqualTo(LocalDate.of(2026, 8, 2))
         assertThat(result.message.dayDate).isEqualTo(LocalDate.of(2026, 8, 1))
         assertThat(result.message.createdAt).isEqualTo(now)
@@ -75,7 +74,6 @@ class SaveMessageServiceTest {
         val retried = service.save(userId, command("2026-08-02T03:00:00Z", clientMessageId = clientMessageId))
 
         assertThat(retried.message.id).isEqualTo(first.message.id)
-        assertThat(retried.isNewlyCreated).isFalse()
         assertThat(retried.responseJob.id).isEqualTo(first.responseJob.id)
         assertThat(messageRepository.messages).hasSize(1)
         assertThat(responseJobRepository.jobs).hasSize(1)
@@ -91,7 +89,7 @@ class SaveMessageServiceTest {
     fun `최대 길이를 넘는 메시지는 저장을 거부한다`() {
         assertThatThrownBy { service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(11))) }
             .isInstanceOf(InvalidConversationRequestException::class.java)
-        assertThat(service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(10))).isNewlyCreated).isTrue()
+        assertThat(service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(10))).message.content).isEqualTo("가".repeat(10))
     }
 
     @Test
@@ -120,7 +118,6 @@ class SaveMessageServiceTest {
 
         val overQuota = service.save(userId, command("2026-08-02T03:01:00Z"))
 
-        assertThat(overQuota.isNewlyCreated).isTrue()
         assertThat(overQuota.responseJob.state.status).isEqualTo(JobStatus.FAILED)
         assertThat(overQuota.responseJob.failureReason).isEqualTo(ResponseFailureReason.QUOTA_EXCEEDED)
         assertThat(overQuota.responseJob.retryable).isFalse()

@@ -2,35 +2,47 @@ package com.moeum.journal.infrastructure.scheduling
 
 import com.moeum.journal.application.command.GenerationExecutor
 import com.moeum.journal.application.command.GenerationPlanner
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+import com.moeum.platform.runtime.WorkerPool
+import org.springframework.beans.factory.annotation.Qualifier
 import org.slf4j.LoggerFactory
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 
-// 일기 생성 Planner/Executor의 실행 주기. moeum.worker.enabled=false인 인스턴스(API 전용)에서는 등록되지 않는다.
+// 계획 조회와 실행 dispatch의 스케줄러를 분리한다. 긴 LLM 호출은 실행 슬롯 안에서 수행한다.
 @Component
-@ConditionalOnProperty(name = ["moeum.worker.enabled"], havingValue = "true", matchIfMissing = true)
+@ConditionalOnRole(ExecutionRole.JOURNAL_WORKER)
 class GenerationScheduler(
     private val generationPlanner: GenerationPlanner,
     private val generationExecutor: GenerationExecutor,
+    @Qualifier("journalWorkerPool") private val pool: WorkerPool,
 ) {
     private val log = LoggerFactory.getLogger(GenerationScheduler::class.java)
 
-    @Scheduled(fixedDelayString = "PT5M")
+    @Scheduled(
+        scheduler = "journalPlanningScheduler", fixedDelayString = "PT5M",
+        initialDelayString = "\${moeum.journal.planning.initial-delay:PT0S}",
+    )
     fun planRecent() {
         runCatching { generationPlanner.planRecent() }
             .onFailure { e -> log.error("Journal 생성 Planning(RECENT) 실패", e) }
     }
 
-    @Scheduled(cron = "0 0 4 * * *")
+    @Scheduled(scheduler = "journalPlanningScheduler", cron = "0 0 4 * * *")
     fun planReconcile() {
         runCatching { generationPlanner.planReconcile() }
             .onFailure { e -> log.error("Journal 생성 Planning(RECONCILIATION) 실패", e) }
     }
 
-    @Scheduled(fixedDelayString = "PT1M")
-    fun executeDueJobs() {
-        runCatching { generationExecutor.executeDueJobs() }
-            .onFailure { e -> log.error("Journal 생성 Execution 실패", e) }
+    @Scheduled(
+        scheduler = "journalPollScheduler",
+        fixedDelayString = "\${moeum.journal.generation-job.poll-interval:PT1S}",
+        initialDelayString = "\${moeum.journal.generation-job.initial-delay:PT0S}",
+    )
+    fun pollDueJobs() {
+        repeat(pool.concurrency) {
+            if (!pool.submit { generationExecutor.executeNext() }) return
+        }
     }
 }

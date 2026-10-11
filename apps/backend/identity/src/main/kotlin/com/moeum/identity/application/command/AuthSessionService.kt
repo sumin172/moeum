@@ -1,5 +1,8 @@
 package com.moeum.identity.application.command
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.identity.domain.AuthSessionRepository
 import com.moeum.identity.domain.UserRepository
 import com.moeum.identity.domain.model.AuthSession
@@ -32,6 +35,7 @@ sealed interface RefreshOutcome {
     data object UserDeleted : RefreshOutcome
 }
 
+@ConditionalOnRole(ExecutionRole.API)
 @Service
 class AuthSessionService(
     private val authSessionRepository: AuthSessionRepository,

@@ -18,9 +18,6 @@ private const val CLAIM_NEXT_SQL =
     "UPDATE $TABLE ${JobClaimSql.CLAIM_SET} " +
         "WHERE id = (SELECT id FROM $TABLE WHERE ${JobClaimSql.CLAIMABLE} ${JobClaimSql.PICK_ONE}) RETURNING *"
 
-private const val CLAIM_BY_ID_SQL =
-    "UPDATE $TABLE ${JobClaimSql.CLAIM_SET} WHERE ${JobClaimSql.CLAIMABLE_BY_ID} RETURNING *"
-
 @Component
 class ResponseJobRepositoryImpl(
     private val jpaRepository: ResponseJobJpaRepository,
@@ -46,15 +43,6 @@ class ResponseJobRepositoryImpl(
             .firstOrNull()
             ?.let { (it as ResponseJobJpaEntity).toDomain() }
 
-    @Transactional
-    override fun claim(id: ResponseJobId, now: Instant, leaseExpiresAt: Instant): ResponseJob? =
-        entityManager.createNativeQuery(CLAIM_BY_ID_SQL, ResponseJobJpaEntity::class.java)
-            .setParameter("id", id.value)
-            .setParameter("now", now)
-            .setParameter("leaseExpiresAt", leaseExpiresAt)
-            .resultList
-            .firstOrNull()
-            ?.let { (it as ResponseJobJpaEntity).toDomain() }
 }
 
 private fun ResponseJobJpaEntity.toDomain(): ResponseJob =

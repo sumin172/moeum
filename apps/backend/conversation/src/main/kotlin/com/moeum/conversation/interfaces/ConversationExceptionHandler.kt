@@ -1,5 +1,8 @@
 package com.moeum.conversation.interfaces
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.conversation.domain.AiQuotaExceededException
 import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.MessageNotFoundException
@@ -11,6 +14,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
+@ConditionalOnRole(ExecutionRole.API)
 @RestControllerAdvice(basePackages = ["com.moeum.conversation.interfaces"])
 class ConversationExceptionHandler {
 

@@ -1,5 +1,8 @@
 package com.moeum.journal.interfaces
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.identity.application.publicapi.Feature
 import com.moeum.identity.application.publicapi.FeatureAccessQuery
 import com.moeum.journal.application.command.ConfirmJournalService
@@ -27,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.time.LocalDate
 
 // diaryDate는 사용자 하루 경계 기준 하루(대화 조회 응답의 dayDate와 같은 값)
+@ConditionalOnRole(ExecutionRole.API)
 @RestController
 @RequestMapping("/api/journals")
 class JournalController(

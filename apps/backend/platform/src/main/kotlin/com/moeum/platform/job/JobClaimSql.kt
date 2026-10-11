@@ -8,10 +8,8 @@ package com.moeum.platform.job
 //
 // 선점 다음 작업 하나 (SKIP LOCKED라 여러 워커가 동시에 호출해도 같은 작업을 잡지 않는다):
 //   UPDATE <table> $CLAIM_SET WHERE id = (SELECT id FROM <table> WHERE $CLAIMABLE $PICK_ONE) RETURNING *
-// 특정 작업 선점 (이미 다른 워커가 잡았으면 아무것도 반환하지 않는다):
-//   UPDATE <table> $CLAIM_SET WHERE $CLAIMABLE_BY_ID RETURNING *
 //
-// 파라미터: :now, :leaseExpiresAt (CLAIMABLE_BY_ID는 :id 추가)
+// 파라미터: :now, :leaseExpiresAt
 object JobClaimSql {
 
     // 선점: PROCESSING으로 바꾸고 시도 횟수·version을 올리며 리스를 잡는다
@@ -25,7 +23,4 @@ object JobClaimSql {
 
     // 선점 대상 중 가장 오래 기다린 하나를 잠근다
     const val PICK_ONE = "ORDER BY next_attempt_at LIMIT 1 FOR UPDATE SKIP LOCKED"
-
-    // 특정 작업이 지금 바로 실행할 수 있는 상태일 때만
-    const val CLAIMABLE_BY_ID = "id = :id AND status = 'PENDING' AND next_attempt_at <= :now"
 }

@@ -2,7 +2,6 @@ package com.moeum.conversation.domain
 
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.ResponseJob
-import com.moeum.conversation.domain.model.ResponseJobId
 import com.moeum.kernel.UserId
 import java.time.Instant
 
@@ -15,6 +14,4 @@ interface ResponseJobRepository {
     // 작업 테이블은 사용자 단위 파티셔닝 대상이 아니다(완료된 작업은 정리 대상).
     // 실행할 차례인 작업 하나를 선점한다(SKIP LOCKED). 없으면 null.
     fun claimNext(now: Instant, leaseExpiresAt: Instant): ResponseJob?
-    // 특정 작업을 선점한다. 이미 다른 워커가 잡았거나 아직 차례가 아니면 null.
-    fun claim(id: ResponseJobId, now: Instant, leaseExpiresAt: Instant): ResponseJob?
 }

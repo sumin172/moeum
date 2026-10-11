@@ -52,6 +52,9 @@ P2를 통과하지 않고 백만 DAU를 지원한다고 주장하지 않는다.
 
 ## 자원 격리 계약
 
+현재 R1의 역할별 기본값과 replica 합산 산식은 [실행 역할](WORKER_ROLES.md)에 명시한다.
+기능 격리 시험 결과를 이 문서의 부하 목표 달성으로 해석하지 않는다.
+
 - API, conversation-worker, journal-worker의 배포 수와 DB pool 상한을 독립 설정한다.
 - DB 최대 연결 수보다 각 역할의 최대 replica × pool 합계가 작아야 한다.
   관리·마이그레이션·복구 연결 여유도 별도로 둔다.

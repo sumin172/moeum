@@ -1,5 +1,8 @@
 package com.moeum.platform.security.jwt
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.security.config.JwtProperties
@@ -10,6 +13,7 @@ import io.jsonwebtoken.security.Keys
 import org.springframework.stereotype.Component
 import java.util.Date
 
+@ConditionalOnRole(ExecutionRole.API)
 @Component
 class JwtProviderImpl(
     jwtProperties: JwtProperties,

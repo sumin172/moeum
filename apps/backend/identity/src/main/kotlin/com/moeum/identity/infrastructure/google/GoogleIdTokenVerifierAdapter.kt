@@ -1,5 +1,8 @@
 package com.moeum.identity.infrastructure.google
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
@@ -9,6 +12,7 @@ import com.moeum.identity.domain.model.GoogleProfile
 import com.moeum.identity.infrastructure.config.GoogleClientProperties
 import org.springframework.stereotype.Component
 
+@ConditionalOnRole(ExecutionRole.API)
 @Component
 class GoogleIdTokenVerifierAdapter(
     googleClientProperties: GoogleClientProperties,

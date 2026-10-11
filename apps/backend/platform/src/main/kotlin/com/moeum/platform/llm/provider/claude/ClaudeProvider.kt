@@ -1,5 +1,8 @@
 package com.moeum.platform.llm.provider.claude
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.moeum.platform.llm.LlmException
@@ -15,6 +18,7 @@ import org.springframework.web.client.body
 
 // 결제 설정 전이라 실제 호출은 아직 검증하지 않았다(라우팅에서 claude를 고르는 용도가 없으면 호출되지 않는다).
 // JSON 응답 강제 옵션이 없어, LlmResponseFormat.JSON은 프롬프트 지시에 맡긴다.
+@ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @Component
 class ClaudeProvider(
     private val claudeRestClient: RestClient,

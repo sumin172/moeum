@@ -1,5 +1,8 @@
 package com.moeum.platform.llm.provider.gemini
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.moeum.platform.llm.LlmException
 import com.moeum.platform.llm.LlmMessage
@@ -15,6 +18,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
 
+@ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @Component
 class GeminiProvider(
     private val geminiRestClient: RestClient,

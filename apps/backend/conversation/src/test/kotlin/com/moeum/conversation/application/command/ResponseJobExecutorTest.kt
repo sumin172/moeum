@@ -76,7 +76,7 @@ class ResponseJobExecutorTest {
     fun `성공하면 assistant 메시지를 저장하고 작업을 완료한다`() {
         val job = enqueue()
 
-        executor(ScriptedResponder(ArrayDeque(listOf(answer())))).executeAsync(job.id)
+        executor(ScriptedResponder(ArrayDeque(listOf(answer())))).executeNext()
 
         assertThat(jobOf(job).state.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(assistantMessages().single().content).isEqualTo("많이 힘드셨겠어요.")
@@ -91,7 +91,7 @@ class ResponseJobExecutorTest {
         val job = enqueue("자정 후", Instant.parse("2026-08-08T15:10:00Z"))
         val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
 
-        executor(responder).executeAsync(job.id)
+        executor(responder).executeNext()
 
         assertThat(responder.requests.single().map { it.content }).containsExactly("자정 전", "자정 후")
     }
@@ -100,7 +100,7 @@ class ResponseJobExecutorTest {
     fun `실패하면 backoff 뒤로 재시도를 예약하고 assistant 메시지는 저장하지 않는다`() {
         val job = enqueue()
 
-        executor(ScriptedResponder(ArrayDeque(listOf(failure)))).executeAsync(job.id)
+        executor(ScriptedResponder(ArrayDeque(listOf(failure)))).executeNext()
 
         val state = jobOf(job).state
         assertThat(state.status).isEqualTo(JobStatus.PENDING)
@@ -116,10 +116,10 @@ class ResponseJobExecutorTest {
         val job = enqueue()
         val executor = executor(ScriptedResponder(ArrayDeque(listOf(failure, failure, failure))))
 
-        executor.executeAsync(job.id)
+        executor.executeNext()
         repeat(2) {
             timeProvider.fixedNow = timeProvider.fixedNow.plus(Duration.ofMinutes(5))
-            executor.executeClaimedAsync(executor.claimNext()!!)
+            executor.executeNext()
         }
 
         val failed = jobOf(job)
@@ -127,7 +127,7 @@ class ResponseJobExecutorTest {
         assertThat(failed.state.attemptCount).isEqualTo(3)
         assertThat(failed.failureReason).isEqualTo(ResponseFailureReason.GENERATION_FAILED)
         assertThat(failed.retryable).isTrue()
-        assertThat(executor.claimNext()).isNull()
+        assertThat(executor.executeNext()).isFalse()
     }
 
     @Test
@@ -136,8 +136,8 @@ class ResponseJobExecutorTest {
         val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
         val executor = executor(responder)
 
-        executor.executeAsync(job.id)
-        executor.executeAsync(job.id)
+        executor.executeNext()
+        executor.executeNext()
 
         assertThat(responder.requests).hasSize(1)
         assertThat(assistantMessages()).hasSize(1)
@@ -153,7 +153,7 @@ class ResponseJobExecutorTest {
             answer("늦은 응답").invoke()
         }
 
-        executor(ScriptedResponder(ArrayDeque(listOf(slowThenReclaimed)))).executeAsync(job.id)
+        executor(ScriptedResponder(ArrayDeque(listOf(slowThenReclaimed)))).executeNext()
 
         assertThat(assistantMessages()).isEmpty()
         // 다른 워커가 잡은 상태 그대로 남는다
@@ -170,7 +170,7 @@ class ResponseJobExecutorTest {
         val responder = ScriptedResponder(ArrayDeque())
         val executor = executor(responder)
 
-        executor.executeClaimedAsync(executor.claimNext()!!)
+        executor.executeNext()
 
         assertThat(responder.requests).isEmpty()
         assertThat(jobOf(job).state.status).isEqualTo(JobStatus.FAILED)

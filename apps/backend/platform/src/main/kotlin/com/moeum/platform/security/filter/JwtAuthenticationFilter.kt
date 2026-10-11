@@ -1,5 +1,8 @@
 package com.moeum.platform.security.filter
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.platform.security.jwt.JwtProvider
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -10,6 +13,7 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 
+@ConditionalOnRole(ExecutionRole.API)
 @Component
 class JwtAuthenticationFilter(
     private val jwtProvider: JwtProvider,

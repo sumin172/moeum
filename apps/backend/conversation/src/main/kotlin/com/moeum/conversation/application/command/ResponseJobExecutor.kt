@@ -4,19 +4,18 @@ import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.ResponseJob
-import com.moeum.conversation.domain.model.ResponseJobId
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.conversation.infrastructure.config.ResponseJobProperties
 import com.moeum.kernel.TimeProvider
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
-import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Service
 
-// AI 응답 생성 작업을 실행한다. 진입점은 두 가지다:
-// - executeAsync: 메시지 저장·사용자 재시도 직후 바로 한 번 실행 시도 (지연 최소화)
-// - claimNext + executeClaimedAsync: poller가 재시도 차례이거나 리스가 만료된 작업을 회수
+// 실행 슬롯 안에서 한 작업을 선점하고 처리한다. DB 작업을 먼저 선점해 대기열에 넣지 않는다.
 // LLM 호출은 트랜잭션 밖에서 하고, 결과 저장/실패 기록만 각각 별도 트랜잭션으로 한다.
 @Service
+@ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER)
 class ResponseJobExecutor(
     private val responseJobRepository: ResponseJobRepository,
     private val messageRepository: MessageRepository,
@@ -29,24 +28,12 @@ class ResponseJobExecutor(
     private val log = LoggerFactory.getLogger(ResponseJobExecutor::class.java)
     private val policy = responseJobProperties.toPolicy()
 
-    @Async
-    fun executeAsync(jobId: ResponseJobId) {
+    fun executeNext(): Boolean {
         val now = timeProvider.now()
-        val job = responseJobRepository.claim(jobId, now, policy.leaseExpiresAt(now))
-        if (job == null) {
-            log.debug("이미 다른 워커가 잡았거나 실행할 차례가 아닌 응답 작업, 스킵: jobId={}", jobId.value)
-            return
-        }
+        val job = responseJobRepository.claimNext(now, policy.leaseExpiresAt(now)) ?: return false
         execute(job)
+        return true
     }
-
-    fun claimNext(): ResponseJob? {
-        val now = timeProvider.now()
-        return responseJobRepository.claimNext(now, policy.leaseExpiresAt(now))
-    }
-
-    @Async
-    fun executeClaimedAsync(job: ResponseJob) = execute(job)
 
     private fun execute(job: ResponseJob) {
         if (policy.isExhausted(job.state.attemptCount)) {

@@ -43,7 +43,6 @@ class RetryResponseServiceTest {
 
         val result = service().retry(userId, job.userMessageId)
 
-        assertThat(result.restarted).isTrue()
         assertThat(result.responseJob.state.status).isEqualTo(JobStatus.PENDING)
         assertThat(result.responseJob.state.nextAttemptAt).isEqualTo(now)
         assertThat(result.responseJob.failureReason).isNull()
@@ -56,7 +55,6 @@ class RetryResponseServiceTest {
 
         val result = service().retry(userId, job.userMessageId)
 
-        assertThat(result.restarted).isFalse()
         assertThat(result.responseJob).isEqualTo(job)
         assertThat(usage.counts).isEmpty()
     }

@@ -1,5 +1,8 @@
 package com.moeum.journal.application.command
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.conversation.application.publicapi.ActiveDay
 import com.moeum.conversation.application.publicapi.ConversationActivityQuery
 import com.moeum.journal.domain.GenerationJobRepository
@@ -11,6 +14,7 @@ import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
 
+@ConditionalOnRole(ExecutionRole.JOURNAL_WORKER)
 @Service
 class GenerationPlanner(
     private val conversationActivityQuery: ConversationActivityQuery,
