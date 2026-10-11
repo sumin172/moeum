@@ -1,7 +1,11 @@
 package com.moeum.platform.security.config
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import org.springframework.boot.context.properties.ConfigurationProperties
 
+@ConditionalOnRole(ExecutionRole.API)
 @ConfigurationProperties(prefix = "moeum.jwt")
 data class JwtProperties(
     val secret: String,

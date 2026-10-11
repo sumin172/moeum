@@ -1,4 +1,9 @@
 spring:
+  datasource:
+    hikari:
+      maximum-pool-size: ${API_DB_POOL_SIZE:10}
+      minimum-idle: 2
+      pool-name: api-db
   jpa:
     hibernate:
       ddl-auto: none
@@ -37,7 +42,7 @@ resilience4j:
           - org.springframework.web.client.HttpClientErrorException.TooManyRequests
           # 응답 본문이 비었거나 content가 없는 경우(안전 필터 등)
           - com.moeum.platform.llm.LlmException
-    # 서킷은 용도가 아니라 provider 단위다 — 같은 provider를 쓰는 대화 응답과 일기 생성이 함께 빠르게 실패한다.
+    # 서킷은 각 워커 프로세스의 provider 단위다. 별도 역할 프로세스 간 상태는 공유하지 않는다.
     instances:
       llm-gemini:
         baseConfig: llm
@@ -51,11 +56,11 @@ moeum:
       refresh-token-ttl: 30d
       # 교체된 직전 토큰이 이 시간 안에 다시 오면 탈취가 아니라 동시 요청으로 보고 세션을 유지한다
       rotation-grace: 30s
-  worker:
-    # false면 이 인스턴스는 AI 작업을 실행하지 않는다 — 스케줄러(응답 작업 poller, 일기 Planner/Executor)도,
-    # 메시지 저장 직후 즉시 실행도 하지 않고 작업을 쌓기만 한다. API 전용 인스턴스와 워커 인스턴스를 같은 jar로
-    # 나눠 띄우기 위한 스위치. 분리 운영 시 워커의 response-job.poll-interval을 1~2초로 줄여 응답 지연을 맞춘다.
-    enabled: true
+  runtime:
+    roles: api
+    conversation-concurrency: 8
+    journal-concurrency: 2
+    shutdown-timeout: 10s
   conversation:
     ai:
       daily-message-limit: 20
@@ -68,13 +73,14 @@ moeum:
       max-attempts: 3
       backoff: 10s, 60s
       lease: 2m
-      poll-interval: PT10S
+      poll-interval: PT1S
   journal:
     # 일기 생성 작업 재시도/리스 정책 (기본값은 GenerationJobProperties 참고)
     generation-job:
       max-attempts: 5
       backoff: 1m, 5m, 30m, 2h
       lease: 5m
+      poll-interval: PT1S
   llm:
     # 용도별 provider·모델·토큰 상한. 모델 교체나 provider 전환(예: 일기를 Claude Haiku로)은 이 설정만 바꾼다.
     # Gemini 모델 alias는 구세대가 조기 폐기되는 경우가 있어(2026-08-08 gemini-2.5-flash 404) latest alias를 쓴다.

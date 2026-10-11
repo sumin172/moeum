@@ -1,5 +1,8 @@
 package com.moeum.platform.security.filter
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.web.PlatformErrorCode
 import jakarta.servlet.http.HttpServletRequest
@@ -10,6 +13,7 @@ import org.springframework.security.web.AuthenticationEntryPoint
 import org.springframework.stereotype.Component
 import tools.jackson.databind.json.JsonMapper
 
+@ConditionalOnRole(ExecutionRole.API)
 @Component
 class JwtAuthenticationEntryPoint(
     private val jsonMapper: JsonMapper,

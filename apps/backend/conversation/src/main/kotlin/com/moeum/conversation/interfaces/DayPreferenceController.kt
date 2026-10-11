@@ -1,5 +1,8 @@
 package com.moeum.conversation.interfaces
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.conversation.application.command.ChangeDayStartTimeService
 import com.moeum.conversation.application.query.GetDayPreferenceService
 import com.moeum.conversation.interfaces.dto.ChangeDayStartTimeRequest
@@ -12,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
+@ConditionalOnRole(ExecutionRole.API)
 @RestController
 @RequestMapping("/api/conversations/day-preference")
 class DayPreferenceController(

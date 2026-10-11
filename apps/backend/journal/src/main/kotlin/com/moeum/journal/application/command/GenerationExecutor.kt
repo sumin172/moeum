@@ -6,32 +6,34 @@ import com.moeum.journal.domain.JournalGenerator
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.kernel.TimeProvider
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
 
-// 실행할 차례인 일기 생성 작업을 하나씩 claim해서 순서대로 처리한다. 하나씩 잡으므로 리스는 작업마다 새로 시작되고,
+// 실행 슬롯 안에서 한 작업을 선점한다. 리스는 실제 실행 시점에 시작되고,
 // 여러 인스턴스가 동시에 돌아도 SKIP LOCKED로 같은 작업을 잡지 않는다.
 // LLM 호출은 트랜잭션 밖에서 하고, 결과 저장/실패 기록만 각각 별도 트랜잭션으로 한다.
 @Service
+@ConditionalOnRole(ExecutionRole.JOURNAL_WORKER)
 class GenerationExecutor(
     private val generationJobRepository: GenerationJobRepository,
     private val conversationActivityQuery: ConversationActivityQuery,
     private val journalGenerator: JournalGenerator,
     private val saveGeneratedJournalService: SaveGeneratedJournalService,
     private val markGenerationFailedService: MarkGenerationFailedService,
-    private val generationJobProperties: GenerationJobProperties,
+    generationJobProperties: GenerationJobProperties,
     private val timeProvider: TimeProvider,
 ) {
     private val log = LoggerFactory.getLogger(GenerationExecutor::class.java)
     private val policy = generationJobProperties.toPolicy()
 
-    fun executeDueJobs() {
-        repeat(generationJobProperties.maxJobsPerRun) {
-            val now = timeProvider.now()
-            val job = generationJobRepository.claimNext(now, policy.leaseExpiresAt(now)) ?: return
-            execute(job)
-        }
+    fun executeNext(): Boolean {
+        val now = timeProvider.now()
+        val job = generationJobRepository.claimNext(now, policy.leaseExpiresAt(now)) ?: return false
+        execute(job)
+        return true
     }
 
     private fun execute(job: GenerationJob) {

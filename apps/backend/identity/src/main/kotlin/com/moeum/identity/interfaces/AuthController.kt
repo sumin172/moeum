@@ -1,5 +1,8 @@
 package com.moeum.identity.interfaces
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.identity.application.command.AuthSessionService
 import com.moeum.identity.application.command.GoogleLoginService
 import com.moeum.identity.application.command.RefreshOutcome
@@ -17,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
+@ConditionalOnRole(ExecutionRole.API)
 @RestController
 @RequestMapping("/api/auth")
 class AuthController(

@@ -1,5 +1,8 @@
 package com.moeum.conversation.infrastructure.ai
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.ConversationResponse
 import com.moeum.conversation.domain.model.Message
@@ -26,6 +29,7 @@ private const val SYSTEM_PROMPT =
         "답변은 두세 문장 이내로 짧게 하고, 필요하면 하루를 더 떠올리게 하는 질문을 하나 덧붙이세요. " +
         "코드 작성, 시사·정치 논쟁, 전문 의료·법률 상담처럼 일상 대화와 무관한 요청이 오면 답변이 어려움을 정중히 안내하고 일상 주제로 되돌리세요."
 
+@ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER)
 @Component
 class LlmConversationResponder(
     private val llmClient: LlmClient,

@@ -73,7 +73,7 @@ class GenerationExecutorTest {
     fun `하루가 끝난 작업을 실행해 초안 일기를 저장하고 작업을 완료한다`() {
         val job = enqueue()
 
-        executor(ScriptedGenerator(failures = 0)).executeDueJobs()
+        executor(ScriptedGenerator(failures = 0)).executeNext()
 
         val completed = jobRepository.jobs.getValue(job.id)
         assertThat(completed.state.status).isEqualTo(JobStatus.COMPLETED)
@@ -91,7 +91,7 @@ class GenerationExecutorTest {
         now = dayEnd.minusSeconds(1)
         val generator = ScriptedGenerator(failures = 0)
 
-        executor(generator).executeDueJobs()
+        executor(generator).executeNext()
 
         assertThat(generator.calls).isZero()
         assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.PENDING)
@@ -103,17 +103,17 @@ class GenerationExecutorTest {
         val generator = ScriptedGenerator(failures = 2)
         val executor = executor(generator)
 
-        executor.executeDueJobs()
+        executor.executeNext()
         val retrying = jobRepository.jobs.getValue(job.id)
         assertThat(retrying.state.status).isEqualTo(JobStatus.PENDING)
         assertThat(retrying.state.lastErrorCode).isEqualTo("LlmException")
 
         // backoff 전에는 다시 실행하지 않는다
-        executor.executeDueJobs()
+        executor.executeNext()
         assertThat(generator.calls).isEqualTo(1)
 
         now = now.plus(Duration.ofMinutes(2))
-        executor.executeDueJobs()
+        executor.executeNext()
 
         assertThat(generator.calls).isEqualTo(2)
         assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.FAILED)

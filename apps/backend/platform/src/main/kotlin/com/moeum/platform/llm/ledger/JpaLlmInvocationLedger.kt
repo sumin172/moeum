@@ -1,5 +1,8 @@
 package com.moeum.platform.llm.ledger
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
@@ -8,6 +11,7 @@ import java.util.UUID
 
 interface LlmInvocationJpaRepository : JpaRepository<LlmInvocationJpaEntity, UUID>
 
+@ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @Component
 class JpaLlmInvocationLedger(
     private val jpaRepository: LlmInvocationJpaRepository,

@@ -1,5 +1,8 @@
 package com.moeum.identity.application.command
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.identity.domain.GoogleIdTokenVerifierPort
 import com.moeum.identity.domain.UserDeletedException
 import com.moeum.identity.domain.UserRepository
@@ -9,6 +12,7 @@ import com.moeum.kernel.UserId
 import org.springframework.stereotype.Service
 import java.util.UUID
 
+@ConditionalOnRole(ExecutionRole.API)
 @Service
 class GoogleLoginService(
     private val googleIdTokenVerifier: GoogleIdTokenVerifierPort,

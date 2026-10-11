@@ -44,17 +44,18 @@ Journal → Conversation publicapi, Journal → Identity publicapi 방향을 유
 Conversation은 Journal을 import하지 않는다. 모듈 간 순환 의존은 테스트로 차단한다.
 도메인은 JPA 어노테이션을 갖지 않는다. publicapi 계약에 JPA 엔티티를 노출하지 않는다.
 
-실행 역할은 세 가지다. 아래 이름은 목표 설정 계약이며 아직 구현된 설정이 아니다.
+실행 역할은 세 가지다. R1에서 역할별 빈·실행 슬롯·DB pool/LLM 예산을 구현했다.
+현재 실행 방법과 검증 범위는 [실행 역할](WORKER_ROLES.md)을 따른다.
 
 - API: HTTP 처리와 짧은 저장 트랜잭션. LLM 호출·배치 스케줄 등록 없음.
 - conversation-worker: 대화 응답만 실행.
-- journal-worker: Conversation publicapi로 마감/전달 대상을 선점하고 Journal에 작업을 등록·실행.
+- journal-worker: 현재 생성 Planner와 일기 작업을 실행. R2부터 Conversation publicapi로 마감/전달 대상을 선점하고 Journal에 작업을 등록·실행.
   소유권과 실행 위치는 다르다. Conversation 소유 행의 변경은 반드시 그 publicapi 안에서 한다.
 
 운영은 역할별 프로세스·배포 수·DB 풀·LLM 예산을 분리한다.
 같은 산출물을 역할 설정으로 실행할 수 있으며 MSA/별도 DB는 요구하지 않는다.
 로컬에서만 복합 역할을 허용하되 활성 역할을 기동 로그로 명시한다.
-기존 단일 worker.enabled 플래그는 역할 분리 구현과 함께 제거한다.
+기본 역할은 API이며 복합 역할은 local 개발/테스트에서만 허용한다.
 
 ## Aggregate와 데이터 접근
 
@@ -213,8 +214,8 @@ PostgreSQL의 SKIP LOCKED는 큐 형태의 다중 소비자 처리에 사용할 
 
 ## 현재 구현과의 차이
 
-현재 코드는 단일 worker.enabled, 원본 스캔 Planner, 날짜 키 기반 생성,
+현재 코드는 실행 역할 분리를 갖추었으며 원본 스캔 Planner, 날짜 키 기반 생성,
 확정·유료 수정·리비전·LLM 호출 원장을 갖고 있다.
 이 문서는 그 코드를 새 설계로 교체할 기준이다.
-이번 설계 작업은 운영 코드와 Flyway를 바꾸지 않는다.
+R1은 실행 경로를 교체하고 관련 데드 코드를 제거했다. Flyway 스키마는 변경하지 않았다.
 구현·삭제 순서는 [개발 단계](DEVELOPMENT_STAGES.md)를 따른다.

@@ -1,5 +1,8 @@
 package com.moeum.journal.interfaces
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.journal.domain.InvalidJournalRequestException
 import com.moeum.journal.domain.JournalEditNotAllowedException
 import com.moeum.journal.domain.JournalGenerationNotRetryableException
@@ -13,6 +16,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
+@ConditionalOnRole(ExecutionRole.API)
 @RestControllerAdvice(basePackages = ["com.moeum.journal.interfaces"])
 class JournalExceptionHandler {
 

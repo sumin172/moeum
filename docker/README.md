@@ -20,3 +20,4 @@ Redis·Kafka·Object Storage는 현재 필수 인프라가 아니다.
 필요성과 부하 측정에 따라 도입을 판단한다.
 목표 실행 역할과 자원 격리는 [아키텍처](../docs/ARCHITECTURE.md),
 부하 검증 계획은 [부하 기준](../docs/CAPACITY.md)을 참고한다.
+현재 API·대화 워커·일기 워커 실행 방법은 [실행 역할](../docs/WORKER_ROLES.md)을 따른다.

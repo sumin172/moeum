@@ -24,7 +24,7 @@ data class SaveMessageCommand(
     val timezone: String,
 )
 
-data class SaveMessageResult(val message: Message, val responseJob: ResponseJob, val isNewlyCreated: Boolean)
+data class SaveMessageResult(val message: Message, val responseJob: ResponseJob)
 
 @Service
 class SaveMessageService(
@@ -48,7 +48,7 @@ class SaveMessageService(
         messageRepository.findByUserIdAndClientMessageId(userId, command.clientMessageId)?.let { existing ->
             val job = responseJobRepository.findByUserIdAndUserMessageId(userId, existing.id)
                 ?: error("응답 작업이 없는 유저 메시지: messageId=${existing.id.value}")
-            return SaveMessageResult(existing, job, isNewlyCreated = false)
+            return SaveMessageResult(existing, job)
         }
 
         val now = timeProvider.now()
@@ -72,6 +72,6 @@ class SaveMessageService(
         } else {
             ResponseJob.quotaExceeded(saved, now)
         }
-        return SaveMessageResult(saved, responseJobRepository.save(job), isNewlyCreated = true)
+        return SaveMessageResult(saved, responseJobRepository.save(job))
     }
 }

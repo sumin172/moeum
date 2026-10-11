@@ -9,10 +9,8 @@ import java.time.Duration
 data class ResponseJobProperties(
     val maxAttempts: Int = 3,
     val backoff: List<Duration> = listOf(Duration.ofSeconds(10), Duration.ofSeconds(60)),
-    // Gemini read timeout(15초)보다 넉넉하게
+    // provider read timeout(60초)보다 넉넉하게
     val lease: Duration = Duration.ofMinutes(2),
-    // poller가 한 번에 가져가는 최대 작업 수
-    val pollBatchSize: Int = 20,
 ) {
     fun toPolicy(): JobPolicy = JobPolicy(maxAttempts = maxAttempts, backoff = backoff, lease = lease)
 }

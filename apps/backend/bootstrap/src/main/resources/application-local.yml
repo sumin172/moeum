@@ -7,12 +7,9 @@ spring:
     username: moeum
     password: moeum
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
       idle-timeout: 30000
       max-lifetime: 1800000
       connection-timeout: 10000
-      pool-name: Moeum-HikariPool
 
 moeum:
   security:

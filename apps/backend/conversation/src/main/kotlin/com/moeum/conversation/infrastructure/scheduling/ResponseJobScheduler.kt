@@ -1,30 +1,28 @@
 package com.moeum.conversation.infrastructure.scheduling
 
 import com.moeum.conversation.application.command.ResponseJobExecutor
-import com.moeum.conversation.infrastructure.config.ResponseJobProperties
-import org.slf4j.LoggerFactory
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+import com.moeum.platform.runtime.WorkerPool
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 
-// 재시도 차례가 된 작업과, 워커가 죽어 리스가 만료된 작업을 회수한다. 정상 경로(메시지 저장 직후 실행)는
-// 이 poller 없이도 동작하므로, 주기는 지연보다 회수 보장 관점에서 잡는다.
-// moeum.worker.enabled=false인 인스턴스(API 전용)에서는 등록되지 않는다.
+// 슬롯 확보 후 워커 스레드 안에서 선점한다. 스케줄러는 LLM 호출을 기다리지 않는다.
 @Component
-@ConditionalOnProperty(name = ["moeum.worker.enabled"], havingValue = "true", matchIfMissing = true)
+@ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER)
 class ResponseJobScheduler(
     private val responseJobExecutor: ResponseJobExecutor,
-    private val responseJobProperties: ResponseJobProperties,
+    @Qualifier("conversationWorkerPool") private val pool: WorkerPool,
 ) {
-    private val log = LoggerFactory.getLogger(ResponseJobScheduler::class.java)
-
-    @Scheduled(fixedDelayString = "\${moeum.conversation.response-job.poll-interval:PT10S}")
+    @Scheduled(
+        scheduler = "conversationPollScheduler",
+        fixedDelayString = "\${moeum.conversation.response-job.poll-interval:PT1S}",
+        initialDelayString = "\${moeum.conversation.response-job.initial-delay:PT0S}",
+    )
     fun pollDueJobs() {
-        runCatching {
-            repeat(responseJobProperties.pollBatchSize) {
-                val job = responseJobExecutor.claimNext() ?: return@runCatching
-                responseJobExecutor.executeClaimedAsync(job)
-            }
-        }.onFailure { e -> log.error("AI 응답 작업 poll 실패", e) }
+        repeat(pool.concurrency) {
+            if (!pool.submit { responseJobExecutor.executeNext() }) return
+        }
     }
 }

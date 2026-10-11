@@ -1,5 +1,8 @@
 package com.moeum.journal.infrastructure.ai
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.JournalGenerator
@@ -27,8 +30,9 @@ private const val SYSTEM_PROMPT =
         "오직 JSON 객체만 응답하세요. {\"title\": string, \"body\": string} 형태입니다. " +
         "title은 그날을 대표하는 짧은 한국어 제목, body는 자연스러운 한국어 1인칭 일기 서술입니다."
 
-class JournalGenerationException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+class JournalGenerationException(message: String) : RuntimeException(message)
 
+@ConditionalOnRole(ExecutionRole.JOURNAL_WORKER)
 @Component
 class LlmJournalGenerator(
     private val llmClient: LlmClient,
@@ -48,7 +52,7 @@ class LlmJournalGenerator(
         )
 
         val payload = runCatching { jsonMapper.readValue(result.text, JournalPayload::class.java) }
-            .getOrElse { e -> throw JournalGenerationException("일기 생성 응답 JSON 파싱 실패: ${result.text}", e) }
+            .getOrElse { e -> throw JournalGenerationException("일기 생성 응답 JSON 파싱 실패: ${e.javaClass.simpleName}") }
 
         return GeneratedJournal(
             generationId = result.generationId,

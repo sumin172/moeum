@@ -28,7 +28,7 @@ import java.util.UUID
  * 실제 Postgres(Testcontainers) + Flyway + JPA + Security 필터 체인을 전부 태우는 통합 테스트 베이스.
  * Google 실서버 호출만 [FakeGoogleVerifierConfig]로 대체한다 — 그 경계 밖은 전부 프로덕션 그대로 동작한다.
  */
-@ActiveProfiles("local")
+@ActiveProfiles("local", "local-all")
 @AutoConfigureTestRestTemplate
 @Import(
     AbstractIntegrationTest.FakeGoogleVerifierConfig::class,
@@ -40,6 +40,7 @@ import java.util.UUID
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     // 재시도 흐름을 몇 초 안에 끝까지 검증할 수 있도록 응답 작업 backoff와 poll 주기를 줄인다
     properties = [
+        "moeum.journal.generation-job.initial-delay=PT1H",
         "moeum.conversation.response-job.backoff=200ms",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
         // 실제 provider 없이 LlmClient → 호출 원장 경로를 검증하기 위한 용도(FakeLlmProvider)

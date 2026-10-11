@@ -73,7 +73,7 @@ class JournalFlowIntegrationTest : AbstractIntegrationTest() {
         jdbcTemplate.update(
             "UPDATE journal.generation_jobs SET next_attempt_at = now() - interval '1 second' WHERE user_id = ?", userId.value,
         )
-        generationExecutor.executeDueJobs()
+        generationExecutor.executeNext()
 
         val generated = journalDay(jwt, day)
         assertThat(generated.generation!!.status).isEqualTo("COMPLETED")

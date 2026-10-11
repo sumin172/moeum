@@ -35,11 +35,6 @@ class InMemoryResponseJobRepository : ResponseJobRepository {
             .minByOrNull { it.state.nextAttemptAt }
             ?.let { claimed(it, now, leaseExpiresAt) }
 
-    override fun claim(id: ResponseJobId, now: Instant, leaseExpiresAt: Instant): ResponseJob? =
-        jobs[id]
-            ?.takeIf { it.state.status == JobStatus.PENDING && !it.state.nextAttemptAt.isAfter(now) }
-            ?.let { claimed(it, now, leaseExpiresAt) }
-
     private fun isClaimable(job: ResponseJob, now: Instant): Boolean {
         val state = job.state
         return (state.status == JobStatus.PENDING && !state.nextAttemptAt.isAfter(now)) ||

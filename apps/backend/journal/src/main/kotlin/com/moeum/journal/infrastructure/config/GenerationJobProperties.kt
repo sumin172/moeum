@@ -16,8 +16,6 @@ data class GenerationJobProperties(
         Duration.ofHours(2),
     ),
     val lease: Duration = Duration.ofMinutes(5),
-    // Executor 한 회차에 최대 몇 개를 처리할지 — 하나씩 claim해서 순서대로 처리하므로 리스는 작업마다 새로 잡힌다.
-    val maxJobsPerRun: Int = 20,
 ) {
     fun toPolicy(): JobPolicy = JobPolicy(maxAttempts = maxAttempts, backoff = backoff, lease = lease)
 }

@@ -1,5 +1,8 @@
 package com.moeum.platform.security.config
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.platform.security.filter.JwtAuthenticationEntryPoint
 import com.moeum.platform.security.filter.JwtAuthenticationFilter
 import org.springframework.context.annotation.Bean
@@ -10,6 +13,7 @@ import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 
+@ConditionalOnRole(ExecutionRole.API)
 @Configuration
 @EnableWebSecurity
 class SecurityConfig(

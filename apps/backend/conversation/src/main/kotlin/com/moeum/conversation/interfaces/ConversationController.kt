@@ -1,6 +1,8 @@
 package com.moeum.conversation.interfaces
 
-import com.moeum.conversation.application.command.ResponseJobTrigger
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.conversation.application.command.RetryResponseService
 import com.moeum.conversation.application.command.SaveMessageCommand
 import com.moeum.conversation.application.command.SaveMessageService
@@ -27,13 +29,13 @@ import java.util.UUID
 private const val DEFAULT_PAGE_SIZE = "50"
 private const val MAX_PAGE_SIZE = 200
 
+@ConditionalOnRole(ExecutionRole.API)
 @RestController
 @RequestMapping("/api/conversations")
 class ConversationController(
     private val saveMessageService: SaveMessageService,
     private val getTodayConversationService: GetTodayConversationService,
     private val retryResponseService: RetryResponseService,
-    private val responseJobTrigger: ResponseJobTrigger,
 ) {
     private val log = LoggerFactory.getLogger(ConversationController::class.java)
 
@@ -53,10 +55,6 @@ class ConversationController(
             log.warn("메시지 저장 유니크 제약 경합, 재조회: userId={}, clientMessageId={}", userId.value, command.clientMessageId)
             saveMessageService.save(userId, command)
         }
-        // 이번 호출이 실제로 새 행을 커밋했을 때만 바로 실행을 시도한다. 여기서 유실돼도 poller가 회수한다.
-        if (result.isNewlyCreated) {
-            responseJobTrigger.requestImmediateExecution(result.responseJob.id)
-        }
         return MessageResponse.from(result.message, result.responseJob)
     }
 
@@ -65,9 +63,6 @@ class ConversationController(
     @ResponseStatus(HttpStatus.ACCEPTED)
     fun retryResponse(@AuthenticationPrincipal userId: UserId, @PathVariable messageId: UUID): MessageResponse {
         val result = retryResponseService.retry(userId, MessageId(messageId))
-        if (result.restarted) {
-            responseJobTrigger.requestImmediateExecution(result.responseJob.id)
-        }
         return MessageResponse.from(result.message, result.responseJob)
     }
 

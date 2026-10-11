@@ -1,5 +1,8 @@
 package com.moeum.platform.web
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -10,6 +13,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 // 업무 모듈의 예외 처리기가 다루지 않은 예외의 마지막 처리기. 클라이언트 요청 형식 오류는 400, 나머지는 500.
+@ConditionalOnRole(ExecutionRole.API)
 @RestControllerAdvice
 class GlobalFallbackExceptionHandler {
 

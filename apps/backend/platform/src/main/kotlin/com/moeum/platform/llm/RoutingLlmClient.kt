@@ -1,5 +1,8 @@
 package com.moeum.platform.llm
 
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UuidV7
 import com.moeum.platform.llm.ledger.LlmInvocation
@@ -11,9 +14,8 @@ import org.springframework.stereotype.Component
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
-private const val DEFAULT_MAX_CONCURRENT_CALLS = 10
-
 // 용도(purpose)별 라우팅 → provider별 동시 호출 상한 → provider 호출(서킷브레이커는 provider에) → 호출 원장 기록.
+@ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @Component
 class RoutingLlmClient(
     providers: List<LlmProvider>,
@@ -25,7 +27,7 @@ class RoutingLlmClient(
     private val log = LoggerFactory.getLogger(RoutingLlmClient::class.java)
     private val providersByName = providers.associateBy { it.name }
     private val permits = providersByName.keys.associateWith {
-        Semaphore(properties.maxConcurrentCalls[it] ?: DEFAULT_MAX_CONCURRENT_CALLS)
+        Semaphore(properties.concurrentLimit(it))
     }
 
     init {
