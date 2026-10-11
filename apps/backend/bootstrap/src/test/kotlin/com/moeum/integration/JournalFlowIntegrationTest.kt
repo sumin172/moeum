@@ -30,7 +30,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Stage 2 흐름 전체: 대화 → 일기 생성 → 조회 → (free) 수정 거부 → 확정 + JournalConfirmed →
+ * 현재 구현 흐름: 대화 → 일기 생성 → 조회 → (free) 수정 거부 → 확정 + JournalConfirmed →
  * 구독 지급 → 수정(낡은 version은 409) → 재확정 → 새 메시지 → OUTDATED.
  * 스케줄러 주기를 기다리지 않도록 Planner/Executor를 직접 부르고, 하루가 끝난 것처럼 작업 시각만 당긴다.
  */
