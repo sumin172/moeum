@@ -1,5 +1,6 @@
 package com.moeum.journal.infrastructure.jpa
 
+import com.moeum.kernel.RecordDayId
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.domain.model.GenerationJobId
@@ -11,7 +12,6 @@ import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
-import java.time.LocalDate
 
 private const val TABLE = "journal.generation_jobs"
 
@@ -28,8 +28,8 @@ class GenerationJobRepositoryImpl(
     override fun save(job: GenerationJob): GenerationJob =
         jpaRepository.save(job.toEntity()).toDomain()
 
-    override fun findByUserIdAndDiaryDate(userId: UserId, diaryDate: LocalDate): GenerationJob? =
-        jpaRepository.findByUserIdAndDiaryDate(userId.value, diaryDate)?.toDomain()
+    override fun findByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): GenerationJob? =
+        jpaRepository.findByUserIdAndRecordDayId(userId.value, recordDayId.value)?.toDomain()
 
     @Transactional
     override fun claimNext(now: Instant, leaseExpiresAt: Instant): GenerationJob? =
@@ -46,7 +46,8 @@ private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
         id = GenerationJobId(id),
         journalId = journalId?.let { JournalId(it) },
         userId = UserId(userId),
-        diaryDate = diaryDate,
+        recordDayId = RecordDayId(recordDayId),
+        displayDate = displayDate,
         state = JobState(
             status = status,
             attemptCount = attemptCount,
@@ -71,7 +72,8 @@ private fun GenerationJob.toEntity(): GenerationJobJpaEntity =
         id = id.value,
         journalId = journalId?.value,
         userId = userId.value,
-        diaryDate = diaryDate,
+        recordDayId = recordDayId.value,
+        displayDate = displayDate,
         status = state.status,
         attemptCount = state.attemptCount,
         nextAttemptAt = state.nextAttemptAt,

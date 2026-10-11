@@ -4,6 +4,7 @@ import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.domain.model.ResponseJobId
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobClaimSql
 import com.moeum.platform.job.JobState
@@ -50,7 +51,7 @@ private fun ResponseJobJpaEntity.toDomain(): ResponseJob =
         id = ResponseJobId(id),
         userMessageId = MessageId(userMessageId),
         userId = UserId(userId),
-        dayDate = dayDate,
+        recordDayId = RecordDayId(recordDayId),
         state = JobState(
             status = status,
             attemptCount = attemptCount,
@@ -69,7 +70,7 @@ private fun ResponseJob.toEntity(): ResponseJobJpaEntity =
         id = id.value,
         userMessageId = userMessageId.value,
         userId = userId.value,
-        dayDate = dayDate,
+        recordDayId = recordDayId.value,
         status = state.status,
         failureReason = failureReason,
         attemptCount = state.attemptCount,

@@ -14,6 +14,7 @@ import com.moeum.journal.support.FakeFeatureAccessQuery
 import com.moeum.journal.support.InMemoryJournalRepository
 import com.moeum.journal.support.InMemoryJournalRevisionRepository
 import com.moeum.journal.support.MutableTimeProvider
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.kernel.UuidV7
 import org.assertj.core.api.Assertions.assertThat
@@ -26,7 +27,7 @@ import java.time.LocalDate
 class JournalLifecycleServicesTest {
 
     private val userId = UserId.generate()
-    private val day = LocalDate.of(2026, 8, 2)
+    private val day = RecordDayId.generate()
     private val timeProvider = MutableTimeProvider(Instant.parse("2026-08-03T01:00:00Z"))
     private val journals = InMemoryJournalRepository()
     private val revisions = InMemoryJournalRevisionRepository()
@@ -36,11 +37,9 @@ class JournalLifecycleServicesTest {
 
     private val editService = EditJournalService(journals, revisions, features, timeProvider)
     private val confirmService = ConfirmJournalService(journals, publisher, timeProvider)
-    private val outdatedService = MarkJournalOutdatedService(journals)
 
-    private val sourceLast = UuidV7.generate()
     private fun generated(): Journal =
-        journals.save(Journal.draft(JournalId.generate(), userId, day, "산책", "한강을 걸었다", sourceLastMessageId = sourceLast))
+        journals.save(Journal.draft(JournalId.generate(), userId, day, LocalDate.of(2026,8,2), "산책", "한강을 걸었다", sourceRevision = 1))
 
     @Test
     fun `확정하면 CONFIRMED가 되고 JournalConfirmedV1을 발행한다`() {
@@ -107,14 +106,4 @@ class JournalLifecycleServicesTest {
         assertThatThrownBy { editService.edit(userId, day, "제목", "본문", 0) }.isInstanceOf(JournalNotFoundException::class.java)
     }
 
-    @Test
-    fun `확정된 일기의 하루에 더 나중 유저 메시지가 생기면 OUTDATED로 바꾼다`() {
-        val journal = generated()
-        confirmService.confirm(userId, day, journal.version, UuidV7.generate())
-
-        assertThat(outdatedService.markIfMissed(userId, day, sourceLast)).isFalse()
-        assertThat(outdatedService.markIfMissed(userId, day, UuidV7.generate())).isTrue()
-
-        assertThat(journals.findByUserIdAndDiaryDate(userId, day)!!.lifecycleStatus).isEqualTo(JournalLifecycleStatus.OUTDATED)
-    }
 }

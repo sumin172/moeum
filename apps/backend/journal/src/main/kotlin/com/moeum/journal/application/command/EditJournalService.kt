@@ -1,5 +1,6 @@
 package com.moeum.journal.application.command
 
+import com.moeum.kernel.RecordDayId
 import com.moeum.identity.application.publicapi.Feature
 import com.moeum.identity.application.publicapi.FeatureAccessQuery
 import com.moeum.journal.domain.InvalidJournalRequestException
@@ -16,7 +17,6 @@ import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.LocalDate
 
 @Service
 class EditJournalService(
@@ -27,15 +27,15 @@ class EditJournalService(
 ) {
     // 고치면 DRAFT로 돌아가 다시 확정해야 한다. 고친 내용은 리비전(edited_by = USER)으로 남는다.
     @Transactional
-    fun edit(userId: UserId, diaryDate: LocalDate, title: String, body: String, expectedVersion: Long): Journal {
+    fun edit(userId: UserId, recordDayId: RecordDayId, title: String, body: String, expectedVersion: Long): Journal {
         if (!featureAccessQuery.isEnabled(userId, Feature.JOURNAL_EDIT)) {
             throw JournalEditNotAllowedException("일기 수정은 구독 기능입니다: userId=${userId.value}")
         }
         if (title.isBlank() || body.isBlank()) {
             throw InvalidJournalRequestException("제목과 본문은 비어 있을 수 없습니다")
         }
-        val journal = journalRepository.findByUserIdAndDiaryDate(userId, diaryDate)
-            ?: throw JournalNotFoundException("일기가 없습니다: diaryDate=$diaryDate")
+        val journal = journalRepository.findByUserIdAndRecordDayId(userId, recordDayId)
+            ?: throw JournalNotFoundException("일기가 없습니다: displayDate=${recordDayId.value}")
         if (journal.version != expectedVersion) {
             throw JournalVersionConflictException("다른 기기에서 먼저 바뀐 일기입니다: expected=$expectedVersion, actual=${journal.version}")
         }

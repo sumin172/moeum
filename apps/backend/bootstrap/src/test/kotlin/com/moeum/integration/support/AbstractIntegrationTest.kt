@@ -12,6 +12,10 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.resttestclient.TestRestTemplate
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate
 import org.springframework.boot.resttestclient.postForEntity
+import org.springframework.boot.resttestclient.exchange
+import org.springframework.http.HttpEntity
+import org.springframework.http.HttpMethod
+import com.moeum.conversation.interfaces.dto.RecordSummaryResponse
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
@@ -41,6 +45,7 @@ import java.util.UUID
     // 재시도 흐름을 몇 초 안에 끝까지 검증할 수 있도록 응답 작업 backoff와 poll 주기를 줄인다
     properties = [
         "moeum.journal.generation-job.initial-delay=PT1H",
+        "moeum.journal.delivery.initial-delay=PT1H",
         "moeum.conversation.response-job.backoff=200ms",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
         // 실제 provider 없이 LlmClient → 호출 원장 경로를 검증하기 위한 용도(FakeLlmProvider)
@@ -72,6 +77,10 @@ abstract class AbstractIntegrationTest {
         return response.body!!
     }
 
+    protected fun recordUrl(jwt: String): String {
+        val records = restTemplate.exchange<List<RecordSummaryResponse>>("/api/conversations/records",HttpMethod.GET,HttpEntity<Void>(authHeaders(jwt))).body!!
+        return "/api/conversations/records/"+records.first().recordDayId
+    }
     protected fun issueJwt(): String = login().accessToken
 
     protected fun authHeaders(jwt: String): HttpHeaders =

@@ -4,6 +4,7 @@ import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.domain.model.GenerationJobId
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -32,7 +33,7 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
     private fun createJobs(count: Int): Set<GenerationJobId> =
         (1..count).map {
             generationJobRepository.save(
-                GenerationJob.pending(UserId.generate(), LocalDate.of(2027, 1, 1), dayEnd = farFuture, now = Instant.now()),
+                GenerationJob.pending(UserId.generate(), RecordDayId.generate(), LocalDate.of(2027, 1, 1), dayEnd = farFuture, now = Instant.now()),
             ).id
         }.toSet()
 
@@ -63,7 +64,7 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
         createJobs(1)
         val firstAt = farFuture.plus(Duration.ofDays(1))
         val first = generateSequence { generationJobRepository.claimNext(firstAt, firstAt.plus(Duration.ofMinutes(5))) }
-            .first { it.diaryDate == LocalDate.of(2027, 1, 1) && it.state.attemptCount == 1 }
+            .first { it.displayDate == LocalDate.of(2027, 1, 1) && it.state.attemptCount == 1 }
 
         // 리스(5분)가 지난 뒤 다른 워커가 같은 작업을 다시 잡는다
         val secondAt = firstAt.plus(Duration.ofMinutes(6))

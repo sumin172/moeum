@@ -29,8 +29,10 @@ class MessageJpaEntity(
     val timezone: String,
     @Column(name = "local_date", nullable = false)
     val localDate: LocalDate,
-    @Column(name = "day_date", nullable = false)
-    val dayDate: LocalDate,
+    @Column(name = "record_day_id", nullable = false)
+    val recordDayId: UUID,
+    @Column(name = "source_sequence")
+    val sourceSequence: Long?,
     @Column(name = "client_message_id")
     val clientMessageId: UUID?,
     @Column(name = "generation_id")

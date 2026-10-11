@@ -1,30 +1,36 @@
 package com.moeum.conversation.application.command
 
-import com.moeum.conversation.domain.model.MessageRole
-import com.moeum.conversation.domain.model.ResponseFailureReason
-import com.moeum.conversation.domain.model.ResponseJob
-import com.moeum.conversation.support.FixedTimeProvider
-import com.moeum.conversation.support.InMemoryMessageRepository
-import com.moeum.conversation.support.InMemoryResponseJobRepository
-import com.moeum.conversation.support.testResponseJobProperties
-import com.moeum.conversation.support.userMessage
-import com.moeum.kernel.UserId
-import com.moeum.platform.job.JobStatus
 import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.ConversationResponse
 import com.moeum.conversation.domain.model.Message
+import com.moeum.conversation.domain.model.MessageRole
+import com.moeum.conversation.domain.model.ResponseFailureReason
+import com.moeum.conversation.domain.model.ResponseJob
+import com.moeum.conversation.support.*
+import com.moeum.kernel.RecordDayId
+import com.moeum.kernel.UserId
+import com.moeum.platform.job.JobStatus
 import com.moeum.platform.llm.LlmException
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
+import kotlin.collections.ArrayDeque
+import kotlin.collections.List
+import kotlin.collections.filter
+import kotlin.collections.getValue
+import kotlin.collections.listOf
+import kotlin.collections.map
+import kotlin.collections.mutableListOf
+import kotlin.collections.plusAssign
+import kotlin.collections.set
+import kotlin.collections.single
 
 class ResponseJobExecutorTest {
 
     private val userId = UserId.generate()
-    private val dayDate = LocalDate.of(2026, 8, 8)
+    private val recordDayId = RecordDayId.generate()
     private val start = Instant.parse("2026-08-08T10:00:00Z")
     private val timeProvider = FixedTimeProvider(start)
     private val messageRepository = InMemoryMessageRepository()
@@ -65,7 +71,7 @@ class ResponseJobExecutorTest {
     )
 
     private fun enqueue(content: String = "오늘 정말 피곤했다", occurredAt: Instant = start): ResponseJob {
-        val message = messageRepository.append(userMessage(userId, content, occurredAt, dayDate))
+        val message = messageRepository.append(userMessage(userId, content, occurredAt, recordDayId))
         return jobRepository.save(ResponseJob.pending(message, start))
     }
 
@@ -80,15 +86,14 @@ class ResponseJobExecutorTest {
 
         assertThat(jobOf(job).state.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(assistantMessages().single().content).isEqualTo("많이 힘드셨겠어요.")
-        assertThat(assistantMessages().single().dayDate).isEqualTo(dayDate)
+        assertThat(assistantMessages().single().recordDayId).isEqualTo(recordDayId)
     }
 
     @Test
     fun `자정을 넘겨도 같은 하루의 대화만 컨텍스트로 전달한다`() {
-        messageRepository.append(userMessage(userId, "자정 전", Instant.parse("2026-08-08T14:50:00Z"), dayDate))
-        messageRepository.append(userMessage(userId, "전날", Instant.parse("2026-08-07T10:00:00Z"), dayDate.minusDays(1)))
-        messageRepository.append(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-08T14:55:00Z"), dayDate))
-        val job = enqueue("자정 후", Instant.parse("2026-08-08T15:10:00Z"))
+        messageRepository.append(userMessage(userId, "자정 전", Instant.parse("2026-08-08T14:50:00Z"), recordDayId))
+        messageRepository.append(userMessage(userId, "전날", Instant.parse("2026-08-07T10:00:00Z"), RecordDayId.generate()))
+        messageRepository.append(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-08T14:55:00Z"), recordDayId))
         val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
 
         executor(responder).executeNext()
@@ -132,7 +137,6 @@ class ResponseJobExecutorTest {
 
     @Test
     fun `같은 작업을 두 번 실행해도 LLM은 한 번만 불린다`() {
-        val job = enqueue()
         val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
         val executor = executor(responder)
 

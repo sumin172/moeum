@@ -1,5 +1,6 @@
 package com.moeum.conversation.application.command
 
+
 import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.ResponseJobRepository
@@ -45,15 +46,15 @@ class ResponseJobExecutor(
         try {
             val userMessage = messageRepository.findByUserIdAndId(job.userId, job.userMessageId)
                 ?: error("응답 작업의 유저 메시지가 없습니다: messageId=${job.userMessageId.value}")
-            val context = messageRepository.findAllByUserIdAndDayDate(job.userId, job.dayDate)
+            val context = messageRepository.findAllByUserIdAndRecordDayId(job.userId, job.recordDayId)
             val response = conversationResponder.respond(job.userId, context)
             saveGeneratedResponseService.save(job, userMessage, response)
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 응답 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
         } catch (e: Exception) {
             log.error(
-                "AI 응답 생성 실패: jobId={}, userId={}, dayDate={}, attempt={}, error={}",
-                job.id.value, job.userId.value, job.dayDate, job.state.attemptCount, e.message, e,
+                "AI 응답 생성 실패: jobId={}, userId={}, recordDayId={}, attempt={}, error={}",
+                job.id.value, job.userId.value, job.recordDayId, job.state.attemptCount, e.message, e,
             )
             recordFailure(job) { markResponseFailedService.markFailed(job, e) }
         }

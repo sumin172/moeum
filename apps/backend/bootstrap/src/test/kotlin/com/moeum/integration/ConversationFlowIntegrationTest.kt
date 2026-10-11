@@ -2,7 +2,7 @@ package com.moeum.integration
 
 import com.moeum.conversation.interfaces.dto.MessageResponse
 import com.moeum.conversation.interfaces.dto.SaveMessageRequest
-import com.moeum.conversation.interfaces.dto.TodayConversationResponse
+import com.moeum.conversation.interfaces.dto.RecordConversationResponse
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.web.PlatformErrorCode
@@ -32,21 +32,21 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
             timezone = "Asia/Seoul",
         )
 
-        val saveResponse = restTemplate.exchange<MessageResponse>(
+        val saveResponse = restTemplate.exchange<com.moeum.conversation.interfaces.SaveMessageResponse>(
             "/api/conversations/messages",
             HttpMethod.POST,
             HttpEntity(request, authHeaders(jwt)),
         )
         assertThat(saveResponse.statusCode).isEqualTo(HttpStatus.OK)
-        val savedId = saveResponse.body!!.id
+        val savedId = saveResponse.body!!.message!!.id
 
         // 같은 clientMessageId 재전송 -> 중복 저장 대신 기존 메시지를 그대로 반환해야 한다
-        val retryResponse = restTemplate.exchange<MessageResponse>(
+        val retryResponse = restTemplate.exchange<com.moeum.conversation.interfaces.SaveMessageResponse>(
             "/api/conversations/messages",
             HttpMethod.POST,
             HttpEntity(request, authHeaders(jwt)),
         )
-        assertThat(retryResponse.body!!.id).isEqualTo(savedId)
+        assertThat(retryResponse.body!!.message!!.id).isEqualTo(savedId)
 
         // AI 응답(assistant 메시지)까지 비동기로 도착하는 걸 기다린다 — 유저 메시지 1개 + assistant 메시지 1개가 최종 상태.
         val messages = awaitTodayMessages(jwt, expectedSize = 2)
@@ -66,7 +66,7 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
             occurredAt = Instant.now(),
             timezone = "Asia/Seoul",
         )
-        restTemplate.exchange<MessageResponse>(
+        restTemplate.exchange<com.moeum.conversation.interfaces.SaveMessageResponse>(
             "/api/conversations/messages",
             HttpMethod.POST,
             HttpEntity(request, authHeaders(jwt)),
@@ -82,8 +82,8 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
 
     private fun awaitTodayMessages(jwt: String, expectedSize: Int): List<MessageResponse> {
         repeat(20) {
-            val response = restTemplate.exchange<TodayConversationResponse>(
-                "/api/conversations/today?timezone=Asia/Seoul",
+            val response = restTemplate.exchange<RecordConversationResponse>(
+                recordUrl(jwt),
                 HttpMethod.GET,
                 HttpEntity<Void>(authHeaders(jwt)),
             )
@@ -97,7 +97,7 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
     @Test
     fun `인증 없이 호출하면 401과 플랫폼 공통 에러 포맷을 반환한다`() {
         val response = restTemplate.exchange<ErrorResponse>(
-            "/api/conversations/today?timezone=Asia/Seoul",
+            "/api/conversations/records",
             HttpMethod.GET,
             HttpEntity<Void>(HttpHeaders()),
         )

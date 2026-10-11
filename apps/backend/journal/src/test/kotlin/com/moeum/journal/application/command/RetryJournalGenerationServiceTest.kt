@@ -6,6 +6,7 @@ import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.domain.model.JournalId
 import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.journal.support.MutableTimeProvider
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import org.assertj.core.api.Assertions.assertThat
@@ -18,13 +19,13 @@ import java.util.UUID
 class RetryJournalGenerationServiceTest {
 
     private val userId = UserId.generate()
-    private val day = LocalDate.of(2026, 8, 2)
+    private val day = RecordDayId.generate()
     private val now = Instant.parse("2026-08-03T05:00:00Z")
     private val jobs = InMemoryGenerationJobRepository()
     private val service = RetryJournalGenerationService(jobs, MutableTimeProvider(now))
 
     private fun job(transform: (GenerationJob) -> GenerationJob) =
-        jobs.save(transform(GenerationJob.pending(userId, day, now.minusSeconds(3600), now.minusSeconds(7200))))
+        jobs.save(transform(GenerationJob.pending(userId, day, LocalDate.of(2026,8,2), now.minusSeconds(3600), now.minusSeconds(7200))))
 
     @Test
     fun `재시도를 소진해 실패한 생성을 다시 시작한다`() {
@@ -42,6 +43,6 @@ class RetryJournalGenerationServiceTest {
         job { it.completed(JournalId.generate(), "p", "m", "v", 1, 1, UUID.randomUUID(), now) }
 
         assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
-        assertThatThrownBy { service.retry(userId, day.minusDays(1)) }.isInstanceOf(JournalNotFoundException::class.java)
+        assertThatThrownBy { service.retry(userId, RecordDayId.generate()) }.isInstanceOf(JournalNotFoundException::class.java)
     }
 }

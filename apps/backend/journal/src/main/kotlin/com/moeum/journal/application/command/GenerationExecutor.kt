@@ -1,6 +1,6 @@
 package com.moeum.journal.application.command
 
-import com.moeum.conversation.application.publicapi.ConversationActivityQuery
+import com.moeum.conversation.application.publicapi.RecordDayOperations
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.JournalGenerator
 import com.moeum.journal.domain.model.GenerationJob
@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service
 @ConditionalOnRole(ExecutionRole.JOURNAL_WORKER)
 class GenerationExecutor(
     private val generationJobRepository: GenerationJobRepository,
-    private val conversationActivityQuery: ConversationActivityQuery,
+    private val recordDayOperations: RecordDayOperations,
     private val journalGenerator: JournalGenerator,
     private val saveGeneratedJournalService: SaveGeneratedJournalService,
     private val markGenerationFailedService: MarkGenerationFailedService,
@@ -44,16 +44,15 @@ class GenerationExecutor(
         }
 
         try {
-            val messages = conversationActivityQuery.findMessages(job.userId, job.diaryDate)
-            val generation = journalGenerator.generate(job.userId, job.diaryDate, messages)
-            val sourceLastMessageId = messages.filter { it.role == USER_ROLE }.maxOfOrNull { it.id }
-            saveGeneratedJournalService.save(job, generation, sourceLastMessageId)
+            val input = recordDayOperations.freezeInput(job.userId, job.recordDayId)
+            val generation = journalGenerator.generate(job.userId, job.displayDate, input.messages)
+            saveGeneratedJournalService.save(job, generation, input.sourceRevision)
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 일기 생성 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
         } catch (e: Exception) {
             log.error(
-                "Journal 생성 실패: jobId={}, userId={}, diaryDate={}, attempt={}, error={}",
-                job.id.value, job.userId.value, job.diaryDate, job.state.attemptCount, e.message, e,
+                "Journal 생성 실패: jobId={}, userId={}, displayDate={}, attempt={}, error={}",
+                job.id.value, job.userId.value, job.displayDate, job.state.attemptCount, e.message, e,
             )
             recordFailure(job) { markGenerationFailedService.markFailed(job, e) }
         }
@@ -66,6 +65,3 @@ class GenerationExecutor(
         }
     }
 }
-
-// MessageSnapshot.role 값(conversation의 MessageRole.USER.name)
-private const val USER_ROLE = "USER"

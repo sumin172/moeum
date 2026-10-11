@@ -1,9 +1,8 @@
 package com.moeum.conversation.infrastructure.jpa
 
+
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
-import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 interface MessageJpaRepository : JpaRepository<MessageJpaEntity, UUID> {
@@ -11,20 +10,22 @@ interface MessageJpaRepository : JpaRepository<MessageJpaEntity, UUID> {
 
     fun findByUserIdAndClientMessageId(userId: UUID, clientMessageId: UUID): MessageJpaEntity?
 
-    fun findByUserIdAndDayDateAndIdGreaterThanOrderByIdAsc(
+    fun findByUserIdAndRecordDayIdAndIdGreaterThanOrderByIdAsc(
         userId: UUID,
-        dayDate: LocalDate,
+        recordDayId: UUID,
         id: UUID,
         pageable: Pageable,
     ): List<MessageJpaEntity>
 
-    fun findByUserIdAndDayDateOrderByIdDesc(
+    fun findByUserIdAndRecordDayIdOrderByIdDesc(
         userId: UUID,
-        dayDate: LocalDate,
+        recordDayId: UUID,
         pageable: Pageable,
     ): List<MessageJpaEntity>
 
-    fun findByUserIdAndDayDateOrderByIdAsc(userId: UUID, dayDate: LocalDate): List<MessageJpaEntity>
+    fun findByUserIdAndRecordDayIdOrderByIdAsc(userId: UUID, recordDayId: UUID): List<MessageJpaEntity>
 
-    fun findByCreatedAtGreaterThanEqualAndCreatedAtLessThan(from: Instant, to: Instant): List<MessageJpaEntity>
+    fun findByUserIdAndRecordDayIdAndRoleAndSourceSequenceLessThanEqualOrderByOccurredAtAscSourceSequenceAsc(
+        userId: UUID, recordDayId: UUID, role: com.moeum.conversation.domain.model.MessageRole, sourceRevision: Long,
+    ): List<MessageJpaEntity>
 }

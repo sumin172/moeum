@@ -2,9 +2,11 @@ package com.moeum.integration
 
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.journal.application.command.SaveGeneratedJournalService
+import com.moeum.journal.domain.JournalRepository
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
+import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import org.assertj.core.api.Assertions.assertThat
@@ -31,12 +33,29 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
     @Autowired
     lateinit var jdbcTemplate: JdbcTemplate
 
+    @Autowired lateinit var journalRepository: JournalRepository
+
+    @Test fun `표시 날짜가 같아도 다른 기록은 별도 일기로 저장 조회된다`() {
+        val user = UserId.generate()
+        val date = LocalDate.of(2027,2,1)
+        val ids = listOf(RecordDayId.generate(),RecordDayId.generate())
+        val future = Instant.now().plus(Duration.ofDays(500))
+        val created = ids.map { generationJobRepository.save(GenerationJob.pending(user,it,date,future,Instant.now())).id }
+        created.forEachIndexed { index,id ->
+            val job = generateSequence { generationJobRepository.claimNext(future.plusSeconds(1),future.plusSeconds(300)) }.first { it.id == id }
+            saveGeneratedJournalService.save(job,GeneratedJournal(UUID.randomUUID(),"제목"+index,"본문"+index,"m","p","v",10,5),1)
+        }
+        assertThat(journalRepository.findByDate(user,date)).hasSize(2)
+        assertThat(journalRepository.findByUserIdAndRecordDayId(user,ids[0])!!.body).isEqualTo("본문0")
+        assertThat(journalRepository.findByUserIdAndRecordDayId(user,ids[1])!!.body).isEqualTo("본문1")
+    }
+
     @Test
     fun `생성된 일기를 리비전·작업 완료와 함께 한 트랜잭션으로 저장한다`() {
         val userId = UserId.generate()
         // 실시간 스케줄러가 건드리지 않도록 먼 미래가 하루 끝인 작업을 만들고, 그 시각으로 선점한다
         val farFuture = Instant.now().plus(Duration.ofDays(400))
-        generationJobRepository.save(GenerationJob.pending(userId, LocalDate.of(2027, 2, 1), farFuture, Instant.now()))
+        generationJobRepository.save(GenerationJob.pending(userId, RecordDayId.generate(), LocalDate.of(2027, 2, 1), farFuture, Instant.now()))
         val claimAt = farFuture.plusSeconds(1)
         val job = generateSequence { generationJobRepository.claimNext(claimAt, claimAt.plus(Duration.ofMinutes(5))) }
             .first { it.userId == userId }
@@ -44,7 +63,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         val journal = saveGeneratedJournalService.save(
             job,
             GeneratedJournal(UUID.randomUUID(), "제목", "본문", "m", "p", "v", 10, 5),
-            sourceLastMessageId = null,
+            sourceRevision = 1,
         )
 
         val revisionOwner = jdbcTemplate.queryForObject(

@@ -30,11 +30,11 @@ class LlmConversationResponderTest {
     fun `대화 응답 용도로 하루 대화를 역할 그대로 넘기고 결과를 생성 메타데이터와 함께 돌려준다`() {
         val llmClient = CapturingLlmClient()
         val userId = UserId.generate()
-        val day = LocalDate.of(2026, 8, 8)
+        val day = com.moeum.kernel.RecordDayId.generate()
         val question = userMessage(userId, "오늘 피곤했어", Instant.parse("2026-08-08T10:00:00Z"), day)
         val reply = Message.assistantMessage(
             MessageId.generate(), userId, "무슨 일 있었어요?", Instant.parse("2026-08-08T10:00:05Z"),
-            "Asia/Seoul", day, day, UUID.randomUUID(), "m", "v1", 1, 1,
+            "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1,
         )
 
         val response = LlmConversationResponder(llmClient, ConversationLimitProperties()).respond(userId, listOf(question, reply))
@@ -52,13 +52,13 @@ class LlmConversationResponderTest {
         assertThat(response.promptVersion).isEqualTo(sent.promptVersion)
     }
 
-    private val day = LocalDate.of(2026, 8, 8)
+    private val day = com.moeum.kernel.RecordDayId.generate()
     private val owner = UserId.generate()
     private fun user(content: String, minute: Int) =
         userMessage(owner, content, Instant.parse("2026-08-08T10:00:00Z").plusSeconds(minute * 60L), day)
     private fun assistant(content: String, minute: Int) = Message.assistantMessage(
         MessageId.generate(), owner, content, Instant.parse("2026-08-08T10:00:30Z").plusSeconds(minute * 60L),
-        "Asia/Seoul", day, day, UUID.randomUUID(), "m", "v1", 1, 1,
+        "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1,
     )
 
     @Test

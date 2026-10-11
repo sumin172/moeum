@@ -40,7 +40,7 @@ DB는 미생성으로 간주한다. 데이터 이전·이중 쓰기·구버전 �
 
 브랜치: refactor/isolate-worker-roles
 의존: R0.
-상태: R1 구현 완료. 실행 역할/자원 상한과 관련 데드 코드 제거, 전체 백엔드 테스트 132개 통과.
+상태: 실행 역할/자원 상한과 관련 데드 코드 제거 완료. 현재 전체 검증 결과는 [실행 역할](WORKER_ROLES.md)을 따른다.
 역할 격리 시험의 범위와 운영 검증의 한계는 [실행 역할](WORKER_ROLES.md)을 따른다.
 
 작업:
@@ -69,7 +69,8 @@ Journal 프로세스를 중단해도 API·대화가 동작하며 재기동 후 �
 
 ## R2 — 하루 기록과 마감 예약 및 Journal 전달 모델 구현
 
-브랜치: refactor/record-day-scheduling
+브랜치: refactor/#46-record-day-scheduling
+상태: 구현 완료. RecordDay 귀속·마감·독립 전달·입력 동결과 기록 ID API, 초기 스키마 재구성, 대체 경로의 데드 코드 제거를 완료했다. 전체 백엔드 테스트 130개 통과. OS 강제 종료·실제 공급자·대규모 부하 검증은 R6 범위다.
 의존: R1. 날짜 표시/미래 입력 허용 오차 등은 RECORD_DAY의 명시된 가정을 적용하되 구현 시작 시 확인한다.
 
 작업:
@@ -146,7 +147,7 @@ RECORD_DAY D27~D30: 한도 소진·여러 기기의 마지막 잔여 횟수 경�
 - 일기 본문을 TEXT로 단순화하고 사용자 이력 조회가 없는 전체 리비전 저장을 제거한다.
 
 제거:
-confirm API/서비스/DTO, DRAFT/CONFIRMED/OUTDATED 전이,
+confirm API/서비스/DTO, DRAFT/CONFIRMED 전이,
 JournalConfirmedV1, 소비처 없는 IntegrationEvent 공통 계약/테스트 recorder,
 GrantComplimentarySubscriptionService의 미사용 운영 경로,
 journal_revisions 및 관련 모델/포트/어댑터/테스트,

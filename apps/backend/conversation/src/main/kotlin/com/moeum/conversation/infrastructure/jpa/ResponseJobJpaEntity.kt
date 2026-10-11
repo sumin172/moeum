@@ -10,7 +10,6 @@ import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 @Entity
@@ -22,8 +21,8 @@ class ResponseJobJpaEntity(
     val userMessageId: UUID,
     @Column(name = "user_id", nullable = false)
     val userId: UUID,
-    @Column(name = "day_date", nullable = false)
-    val dayDate: LocalDate,
+    @Column(name = "record_day_id", nullable = false)
+    val recordDayId: UUID,
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     val status: JobStatus,

@@ -21,8 +21,10 @@ class GenerationJobJpaEntity(
     val journalId: UUID?,
     @Column(name = "user_id", nullable = false)
     val userId: UUID,
-    @Column(name = "diary_date", nullable = false)
-    val diaryDate: LocalDate,
+    @Column(name = "record_day_id", nullable = false)
+    val recordDayId: UUID,
+    @Column(name = "display_date", nullable = false)
+    val displayDate: LocalDate,
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     val status: JobStatus,

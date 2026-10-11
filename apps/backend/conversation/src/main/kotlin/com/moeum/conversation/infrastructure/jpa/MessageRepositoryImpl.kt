@@ -1,5 +1,7 @@
 package com.moeum.conversation.infrastructure.jpa
 
+import com.moeum.kernel.RecordDayId
+
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
@@ -7,8 +9,6 @@ import com.moeum.kernel.UserId
 import jakarta.persistence.EntityManager
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
-import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 // 커서는 id(UUIDv7, 서버 발급 순)로 비교하고, 반환은 실제 발화 순서(occurredAt)로 정렬한다 —
@@ -27,21 +27,24 @@ class MessageRepositoryImpl(
     override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
         jpaRepository.findByUserIdAndClientMessageId(userId.value, clientMessageId)?.toDomain()
 
-    override fun findPage(userId: UserId, dayDate: LocalDate, after: MessageId?, limit: Int): List<Message> {
+    override fun findPage(userId: UserId, recordDayId: RecordDayId, after: MessageId?, limit: Int): List<Message> {
         val pageable = PageRequest.of(0, limit)
         val entities = if (after != null) {
-            jpaRepository.findByUserIdAndDayDateAndIdGreaterThanOrderByIdAsc(userId.value, dayDate, after.value, pageable)
+            jpaRepository.findByUserIdAndRecordDayIdAndIdGreaterThanOrderByIdAsc(userId.value, recordDayId.value, after.value, pageable)
         } else {
-            jpaRepository.findByUserIdAndDayDateOrderByIdDesc(userId.value, dayDate, pageable).asReversed()
+            jpaRepository.findByUserIdAndRecordDayIdOrderByIdDesc(userId.value, recordDayId.value, pageable).asReversed()
         }
         return entities.map { it.toDomain() }.sortedWith(DISPLAY_ORDER)
     }
 
-    override fun findAllByUserIdAndDayDate(userId: UserId, dayDate: LocalDate): List<Message> =
-        jpaRepository.findByUserIdAndDayDateOrderByIdAsc(userId.value, dayDate).map { it.toDomain() }.sortedWith(DISPLAY_ORDER)
+    override fun findAllByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): List<Message> =
+        jpaRepository.findByUserIdAndRecordDayIdOrderByIdAsc(userId.value, recordDayId.value).map { it.toDomain() }.sortedWith(DISPLAY_ORDER)
 
-    override fun findCreatedBetween(from: Instant, to: Instant): List<Message> =
-        jpaRepository.findByCreatedAtGreaterThanEqualAndCreatedAtLessThan(from, to).map { it.toDomain() }
+
+    override fun findSource(userId: UserId, recordDayId: RecordDayId, sourceRevision: Long): List<Message> =
+        jpaRepository.findByUserIdAndRecordDayIdAndRoleAndSourceSequenceLessThanEqualOrderByOccurredAtAscSourceSequenceAsc(
+            userId.value, recordDayId.value, com.moeum.conversation.domain.model.MessageRole.USER, sourceRevision,
+        ).map { it.toDomain() }
 
     // 직접 할당한 UUID라 Spring Data save()는 merge로 처리되어 INSERT 전에 SELECT가 한 번 더 나간다.
     // 추가만 하는 데이터이므로 persist로 바로 INSERT한다(호출부 트랜잭션 안에서 실행된다).
@@ -60,7 +63,8 @@ private fun MessageJpaEntity.toDomain(): Message =
         occurredAt = occurredAt,
         timezone = timezone,
         localDate = localDate,
-        dayDate = dayDate,
+        sourceSequence = sourceSequence,
+        recordDayId = RecordDayId(recordDayId),
         clientMessageId = clientMessageId,
         generationId = generationId,
         model = model,
@@ -80,7 +84,8 @@ private fun Message.toEntity(): MessageJpaEntity =
         occurredAt = occurredAt,
         timezone = timezone,
         localDate = localDate,
-        dayDate = dayDate,
+        sourceSequence = sourceSequence,
+        recordDayId = recordDayId.value,
         clientMessageId = clientMessageId,
         generationId = generationId,
         model = model,
