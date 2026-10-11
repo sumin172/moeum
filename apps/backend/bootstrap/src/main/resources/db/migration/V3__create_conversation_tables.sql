@@ -13,6 +13,7 @@ CREATE TABLE conversation.record_days (
     timezone TEXT NOT NULL,
     close_at TIMESTAMPTZ NOT NULL,
     last_user_occurred_at TIMESTAMPTZ NOT NULL,
+    stream_sequence BIGINT NOT NULL DEFAULT 0,
     source_revision BIGINT NOT NULL DEFAULT 0,
     closed_at TIMESTAMPTZ NULL,
     close_reason TEXT NOT NULL,
@@ -39,7 +40,8 @@ CREATE TABLE conversation.messages (
     timezone TEXT NOT NULL,
     local_date DATE NOT NULL,
     record_day_id UUID NOT NULL,
-    source_sequence BIGINT NULL,
+    source_sequence BIGINT NOT NULL CHECK (source_sequence > 0),
+    stream_sequence BIGINT NOT NULL CHECK (stream_sequence > 0),
     client_message_id UUID NULL,
     generation_id UUID NULL,
     model TEXT NULL,
@@ -51,18 +53,21 @@ CREATE TABLE conversation.messages (
     CONSTRAINT uq_conversation_messages_user_client_message_id UNIQUE (user_id, client_message_id)
 );
 
-CREATE INDEX idx_messages_record_page ON conversation.messages (user_id,record_day_id,id);
+CREATE INDEX idx_messages_record_page ON conversation.messages (user_id,record_day_id,stream_sequence);
+CREATE UNIQUE INDEX uq_messages_stream_sequence ON conversation.messages(record_day_id,stream_sequence);
+CREATE INDEX idx_messages_context ON conversation.messages(user_id,record_day_id,source_sequence DESC,role ASC);
 CREATE INDEX idx_messages_record_source ON conversation.messages (user_id,record_day_id,occurred_at,source_sequence) WHERE role = 'USER';
 CREATE UNIQUE INDEX uq_messages_source_sequence ON conversation.messages (record_day_id,source_sequence) WHERE role = 'USER';
 
 -- 유저 메시지 하나에 대한 AI 응답 생성 작업. 메시지와 같은 트랜잭션에서 만들어진다.
 -- status/attempt_count/next_attempt_at/lease_expires_at/version: 공통 작업 실행 규칙(platform JobState, JobClaimSql)
--- failure_reason: 사용자에게 보여주는 실패 분류(QUOTA_EXCEEDED | GENERATION_FAILED), last_error_code: 기술적 원인
+-- failure_reason: 사용자에게 보여주는 실패 분류(GENERATION_FAILED), last_error_code: 기술적 원인
 CREATE TABLE conversation.response_jobs (
     id UUID PRIMARY KEY,
     user_message_id UUID NOT NULL,
     user_id UUID NOT NULL,
     record_day_id UUID NOT NULL,
+    input_source_revision BIGINT NOT NULL CHECK (input_source_revision > 0),
     status TEXT NOT NULL,
     failure_reason TEXT NULL,
     attempt_count INT NOT NULL DEFAULT 0,
@@ -83,11 +88,16 @@ CREATE INDEX idx_conversation_response_jobs_pending ON conversation.response_job
 CREATE INDEX idx_conversation_response_jobs_processing ON conversation.response_jobs (lease_expires_at)
     WHERE status = 'PROCESSING';
 
--- AI 응답 요청 수 카운터. R3에서 승인 시각의 사용 기간 정책을 적용한다.
--- 토큰 사용량은 여기가 아니라 platform.llm_invocations에서 집계한다.
-CREATE TABLE conversation.ai_usage_daily (
-    user_id UUID NOT NULL,
+CREATE UNIQUE INDEX uq_response_stream_source ON conversation.response_jobs(record_day_id,input_source_revision);
+CREATE INDEX idx_response_stream_active ON conversation.response_jobs(record_day_id,input_source_revision)
+    WHERE status IN ('PENDING','PROCESSING');
+CREATE INDEX idx_response_stream_completed ON conversation.response_jobs(record_day_id,input_source_revision) WHERE status='COMPLETED';
+
+-- 현재 UTC 기간 사용량과 서버 접수 속도. 사용자당 한 행만 유지한다.
+CREATE TABLE conversation.conversation_usage (
+    user_id UUID PRIMARY KEY,
     usage_date DATE NOT NULL,
-    message_count INT NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, usage_date)
+    message_count INT NOT NULL CHECK (message_count >= 0),
+    request_window TIMESTAMPTZ NOT NULL,
+    request_count INT NOT NULL CHECK (request_count >= 0)
 );

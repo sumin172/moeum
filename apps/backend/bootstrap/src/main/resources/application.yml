@@ -50,6 +50,11 @@ resilience4j:
         baseConfig: llm
 
 moeum:
+  identity:
+    conversation:
+      # 제품 확정값이 아닌 개발 기본안. 무료·구독 모두 유한한 한도.
+      free-daily-limit: 20
+      premium-daily-limit: 100
   auth:
     session:
       # refresh token 수명(로그인·refresh 때마다 연장). access token 수명은 moeum.jwt.expiration-seconds(기본 15분)
@@ -62,12 +67,12 @@ moeum:
     journal-concurrency: 2
     shutdown-timeout: 10s
   conversation:
-    ai:
-      daily-message-limit: 20
     # 이상 사용으로 LLM 비용이 튀지 않게 하는 상한(잠정값, ConversationLimitProperties 참고)
     limits:
       max-message-length: 4000
       context-char-budget: 20000
+      context-message-limit: 100
+      accepted-messages-per-minute: 60
     # AI 응답 생성 작업 재시도/리스 정책 (기본값은 ResponseJobProperties 참고)
     response-job:
       max-attempts: 3

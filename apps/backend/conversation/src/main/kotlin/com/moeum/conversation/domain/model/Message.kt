@@ -17,7 +17,7 @@ data class Message(
     val timezone: String,
     val localDate: LocalDate,
     val recordDayId: RecordDayId,
-    val sourceSequence: Long?,
+    val sourceSequence: Long,
     val clientMessageId: UUID?,
     val generationId: UUID? = null,
     val model: String? = null,
@@ -26,6 +26,7 @@ data class Message(
     val outputTokens: Int? = null,
     val createdAt: Instant,
     val deletedAt: Instant? = null,
+    val streamSequence: Long = 0,
 ) {
     companion object {
         fun userMessage(
@@ -36,8 +37,8 @@ data class Message(
         fun assistantMessage(
             id: MessageId, userId: UserId, content: String, occurredAt: Instant, timezone: String,
             localDate: LocalDate, recordDayId: RecordDayId, generationId: UUID, model: String,
-            promptVersion: String, inputTokens: Int, outputTokens: Int,
-        ) = Message(id,userId,MessageRole.ASSISTANT,content,occurredAt,timezone,localDate,recordDayId,null,null,
+            promptVersion: String, inputTokens: Int, outputTokens: Int, sourceSequence: Long,
+        ) = Message(id,userId,MessageRole.ASSISTANT,content,occurredAt,timezone,localDate,recordDayId,sourceSequence,null,
             generationId,model,promptVersion,inputTokens,outputTokens,occurredAt)
     }
 }

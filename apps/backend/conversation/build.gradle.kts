@@ -25,6 +25,7 @@ tasks.named<Jar>("jar") {
 dependencies {
     implementation(project(":shared-kernel"))
     implementation(project(":platform"))
+    implementation(project(":identity"))
 
     implementation(libs.spring.boot.starter.data.jpa)
     compileOnly(libs.spring.boot.starter.web)

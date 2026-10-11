@@ -34,9 +34,6 @@ data class Subscription(
     val revokedAt: Instant? = null,
     val createdAt: Instant,
 ) {
-    fun isActive(now: Instant): Boolean =
-        revokedAt == null && !now.isBefore(startsAt) && (endsAt == null || now.isBefore(endsAt))
-
     companion object {
         fun complimentary(userId: UserId, plan: Plan, startsAt: Instant, endsAt: Instant?, now: Instant): Subscription {
             require(plan != Plan.FREE) { "FREE는 구독으로 지급하지 않습니다" }

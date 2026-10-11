@@ -18,13 +18,13 @@ class FeatureAccessQueryServiceTest {
 
     private class InMemorySubscriptionRepository : SubscriptionRepository {
         val subscriptions = mutableListOf<Subscription>()
-        override fun findAllByUserId(userId: UserId): List<Subscription> = subscriptions.filter { it.userId == userId }
+        override fun findActiveByUserId(userId: UserId, now: Instant): List<Subscription> = subscriptions.filter { it.userId == userId && it.revokedAt==null && !now.isBefore(it.startsAt) && (it.endsAt==null || now.isBefore(it.endsAt)) }
         override fun save(subscription: Subscription): Subscription = subscription.also { subscriptions += it }
     }
 
     private val timeProvider = MutableTimeProvider(Instant.parse("2026-10-08T00:00:00Z"))
     private val repository = InMemorySubscriptionRepository()
-    private val query = FeatureAccessQueryService(repository, FeaturePlanProperties(), timeProvider)
+    private val query = FeatureAccessQueryService(repository, FeaturePlanProperties(), timeProvider, com.moeum.identity.infrastructure.config.ConversationPlanProperties())
     private val grant = GrantComplimentarySubscriptionService(repository, timeProvider)
     private val userId = UserId.generate()
 

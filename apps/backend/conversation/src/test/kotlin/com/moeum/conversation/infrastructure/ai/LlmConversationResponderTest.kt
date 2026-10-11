@@ -34,7 +34,7 @@ class LlmConversationResponderTest {
         val question = userMessage(userId, "오늘 피곤했어", Instant.parse("2026-08-08T10:00:00Z"), day)
         val reply = Message.assistantMessage(
             MessageId.generate(), userId, "무슨 일 있었어요?", Instant.parse("2026-08-08T10:00:05Z"),
-            "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1,
+            "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1, sourceSequence=1,
         )
 
         val response = LlmConversationResponder(llmClient, ConversationLimitProperties()).respond(userId, listOf(question, reply))
@@ -58,7 +58,7 @@ class LlmConversationResponderTest {
         userMessage(owner, content, Instant.parse("2026-08-08T10:00:00Z").plusSeconds(minute * 60L), day)
     private fun assistant(content: String, minute: Int) = Message.assistantMessage(
         MessageId.generate(), owner, content, Instant.parse("2026-08-08T10:00:30Z").plusSeconds(minute * 60L),
-        "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1,
+        "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1, sourceSequence=1,
     )
 
     @Test

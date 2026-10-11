@@ -31,8 +31,8 @@ class MessageJpaEntity(
     val localDate: LocalDate,
     @Column(name = "record_day_id", nullable = false)
     val recordDayId: UUID,
-    @Column(name = "source_sequence")
-    val sourceSequence: Long?,
+    @Column(name = "source_sequence", nullable = false)
+    val sourceSequence: Long,
     @Column(name = "client_message_id")
     val clientMessageId: UUID?,
     @Column(name = "generation_id")
@@ -49,4 +49,6 @@ class MessageJpaEntity(
     val createdAt: Instant,
     @Column(name = "deleted_at")
     val deletedAt: Instant? = null,
+    @Column(name = "stream_sequence", nullable = false)
+    val streamSequence: Long = 0,
 )

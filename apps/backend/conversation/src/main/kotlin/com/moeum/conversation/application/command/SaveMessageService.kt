@@ -40,7 +40,7 @@ class SaveMessageService(
     private val recordDayRepository: RecordDayRepository,
     private val messageRepository: MessageRepository,
     private val responseJobRepository: ResponseJobRepository,
-    private val aiQuotaGuard: AiQuotaGuard,
+    private val quota: ConversationQuotaService,
     private val limits: ConversationLimitProperties,
     private val timeProvider: TimeProvider,
 ) {
@@ -97,6 +97,7 @@ class SaveMessageService(
         if (!record.contains(occurredAt)) throw RecordAssignmentConflictException("발화 시각이 기록 구간 밖입니다")
         if (record.frozenSourceRevision != null) return SaveMessageResult.Discarded(record.id)
 
+        quota.consume(userId, timeProvider.now())
         record = record.append(occurredAt, zone, now)
         if (created) recordDayRepository.insert(record) else recordDayRepository.update(record)
         if (created && record.closedAt == null) {
@@ -115,11 +116,8 @@ class SaveMessageService(
             clientMessageId = command.clientMessageId, now = now,
         )
         val saved = messageRepository.append(message)
-        // 요금제/기간 한도 변경은 R3에서 한다. 폐기·중복 경로는 이 카운터를 호출하지 않는다.
-        val quotaAllowed = aiQuotaGuard.tryConsume(userId, now.atZone(zone).toLocalDate())
-        // 이미 닫힌 과거 기록에는 새 AI 응답을 끼워 넣지 않는다.
-        val job = if (record.closedAt != null) null
-            else responseJobRepository.save(if (quotaAllowed) ResponseJob.pending(saved, now) else ResponseJob.quotaExceeded(saved, now))
+        // 닫힌 과거 기록에는 AI 응답을 만들지 않는다.
+        val job = if (record.closedAt != null) null else responseJobRepository.save(ResponseJob.pending(saved, now))
         return SaveMessageResult.Accepted(saved, job, record)
     }
 }

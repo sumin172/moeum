@@ -57,14 +57,14 @@ class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM conversation.messages WHERE user_id = ? AND role = 'USER'",Int::class.java,user.value)).isEqualTo(1)
         assertThat(count("conversation.response_jobs",user)).isEqualTo(1)
         assertThat(jdbc.queryForObject("SELECT source_revision FROM conversation.record_days WHERE user_id = ?",Long::class.java,user.value)).isEqualTo(1)
-        assertThat(jdbc.queryForObject("SELECT message_count FROM conversation.ai_usage_daily WHERE user_id = ?",Int::class.java,user.value)).isEqualTo(1)
+        assertThat(jdbc.queryForObject("SELECT message_count FROM conversation.conversation_usage WHERE user_id = ?",Int::class.java,user.value)).isEqualTo(1)
     }
     @Test fun `동결 이후 신규 입력은 모두 폐기되고 이미 저장된 중복은 성공을 돌려준다`() {
         val user = UserId.generate()
         val command = command(Instant.now().minus(Duration.ofDays(1)))
         val first = accepted(user,command)
         val input = records.freezeInput(user,first.record.id)
-        val usage = jdbc.queryForObject("SELECT message_count FROM conversation.ai_usage_daily WHERE user_id = ?",Int::class.java,user.value)
+        val usage = jdbc.queryForObject("SELECT message_count FROM conversation.conversation_usage WHERE user_id = ?",Int::class.java,user.value)
         val late = command.copy(clientMessageId = UUID.randomUUID())
         assertThat(save.save(user,late)).isInstanceOf(SaveMessageResult.Discarded::class.java)
         assertThat(save.save(user,late)).isInstanceOf(SaveMessageResult.Discarded::class.java)
@@ -72,7 +72,7 @@ class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
         assertThat(records.freezeInput(user,first.record.id)).isEqualTo(input)
         assertThat(count("conversation.messages",user)).isEqualTo(1)
         assertThat(count("conversation.response_jobs",user)).isZero()
-        assertThat(jdbc.queryForObject("SELECT message_count FROM conversation.ai_usage_daily WHERE user_id = ?",Int::class.java,user.value)).isEqualTo(usage)
+        assertThat(jdbc.queryForObject("SELECT message_count FROM conversation.conversation_usage WHERE user_id = ?",Int::class.java,user.value)).isEqualTo(usage)
     }
     @Test fun `추가와 동결 경합은 저장 또는 폐기 중 하나이며 재시도 입력은 동일하다`() {
         val user = UserId.generate()

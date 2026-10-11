@@ -10,6 +10,9 @@ interface ResponseJobRepository {
     fun save(job: ResponseJob): ResponseJob
     fun findByUserIdAndUserMessageId(userId: UserId, userMessageId: MessageId): ResponseJob?
     fun findAllByUserIdAndUserMessageIdIn(userId: UserId, userMessageIds: Collection<MessageId>): List<ResponseJob>
+    fun hasLaterStarted(job: ResponseJob): Boolean
+    fun supersededIds(userId: UserId, ids: Collection<com.moeum.conversation.domain.model.ResponseJobId>): Set<com.moeum.conversation.domain.model.ResponseJobId>
+    fun findAllByUserIdAndIdIn(userId: UserId, ids: Collection<com.moeum.conversation.domain.model.ResponseJobId>): List<ResponseJob>
     // 선점(claim)은 워커가 사용자와 무관하게 실행할 차례인 작업을 고르는 경로라 user_id 없이 조회한다 —
     // 작업 테이블은 사용자 단위 파티셔닝 대상이 아니다(완료된 작업은 정리 대상).
     // 실행할 차례인 작업 하나를 선점한다(SKIP LOCKED). 없으면 null.

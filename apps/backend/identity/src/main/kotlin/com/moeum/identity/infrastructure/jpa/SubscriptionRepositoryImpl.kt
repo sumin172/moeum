@@ -41,7 +41,11 @@ class SubscriptionJpaEntity(
 )
 
 interface SubscriptionJpaRepository : JpaRepository<SubscriptionJpaEntity, UUID> {
-    fun findAllByUserId(userId: UUID): List<SubscriptionJpaEntity>
+    @org.springframework.data.jpa.repository.Query(value = """
+        SELECT * FROM identity.subscriptions WHERE user_id=:userId AND starts_at<=:now
+            AND (ends_at IS NULL OR ends_at>:now) AND revoked_at IS NULL
+        """, nativeQuery = true)
+    fun findActiveByUserId(userId: UUID, now: Instant): List<SubscriptionJpaEntity>
 }
 
 @Component
@@ -49,8 +53,8 @@ class SubscriptionRepositoryImpl(
     private val jpaRepository: SubscriptionJpaRepository,
 ) : SubscriptionRepository {
 
-    override fun findAllByUserId(userId: UserId): List<Subscription> =
-        jpaRepository.findAllByUserId(userId.value).map { it.toDomain() }
+    override fun findActiveByUserId(userId: UserId, now: Instant): List<Subscription> =
+        jpaRepository.findActiveByUserId(userId.value, now).map { it.toDomain() }
 
     override fun save(subscription: Subscription): Subscription =
         jpaRepository.save(subscription.toEntity()).toDomain()

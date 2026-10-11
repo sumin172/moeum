@@ -7,8 +7,8 @@ import com.moeum.conversation.support.FixedTimeProvider
 import com.moeum.conversation.support.InMemoryRecordDayRepository
 import com.moeum.conversation.support.InMemoryMessageRepository
 import com.moeum.conversation.support.InMemoryResponseJobRepository
-import com.moeum.conversation.support.quotaGuard
-import com.moeum.conversation.domain.model.ResponseFailureReason
+import com.moeum.conversation.support.quotaService
+import com.moeum.conversation.domain.AiQuotaExceededException
 import com.moeum.platform.job.JobStatus
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
@@ -32,7 +32,7 @@ class SaveMessageServiceTest {
 
     private fun newService(quotaLimit: Int = 20) =
         SaveMessageService(
-            recordDayRepository, messageRepository, responseJobRepository, quotaGuard(quotaLimit),
+            recordDayRepository, messageRepository, responseJobRepository, quotaService(quotaLimit),
             ConversationLimitProperties(maxMessageLength = 10), FixedTimeProvider(now),
         )
 
@@ -83,8 +83,8 @@ class SaveMessageServiceTest {
 
     @Test
     fun `동결 이후 신규 입력은 본문 원본 버전 quota 작업 없이 폐기하고 중복은 원래 성공이다`() {
-        val usage = com.moeum.conversation.support.InMemoryAiUsageRepository()
-        val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaGuard(20,usage),
+        val usage = com.moeum.conversation.support.InMemoryConversationUsageRepository()
+        val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20,usage),
             ConversationLimitProperties(maxMessageLength = 10),FixedTimeProvider(now))
         val command = command("2026-08-01T16:30:00Z")
         val first = accepted(service.save(userId,command))
@@ -97,6 +97,18 @@ class SaveMessageServiceTest {
         assertThat(recordDayRepository.days[first.record.id]!!.sourceRevision).isEqualTo(1)
         assertThat(usage.counts).isEqualTo(counts)
         assertThat(accepted(service.save(userId,command)).message.id).isEqualTo(first.message.id)
+    }
+
+    @Test
+    fun `서버 UTC 기간은 발화의 현지 날짜나 과거 시각으로 바뀌지 않는다`() {
+        val usage = com.moeum.conversation.support.InMemoryConversationUsageRepository()
+        val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20,usage),
+            ConversationLimitProperties(),FixedTimeProvider(now))
+        val first = accepted(service.save(userId,command("2026-08-02T10:00:00Z").copy(timezone="Pacific/Kiritimati")))
+        assertThat(first.message.localDate).isEqualTo(LocalDate.of(2026,8,3))
+        service.save(userId,command("2026-07-31T10:00:00Z"))
+        assertThat(usage.counts).containsEntry(userId to LocalDate.of(2026,8,2),2)
+        assertThat(usage.counts).hasSize(1)
     }
 
     @Test
@@ -142,14 +154,12 @@ class SaveMessageServiceTest {
     }
 
     @Test
-    fun `하루 quota를 넘긴 메시지는 저장하되 응답 작업은 처음부터 QUOTA_EXCEEDED로 실패시킨다`() {
-        val service = newService(quotaLimit = 1)
-        accepted(service.save(userId, command("2026-08-02T03:00:00Z")))
-
-        val overQuota = accepted(service.save(userId, command("2026-08-02T03:01:00Z")))
-
-        assertThat(overQuota.responseJob!!.state.status).isEqualTo(JobStatus.FAILED)
-        assertThat(overQuota.responseJob.failureReason).isEqualTo(ResponseFailureReason.QUOTA_EXCEEDED)
-        assertThat(overQuota.responseJob.retryable).isFalse()
+    fun `한도 소진 시 새 원본과 응답 작업을 남기지 않는다`() {
+        val service = newService(quotaLimit=1)
+        val first = accepted(service.save(userId,command("2026-08-02T03:00:00Z")))
+        assertThatThrownBy { service.save(userId,command("2026-08-02T03:01:00Z")) }.isInstanceOf(AiQuotaExceededException::class.java)
+        assertThat(messageRepository.messages).hasSize(1)
+        assertThat(responseJobRepository.jobs).hasSize(1)
+        assertThat(recordDayRepository.days[first.record.id]!!.sourceRevision).isEqualTo(1)
     }
 }

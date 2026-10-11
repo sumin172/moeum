@@ -15,11 +15,13 @@ class SaveGeneratedResponseService(
     private val messageRepository: MessageRepository,
     private val responseJobRepository: ResponseJobRepository,
     private val timeProvider: TimeProvider,
+    private val records: com.moeum.conversation.domain.RecordDayRepository,
 ) {
     // 작업 완료를 먼저 저장한다 — 리스를 뺏긴 워커면 여기서 낙관적 락 충돌로 트랜잭션 전체가 롤백되어
     // assistant 메시지가 중복 저장되지 않는다.
     @Transactional
     fun save(job: ResponseJob, userMessage: Message, response: ConversationResponse) {
+        records.find(job.userId, job.recordDayId, lock=true) ?: error("응답 기록이 없습니다")
         val now = timeProvider.now()
         responseJobRepository.save(job.completed(now))
         messageRepository.append(
@@ -31,6 +33,7 @@ class SaveGeneratedResponseService(
                 timezone = userMessage.timezone,
                 localDate = userMessage.localDate,
                 recordDayId = userMessage.recordDayId,
+                sourceSequence = job.inputSourceRevision,
                 generationId = response.generationId,
                 model = response.model,
                 promptVersion = response.promptVersion,

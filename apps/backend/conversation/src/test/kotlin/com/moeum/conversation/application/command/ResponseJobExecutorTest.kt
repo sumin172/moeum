@@ -4,6 +4,9 @@ import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.ConversationResponse
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageRole
+import com.moeum.conversation.domain.model.RecordDay
+import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
+import java.time.ZoneId
 import com.moeum.conversation.domain.model.ResponseFailureReason
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.support.*
@@ -35,6 +38,7 @@ class ResponseJobExecutorTest {
     private val timeProvider = FixedTimeProvider(start)
     private val messageRepository = InMemoryMessageRepository()
     private val jobRepository = InMemoryResponseJobRepository()
+    private val records = InMemoryRecordDayRepository().also { it.insert(RecordDay.create(userId,start,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,null).copy(id=recordDayId)) }
 
     private class ScriptedResponder(private val outcomes: ArrayDeque<() -> ConversationResponse>) : ConversationResponder {
         val requests = mutableListOf<List<Message>>()
@@ -64,14 +68,15 @@ class ResponseJobExecutorTest {
         responseJobRepository = jobRepository,
         messageRepository = messageRepository,
         conversationResponder = responder,
-        saveGeneratedResponseService = SaveGeneratedResponseService(messageRepository, jobRepository, timeProvider),
+        saveGeneratedResponseService = SaveGeneratedResponseService(messageRepository, jobRepository, timeProvider, records),
         markResponseFailedService = MarkResponseFailedService(jobRepository, testResponseJobProperties, timeProvider),
         responseJobProperties = testResponseJobProperties,
         timeProvider = timeProvider,
+        limits = ConversationLimitProperties(),
     )
 
     private fun enqueue(content: String = "오늘 정말 피곤했다", occurredAt: Instant = start): ResponseJob {
-        val message = messageRepository.append(userMessage(userId, content, occurredAt, recordDayId))
+        val message = messageRepository.append(userMessage(userId, content, occurredAt, recordDayId, sourceSequence=messageRepository.messages.values.count { it.recordDayId==recordDayId && it.role==MessageRole.USER }.toLong()+1))
         return jobRepository.save(ResponseJob.pending(message, start))
     }
 
@@ -94,11 +99,28 @@ class ResponseJobExecutorTest {
         messageRepository.append(userMessage(userId, "자정 전", Instant.parse("2026-08-08T14:50:00Z"), recordDayId))
         messageRepository.append(userMessage(userId, "전날", Instant.parse("2026-08-07T10:00:00Z"), RecordDayId.generate()))
         messageRepository.append(userMessage(UserId.generate(), "다른 사용자", Instant.parse("2026-08-08T14:55:00Z"), recordDayId))
+        enqueue("자정 후",Instant.parse("2026-08-08T15:01:00Z"))
         val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
 
         executor(responder).executeNext()
 
         assertThat(responder.requests.single().map { it.content }).containsExactly("자정 전", "자정 후")
+    }
+
+    @Test
+    fun `선행 자동 재시도는 후속 발화를 섞지 않고 완료 후 다음 응답에 선행 답변을 전달한다`() {
+        enqueue("첫 번째")
+        enqueue("두 번째",start.plusSeconds(1))
+        val responder = ScriptedResponder(ArrayDeque(listOf(failure,answer("첫 응답"),answer("다음 응답"))))
+        val runner = executor(responder)
+        assertThat(runner.executeNext()).isTrue()
+        assertThat(runner.executeNext()).isFalse()
+        timeProvider.fixedNow = start.plusSeconds(120)
+        assertThat(runner.executeNext()).isTrue()
+        assertThat(responder.requests.take(2).map { it.map { message -> message.content } })
+            .containsExactly(listOf("첫 번째"),listOf("첫 번째"))
+        assertThat(runner.executeNext()).isTrue()
+        assertThat(responder.requests.last().map { it.content }).containsExactly("첫 번째","첫 응답","두 번째")
     }
 
     @Test
@@ -137,6 +159,7 @@ class ResponseJobExecutorTest {
 
     @Test
     fun `같은 작업을 두 번 실행해도 LLM은 한 번만 불린다`() {
+        enqueue()
         val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
         val executor = executor(responder)
 
