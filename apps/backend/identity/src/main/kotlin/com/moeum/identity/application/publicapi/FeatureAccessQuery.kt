@@ -10,6 +10,6 @@ enum class Feature {
 }
 
 interface FeatureAccessQuery {
-    // 지금 유효한 구독의 요금제 기준. 구독 상태는 JWT에 넣지 않고 매번 조회한다(PRINCIPLES #10).
+    // 지금 유효한 구독의 요금제 기준. 구독 상태는 JWT에 넣지 않고 매번 조회한다.
     fun isEnabled(userId: UserId, feature: Feature): Boolean
 }

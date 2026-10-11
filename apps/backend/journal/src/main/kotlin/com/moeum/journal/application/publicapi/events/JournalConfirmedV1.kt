@@ -5,8 +5,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-// 사용자가 일기를 확정했다. 수정 후 재확정하면 같은 일기에 대해 다시 발행된다 — 소비자(예: Stage 4 보상)는
-// journalId(+revision)로 중복을 판단한다. 지금은 in-process로만 발행한다(Outbox는 Stage 4).
+// 사용자가 일기를 확정했다. 현재 업무 소비자는 없으며 in-process로만 발행한다.
+// 재설계 R4에서 수동 확정 흐름과 함께 제거한다(docs/DEVELOPMENT_STAGES.md).
 data class JournalConfirmedV1(
     override val eventId: UUID,
     override val occurredAt: Instant,

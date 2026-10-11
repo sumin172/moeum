@@ -61,7 +61,7 @@ data class DayPreference(
     }
 
     companion object {
-        // 실사용 패턴 확인 전 잠정값. 최종 확정은 docs/DEVELOPMENT_STAGES.md "구현하면서 결정" 참고.
+        // 현재 구현의 잠정값. 새 하루 마감 정책은 docs/RECORD_DAY.md를 따르며 R2에서 교체한다.
         val DEFAULT_DAY_START_TIME: LocalTime = LocalTime.of(2, 0)
 
         fun default(userId: UserId, now: Instant): DayPreference =

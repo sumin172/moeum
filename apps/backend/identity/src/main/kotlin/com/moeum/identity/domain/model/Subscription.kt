@@ -18,7 +18,7 @@ enum class SubscriptionSource {
     // 결제 없이 지급(초기 사용자 혜택, 프로모션 등)
     COMPLIMENTARY,
 
-    // 결제로 생긴 구독 — Stage 6
+    // 결제로 생긴 구독 — 실제 결제 연동은 별도 제품 작업
     PAID,
 }
 

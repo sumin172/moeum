@@ -19,7 +19,7 @@ data class Journal(
     val diaryDate: LocalDate,
     val lifecycleStatus: JournalLifecycleStatus,
     val title: String,
-    // 일기 본문. 저장소에서 journals.content(JSONB) {"body"} 구조로 변환한다 — 구조 확장은 Stage 3.
+    // 현재는 journals.content(JSONB) {"body"}로 저장한다. 재설계 R4에서 TEXT로 단순화한다.
     val body: String,
     val currentRevision: Int,
     // 낙관적 락. 클라이언트는 받은 version을 수정·확정 요청에 그대로 돌려보낸다(다른 기기에서 먼저 바꿨으면 충돌).
