@@ -9,7 +9,7 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import java.time.Instant
 
-// UNIQUE(user_id, diary_date), 낙관적 락(version), 선점 규칙(JobClaimSql)을 메모리에서 흉내 낸다.
+// UNIQUE(user_id, record_day), 낙관적 락(version), 선점 규칙(JobClaimSql)을 메모리에서 흉내 낸다.
 class InMemoryGenerationJobRepository : GenerationJobRepository {
     val jobs = linkedMapOf<Any, GenerationJob>()
 
@@ -24,6 +24,13 @@ class InMemoryGenerationJobRepository : GenerationJobRepository {
         val saved = job.copy(state = job.state.copy(version = job.state.version + if (current == null) 0 else 1))
         jobs[job.id] = saved
         return saved
+    }
+
+    override fun lockClaim(job: GenerationJob) {
+        val current = jobs[job.id]
+        if (current == null || current.state.version != job.state.version || current.state.status != JobStatus.PROCESSING) {
+            throw ObjectOptimisticLockingFailureException(GenerationJob::class.java,job.id.value)
+        }
     }
 
     override fun findByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): GenerationJob? =

@@ -31,7 +31,6 @@ class SaveGeneratedResponseService(
                 content = response.content,
                 occurredAt = now,
                 timezone = userMessage.timezone,
-                localDate = userMessage.localDate,
                 recordDayId = userMessage.recordDayId,
                 sourceSequence = job.inputSourceRevision,
                 generationId = response.generationId,

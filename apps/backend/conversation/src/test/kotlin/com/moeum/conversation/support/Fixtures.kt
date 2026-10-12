@@ -3,7 +3,6 @@ package com.moeum.conversation.support
 import com.moeum.conversation.application.command.ConversationQuotaService
 import com.moeum.conversation.domain.ConversationUsage
 import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
-import com.moeum.identity.application.publicapi.ConversationAllowanceQuery
 import java.time.Instant
 import com.moeum.conversation.domain.ConversationUsageRepository
 import com.moeum.conversation.infrastructure.config.ResponseJobProperties

@@ -9,10 +9,20 @@ import com.moeum.platform.llm.provider.LlmProviderResult
 // 실제 provider를 부르지 않고 RoutingLlmClient → 원장 기록 경로를 검증하기 위한 provider.
 // 메시지 내용이 "fail"이면 실패한다. moeum.llm.routes.integration-test가 이 provider를 쓴다.
 class FakeLlmProvider : LlmProvider {
+    private val journalFailures = java.util.concurrent.ConcurrentHashMap<com.moeum.kernel.UserId,java.util.concurrent.atomic.AtomicInteger>()
+    private val journalInputs = java.util.concurrent.ConcurrentHashMap<com.moeum.kernel.UserId,java.util.concurrent.CopyOnWriteArrayList<List<com.moeum.platform.llm.LlmMessage>>>()
+    fun failNextJournal(user: com.moeum.kernel.UserId, times: Int) { journalFailures[user] = java.util.concurrent.atomic.AtomicInteger(times) }
+    fun inputsFor(user: com.moeum.kernel.UserId): List<List<com.moeum.platform.llm.LlmMessage>> = journalInputs[user]?.toList() ?: emptyList()
+    fun reset() { journalFailures.clear(); journalInputs.clear() }
     override val name = "fake"
     override val vendor = "fake-vendor"
 
     override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
+        if (request.purpose == "journal-generation") {
+            val user = requireNotNull(request.userId)
+            journalInputs.computeIfAbsent(user) { java.util.concurrent.CopyOnWriteArrayList() }.add(request.messages.toList())
+            if ((journalFailures[user]?.getAndUpdate { if (it>0) it-1 else 0 } ?: 0)>0) throw LlmException("테스트용 일기 실패")
+        }
         if (request.messages.any { it.content == "fail" }) throw LlmException("테스트용 실패")
         // 일기 생성은 JSON 응답을 기대한다
         val text = if (request.purpose == "journal-generation") """{"title":"테스트 일기","body":"오늘의 기록"}""" else "ok"

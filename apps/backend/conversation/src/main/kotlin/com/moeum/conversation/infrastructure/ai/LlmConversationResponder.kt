@@ -59,7 +59,6 @@ class LlmConversationResponder(
             generationId = result.generationId,
             content = result.text,
             model = result.model,
-            provider = result.provider,
             promptVersion = result.promptVersion,
             inputTokens = result.inputTokens,
             outputTokens = result.outputTokens,

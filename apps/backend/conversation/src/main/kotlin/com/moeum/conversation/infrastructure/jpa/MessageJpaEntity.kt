@@ -8,7 +8,6 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 @Entity
@@ -27,8 +26,6 @@ class MessageJpaEntity(
     val occurredAt: Instant,
     @Column(nullable = false)
     val timezone: String,
-    @Column(name = "local_date", nullable = false)
-    val localDate: LocalDate,
     @Column(name = "record_day_id", nullable = false)
     val recordDayId: UUID,
     @Column(name = "source_sequence", nullable = false)
@@ -47,8 +44,6 @@ class MessageJpaEntity(
     val outputTokens: Int? = null,
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant,
-    @Column(name = "deleted_at")
-    val deletedAt: Instant? = null,
     @Column(name = "stream_sequence", nullable = false)
     val streamSequence: Long = 0,
 )

@@ -40,11 +40,11 @@ class SaveMessageServiceTest {
         SaveMessageCommand(clientMessageId, content, Instant.parse(occurredAt), "Asia/Seoul")
 
     @Test
-    fun `메시지는 기본 하루 경계(02시)로 계산한 표시 날짜와 달력 날짜를 함께 저장한다`() {
+    fun `발화 시각과 기본 마감 기준의 표시 날짜를 구분한다`() {
         // KST 2026-08-02 01:30 — 달력으로는 8/2지만 하루 경계(02:00) 전이라 8/1 하루에 속한다
         val result = accepted(service.save(userId, command("2026-08-01T16:30:00Z")))
 
-        assertThat(result.message.localDate).isEqualTo(LocalDate.of(2026, 8, 2))
+        assertThat(result.message.occurredAt.atZone(java.time.ZoneId.of(result.message.timezone)).toLocalDate()).isEqualTo(LocalDate.of(2026, 8, 2))
         assertThat(result.record.displayDate).isEqualTo(LocalDate.of(2026, 8, 1))
         assertThat(result.message.createdAt).isEqualTo(now)
     }
@@ -105,7 +105,7 @@ class SaveMessageServiceTest {
         val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20,usage),
             ConversationLimitProperties(),FixedTimeProvider(now))
         val first = accepted(service.save(userId,command("2026-08-02T10:00:00Z").copy(timezone="Pacific/Kiritimati")))
-        assertThat(first.message.localDate).isEqualTo(LocalDate.of(2026,8,3))
+        assertThat(first.message.occurredAt.atZone(java.time.ZoneId.of(first.message.timezone)).toLocalDate()).isEqualTo(LocalDate.of(2026,8,3))
         service.save(userId,command("2026-07-31T10:00:00Z"))
         assertThat(usage.counts).containsEntry(userId to LocalDate.of(2026,8,2),2)
         assertThat(usage.counts).hasSize(1)

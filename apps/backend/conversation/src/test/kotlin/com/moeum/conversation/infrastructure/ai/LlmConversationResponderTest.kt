@@ -13,7 +13,6 @@ import com.moeum.platform.llm.LlmRole
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 class LlmConversationResponderTest {
@@ -34,7 +33,7 @@ class LlmConversationResponderTest {
         val question = userMessage(userId, "오늘 피곤했어", Instant.parse("2026-08-08T10:00:00Z"), day)
         val reply = Message.assistantMessage(
             MessageId.generate(), userId, "무슨 일 있었어요?", Instant.parse("2026-08-08T10:00:05Z"),
-            "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1, sourceSequence=1,
+            "Asia/Seoul", day, UUID.randomUUID(), "m", "v1", 1, 1, sourceSequence=1,
         )
 
         val response = LlmConversationResponder(llmClient, ConversationLimitProperties()).respond(userId, listOf(question, reply))
@@ -48,7 +47,6 @@ class LlmConversationResponderTest {
             LlmMessage(LlmRole.ASSISTANT, "무슨 일 있었어요?"),
         )
         assertThat(response.content).isEqualTo("많이 힘드셨겠어요.")
-        assertThat(response.provider).isEqualTo("google")
         assertThat(response.promptVersion).isEqualTo(sent.promptVersion)
     }
 
@@ -58,7 +56,7 @@ class LlmConversationResponderTest {
         userMessage(owner, content, Instant.parse("2026-08-08T10:00:00Z").plusSeconds(minute * 60L), day)
     private fun assistant(content: String, minute: Int) = Message.assistantMessage(
         MessageId.generate(), owner, content, Instant.parse("2026-08-08T10:00:30Z").plusSeconds(minute * 60L),
-        "Asia/Seoul", LocalDate.of(2026,8,8), day, UUID.randomUUID(), "m", "v1", 1, 1, sourceSequence=1,
+        "Asia/Seoul", day, UUID.randomUUID(), "m", "v1", 1, 1, sourceSequence=1,
     )
 
     @Test

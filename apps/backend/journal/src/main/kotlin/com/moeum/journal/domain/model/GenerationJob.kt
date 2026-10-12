@@ -8,7 +8,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-// 사용자 하루 하나의 일기 생성 작업. 첫 시도 시각(state.nextAttemptAt)은 그 하루가 끝나는 시각이다.
+// 마감된 기록당 하나의 최초 일기 생성 작업. 날짜는 표시 속성이고 recordDayId가 멱등키다.
 data class GenerationJob(
     val id: GenerationJobId,
     val journalId: JournalId?,

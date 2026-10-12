@@ -24,7 +24,6 @@ class ControllableConversationResponder : ConversationResponder {
             generationId = UUID.randomUUID(),
             content = "테스트 응답입니다.",
             model = "fake-model",
-            provider = "fake",
             promptVersion = "test",
             inputTokens = 1,
             outputTokens = 1,

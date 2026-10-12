@@ -40,7 +40,6 @@ dependencies {
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.jackson.databind)
     testImplementation(libs.kotlin.reflect)
-    testImplementation(libs.spring.security.test)
 }
 
 tasks.withType<Test> {

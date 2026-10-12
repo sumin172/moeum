@@ -104,7 +104,7 @@ timezone 이동·DST·오프라인·설정 변경·마감과 입력 경합·전�
 ## R3 — 대화 응답 순서·입력 범위·상태 조회 정비
 
 브랜치: refactor/#49-conversation-response-ordering
-상태: 구현·데드 코드 삭제·초기 스키마 재구성 완료. 전체 백엔드 테스트 141개 통과(실패·오류·생략 0개). 실제 PostgreSQL 동시 접수·다중 워커 선점·리스 회수·응답 입력 범위·구독 변경·독립 상태 조회를 검증했다. 클라이언트 화면과 대규모 운영 부하 검증은 포함하지 않는다. 현재 계약은 [대화 계약](CONVERSATION.md)을 따른다.
+상태: 구현·데드 코드 삭제·초기 스키마 재구성 완료. 현재 전체 검증 결과는 WORKER_ROLES를 따른다. 실제 PostgreSQL 동시 접수·다중 워커 선점·리스 회수·응답 입력 범위·구독 변경·독립 상태 조회를 검증했다. 클라이언트 화면과 대규모 운영 부하 검증은 포함하지 않는다. 현재 계약은 [대화 계약](CONVERSATION.md)을 따른다.
 의존: R2.
 
 작업:
@@ -137,13 +137,14 @@ RECORD_DAY D27~D30: 한도 소진·여러 기기의 마지막 잔여 횟수 경�
 
 ## R4 — 일기 자동 보관·구독 수정 정책 구현
 
-브랜치: refactor/automatic-journal-lifecycle
+브랜치: refactor/#51-automatic-journal-lifecycle
+상태: 구현·초기 V2~V4 스키마 재구성·관련 데드 코드 삭제와 R1~R4 잔여 항목 점검 완료. 전체 백엔드 테스트 143개 통과(실패·오류·생략 0개). 신규 PostgreSQL에서 즉시 조회·구독 수정·동시 수정 충돌·늦은 생성 결과 차단·원본 버전 불일치·무료 실패 복구 동일 입력/무차감을 검증했다. 실제 공급자·대규모 부하·독립 JVM 강제 종료는 R6 범위다. 현재 계약은 [일기 계약](JOURNAL.md)을 따른다.
 의존: R2, R3.
 
 작업:
 
 - 생성 즉시 보관하고 제목·본문 직접 수정은 JOURNAL_EDIT 구독 권한으로 제공한다.
-- 사용자 편집 version과 원본 버전으로 오래된 생성 결과 저장을 차단한다.
+- 사용자 수정은 version으로 충돌을 검사하고 자동 생성은 소유권 검사·INSERT 전용 저장으로 기존 결과를 보존한다. 동결 원본 버전이 다른 결과는 거절한다.
 - 늦은 원본으로 기존 일기를 자동 갱신하지 않는다. 입력 확정 후 폐기 정책과 수정본 보호를 유지한다.
 - 서버 실패 복구 재시도는 같은 생성 작업·확정 입력으로 제공하고 대화 횟수를 추가 차감하지 않는다.
 - AI 재작성·문체·길이 설정은 구현하지 않는다.
@@ -152,7 +153,10 @@ RECORD_DAY D27~D30: 한도 소진·여러 기기의 마지막 잔여 횟수 경�
 제거:
 confirm API/서비스/DTO, DRAFT/CONFIRMED 전이,
 JournalConfirmedV1, 소비처 없는 IntegrationEvent 공통 계약/테스트 recorder,
-GrantComplimentarySubscriptionService의 미사용 운영 경로,
+GrantComplimentarySubscriptionService와 전용 저장 포트/어댑터/팩터리,
+사용처 없는 Journal deleted_at/purge_after,
+SubscriptionSource와 구독 source 필드/컬럼, 메시지 localDate/deletedAt와 미사용 ConversationResponse.provider,
+사용하지 않는 Spring Security/Testcontainers JUnit 테스트 의존성,
 journal_revisions 및 관련 모델/포트/어댑터/테스트,
 JournalContentCodec과 body만 담는 JSON 변환.
 
@@ -181,7 +185,7 @@ RECORD_DAY D13/D19/D31과 일기 생성·구독 수정·지연 원본 폐기 전
 제거:
 platform.llm_invocations 및 원장 전용 포트/엔티티/테스트,
 결과·작업의 미사용 토큰 중복 컬럼,
-ConversationResponse.provider 등 소비처 없는 전달 필드,
+관측 경로 교체 후 소비처가 사라진 전달 필드,
 구형 문서·설정·의존성.
 로그로 대체한다며 업무 재시도·멱등성 상태를 함께 지우지 않는다.
 

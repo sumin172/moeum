@@ -70,7 +70,6 @@ private fun MessageJpaEntity.toDomain(): Message =
         content = content,
         occurredAt = occurredAt,
         timezone = timezone,
-        localDate = localDate,
         sourceSequence = sourceSequence,
         recordDayId = RecordDayId(recordDayId),
         clientMessageId = clientMessageId,
@@ -80,7 +79,6 @@ private fun MessageJpaEntity.toDomain(): Message =
         inputTokens = inputTokens,
         outputTokens = outputTokens,
         createdAt = createdAt,
-        deletedAt = deletedAt,
         streamSequence = streamSequence,
     )
 
@@ -92,7 +90,6 @@ private fun Message.toEntity(): MessageJpaEntity =
         content = content,
         occurredAt = occurredAt,
         timezone = timezone,
-        localDate = localDate,
         sourceSequence = sourceSequence,
         recordDayId = recordDayId.value,
         clientMessageId = clientMessageId,
@@ -102,6 +99,5 @@ private fun Message.toEntity(): MessageJpaEntity =
         inputTokens = inputTokens,
         outputTokens = outputTokens,
         createdAt = createdAt,
-        deletedAt = deletedAt,
         streamSequence = streamSequence,
     )

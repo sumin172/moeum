@@ -4,9 +4,7 @@ import com.moeum.conversation.application.publicapi.*
 import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.JournalGenerator
-import com.moeum.journal.domain.JournalRevisionRepository
 import com.moeum.journal.domain.model.GenerationJob
-import com.moeum.journal.domain.model.JournalRevision
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.journal.support.InMemoryJournalRepository
@@ -37,10 +35,6 @@ class GenerationExecutorTest {
     private val jobRepository = InMemoryGenerationJobRepository()
     private val journalRepository = InMemoryJournalRepository()
     private val journals get() = journalRepository.journals.values.toList()
-    private val revisions = mutableListOf<JournalRevision>()
-    private val revisionRepository = object : JournalRevisionRepository {
-        override fun append(revision: JournalRevision): JournalRevision = revision.also { revisions += it }
-    }
     private val activityQuery = object : RecordDayOperations {
         override fun closeNext() = false
         override fun claimDelivery(): RecordDelivery? = null
@@ -64,7 +58,7 @@ class GenerationExecutorTest {
         generationJobRepository = jobRepository,
         recordDayOperations = activityQuery,
         journalGenerator = generator,
-        saveGeneratedJournalService = SaveGeneratedJournalService(journalRepository, revisionRepository, jobRepository, timeProvider),
+        saveGeneratedJournalService = SaveGeneratedJournalService(journalRepository, jobRepository, timeProvider),
         markGenerationFailedService = MarkGenerationFailedService(jobRepository, properties, timeProvider),
         generationJobProperties = properties,
         timeProvider = timeProvider,
@@ -73,7 +67,7 @@ class GenerationExecutorTest {
     private fun enqueue(): GenerationJob = jobRepository.save(GenerationJob.pending(userId, recordDayId, displayDate, dayEnd, dayEnd.minusSeconds(7200)))
 
     @Test
-    fun `하루가 끝난 작업을 실행해 초안 일기를 저장하고 작업을 완료한다`() {
+    fun `하루가 끝난 작업을 실행해 일기를 즉시 보관하고 작업을 완료한다`() {
         val job = enqueue()
 
         executor(ScriptedGenerator(failures = 0)).executeNext()
@@ -85,7 +79,7 @@ class GenerationExecutorTest {
         // 입력 동결 시의 원본 버전을 결과에 남긴다
         assertThat(journals.single().sourceRevision).isEqualTo(1)
         // 사용자 소유 데이터는 user_id를 직접 갖는다
-        assertThat(revisions.single().userId).isEqualTo(userId)
+        assertThat(journals.single().userId).isEqualTo(userId)
     }
 
     @Test

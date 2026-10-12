@@ -32,13 +32,11 @@ CREATE UNIQUE INDEX uq_identity_auth_sessions_active_device
     WHERE revoked_at IS NULL;
 
 -- 사용자에게 유료 요금제가 적용되는 기간(결제와 무관). 구독이 없으면 FREE.
--- source: COMPLIMENTARY(결제 없이 지급 — 초기 사용자 혜택 등) | PAID(결제 연동은 별도 제품 작업)
 -- 어떤 기능이 열리는지는 요금제별 설정(moeum.features.plans)으로 정한다.
 CREATE TABLE identity.subscriptions (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
     plan TEXT NOT NULL,
-    source TEXT NOT NULL,
     starts_at TIMESTAMPTZ NOT NULL,
     ends_at TIMESTAMPTZ NULL,
     revoked_at TIMESTAMPTZ NULL,
