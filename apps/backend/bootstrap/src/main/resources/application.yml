@@ -1,4 +1,9 @@
 spring:
+  datasource:
+    hikari:
+      maximum-pool-size: ${API_DB_POOL_SIZE:10}
+      minimum-idle: 2
+      pool-name: api-db
   jpa:
     hibernate:
       ddl-auto: none
@@ -6,6 +11,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  jmx:
+    enabled: true
+    unique-names: true
   threads:
     virtual:
       enabled: true
@@ -16,6 +24,112 @@ server:
     connection-timeout: 15s
     keep-alive-timeout: 5s
 
+management:
+  endpoints:
+    web:
+      exposure:
+        exclude: "*"
+    jmx:
+      exposure:
+        include: health,metrics
+
 logging:
+  structured:
+    format:
+      console: logstash
   level:
-    com.moeum: DEBUG
+    com.moeum: INFO
+    # PostgreSQL 오류 DETAIL은 실패한 행의 본문을 포함할 수 있다. 업무 경로에서 SQLSTATE/위치만 기록한다.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+    org.hibernate.orm.jdbc.error: OFF
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      llm:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        recordExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+          - org.springframework.web.client.HttpClientErrorException.TooManyRequests
+          # 응답 본문이 비었거나 content가 없는 경우(안전 필터 등)
+          - com.moeum.platform.llm.LlmException
+    # 서킷은 각 워커 프로세스의 provider 단위다. 별도 역할 프로세스 간 상태는 공유하지 않는다.
+    instances:
+      llm-gemini:
+        baseConfig: llm
+      llm-claude:
+        baseConfig: llm
+
+moeum:
+  telemetry:
+    buffer-capacity: 1024
+    shutdown-timeout: 2s
+  jobs:
+    retention:
+      completed-age: 30d
+      batch-size: 100
+      interval: PT1M
+      initial-delay: PT1M
+  identity:
+    conversation:
+      # 제품 확정값이 아닌 개발 기본안. 무료·구독 모두 유한한 한도.
+      free-daily-limit: 20
+      premium-daily-limit: 100
+  auth:
+    session:
+      # refresh token 수명(로그인·refresh 때마다 연장). access token 수명은 moeum.jwt.expiration-seconds(기본 15분)
+      refresh-token-ttl: 30d
+      # 교체된 직전 토큰이 이 시간 안에 다시 오면 탈취가 아니라 동시 요청으로 보고 세션을 유지한다
+      rotation-grace: 30s
+  runtime:
+    roles: api
+    conversation-concurrency: 8
+    journal-concurrency: 2
+    shutdown-timeout: 10s
+  conversation:
+    # 이상 사용으로 LLM 비용이 튀지 않게 하는 상한(잠정값, ConversationLimitProperties 참고)
+    limits:
+      max-message-length: 4000
+      context-char-budget: 20000
+      context-message-limit: 100
+      accepted-messages-per-minute: 60
+    # AI 응답 생성 작업 재시도/리스 정책 (기본값은 ResponseJobProperties 참고)
+    response-job:
+      max-attempts: 3
+      backoff: 10s, 60s
+      lease: 2m
+      poll-interval: PT1S
+  journal:
+    # 일기 생성 작업 재시도/리스 정책 (기본값은 GenerationJobProperties 참고)
+    generation-job:
+      max-attempts: 5
+      backoff: 1m, 5m, 30m, 2h
+      lease: 5m
+      poll-interval: PT1S
+  llm:
+    # 용도별 provider·모델·토큰 상한. 모델 교체나 provider 전환(예: 일기를 Claude Haiku로)은 이 설정만 바꾼다.
+    # Gemini 모델 alias는 구세대가 조기 폐기되는 경우가 있어(2026-08-08 gemini-2.5-flash 404) latest alias를 쓴다.
+    routes:
+      conversation-response:
+        provider: gemini
+        model: gemini-flash-latest
+        # 일상 반응은 짧게(비용 제어). Gemini 2.5+는 thinking 토큰도 이 상한에 포함되므로 thinking을 끈다.
+        max-output-tokens: 150
+        thinking-budget: 0
+      journal-generation:
+        # 목표는 Claude Haiku(claude-haiku-4-5-20251001)지만 결제 설정 전까지 Gemini를 쓴다
+        provider: gemini
+        model: gemini-flash-latest
+        max-output-tokens: 2000
+    # provider별 동시 호출 상한(bulkhead)
+    max-concurrent-calls:
+      gemini: 20
+      claude: 10
+    acquire-timeout: 5s

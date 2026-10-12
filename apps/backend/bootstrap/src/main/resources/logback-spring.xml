@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/structured-console-appender.xml"/>
+    <appender name="ASYNC_CONSOLE" class="com.moeum.platform.observability.NonBlockingConsoleAppender">
+        <queueSize>1024</queueSize>
+        <maxFlushTime>2000</maxFlushTime>
+        <appender-ref ref="CONSOLE"/>
+    </appender>
+    <root level="${ROOT_LOG_LEVEL:-INFO}">
+        <appender-ref ref="ASYNC_CONSOLE"/>
+    </root>
+</configuration>

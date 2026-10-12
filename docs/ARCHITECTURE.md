@@ -1,399 +1,225 @@
-# 모음 (Moeum) — 아키텍처 결정 문서
-
-> 최종 업데이트: 2026-07-19 (v2)
-
----
-
-## 서비스 한 줄 정의
-
-AI와 일상 대화를 통해 자연스럽게 기록하고, 하루가 끝날 때 일기로 정리해 아카이브하는 플랫폼.
-경쟁력은 가장 똑똑한 AI가 아니라 **사용자의 삶을 가장 잘 기록하고 연결하는 경험**에 있다.
-
----
-
-## 핵심 데이터 철학
-
-```
-사용자 메시지 (Message, role=user)  = 원본 기록, 절대 불변, 가장 중요한 자산
-AI 대화 응답 (Message, role=assistant) = 사용자 경험상 대화이지만 기술적으로는 AI 파생 결과
-Moment                               = Conversation이 소유하는 핵심 도메인 데이터
-AI 생성 결과 (Journal, Insight)      = 언제든 재생성 가능한 파생 데이터
-```
-
-AI가 틀리거나 모델이 교체되어도 원본 기록은 반드시 보존된다.
-AI 대화 응답도 생성 메타데이터(model, generation_id)를 가져야 디버깅과 모델 교체가 가능하다.
-
----
-
-## 기술 스택
-
-| 영역 | 선택 | 이유 |
-|------|------|------|
-| 백엔드 | Kotlin + Spring Boot + Java 21 | 도메인 표현력, 트랜잭션, JPA, 스케줄러 통합 |
-| 빌드 | Gradle Kotlin DSL | |
-| 웹 | Next.js | 아카이브 UI + 얇은 BFF |
-| 모바일 | Flutter (또는 RN+Expo) | 팀 숙련도에 따라 결정 |
-| DB | PostgreSQL | 단일 클러스터로 시작 |
-| 캐시 | Redis | 세션·Rate Limit (초기에는 생략 가능) |
-| 파일 | Object Storage | 이미지·음성 |
-
-### AI 모델 라우팅
-
-| 용도 | 모델 | 이유 |
-|------|------|------|
-| 일상 대화 반응 | Gemini 2.5 Flash | 빈도 높음, 무료 티어로 개발 가능 |
-| Moment 추출 (배치) | Gemini 2.5 Flash | 구조화 출력, 저비용 |
-| 일기 생성 초안 | Claude Haiku 4.5 | 하루 1회, 한국어 품질 |
-| Insight 생성 | Claude Sonnet 4.6 | 주·월 1회, 품질 우선 |
-
-**비용 제어 원칙**
-- 대화 반응: 최근 8~10개 메시지만 컨텍스트로 사용
-- 응답 토큰 상한: 일상 반응 150 토큰
-- 시스템 프롬프트 최소화
-- 개발 중 전체를 Gemini 무료 티어로 처리
-
----
-
-## 아키텍처 전략
-
-### 모듈러 모놀리스 → 필요 시 MSA
-
-초기에는 하나의 애플리케이션으로 운영한다.
-논리적 경계는 MSA와 동일하게 설계하되, 물리적 분리는 실제 필요가 생길 때만 한다.
-
-**MSA 분리 검토 조건 (2개 이상 충족 시)**
-- 특정 모듈만 독립 스케일링이 필요
-- 장애 반경을 격리해야 하는 상황 발생
-- 팀 소유권이 실제로 나뉨
-- 배포 주기가 명확히 달라짐
-- 다른 런타임 필요 (Python GPU 등)
-- 보안 또는 데이터 정책이 달라짐
-
-**우선 분리 후보 (나중에)**
-```
-Notification → 기록 기능과 장애 격리 필요
-Insight      → Python 분석 모델 필요 시
-LLM Gateway  → 독립 스케일링 필요 시
-```
-
----
-
-## 모듈 구조
-
-```
-backend/
-├─ bootstrap/           # 앱 진입점, 설정 조합
-├─ modules/
-│  ├─ identity/         # 사용자, 계정, 인증, 구독
-│  ├─ conversation/     # 메시지, ConversationDay, Moment
-│  ├─ journal/          # 일기 생성, 수정, 확정
-│  ├─ insight/          # 감정 분석, 패턴, 회고
-│  ├─ gamification/     # 미션, 스트릭, 포인트 원장
-│  └─ notification/     # 알림 발송
-├─ platform/
-│  ├─ llm/              # AI 제공자 추상화
-│  ├─ database/         # JPA 공통 설정
-│  ├─ messaging/        # 이벤트 발행/구독 인프라
-│  ├─ security/         # JWT, 인증 필터
-│  └─ observability/    # 로깅, 메트릭, 트레이싱
-└─ shared-kernel/       # UserId, Money, DomainEvent, TimeProvider
-```
-
-### 각 모듈 내부 레이어
-
-```
-{module}/
-├─ domain/         # 엔티티, 값객체, 도메인 이벤트, 레포지터리 인터페이스
-├─ application/
-│  ├─ command/     # 명령 유즈케이스
-│  ├─ query/       # 조회 유즈케이스
-│  └─ publicapi/   # 다른 모듈에 공개하는 인터페이스 (유일한 의존 진입점)
-├─ infrastructure/ # JPA 구현, 외부 API 클라이언트, 이벤트 퍼블리셔
-└─ interfaces/     # REST 컨트롤러, DTO, 요청/응답 매핑
-```
-
-다른 모듈은 `domain`, `infrastructure`에 접근하지 않고 `publicapi`만 의존한다.
-
-```kotlin
-// conversation/application/publicapi
-interface ConversationJournalSourceQuery {
-    fun getJournalSource(conversationDayId: ConversationDayId): JournalSourceSnapshot
-}
-// 나중에 HTTP 클라이언트로 구현을 교체해도 호출부 코드는 변경 없음
-```
-
----
-
-## Bounded Context & 데이터 소유권
-
-각 데이터는 **하나의 컨텍스트만 원본 소유자**다.
-
-| 컨텍스트 | 소유 데이터 |
-|----------|------------|
-| Identity | User, Account, Device, Consent, Subscription |
-| Conversation | Message, ConversationDay, Moment, Attachment |
-| Journal | Journal, JournalRevision, JournalSection, JournalTag |
-| Insight | EmotionObservation, DailyInsight, WeeklyInsight, Pattern |
-| Gamification | Mission, Streak, Achievement, PointLedger, Reward |
-| Notification | NotificationLog, NotificationTemplate |
-
-**Moment 생성 책임**
-Moment는 Conversation 컨텍스트가 소유하고 생성한다.
-Journal 모듈은 Moment를 생성하거나 conversation 테이블에 저장하지 않는다.
-
-Moment 추출은 LLM 배치 호출이므로 하루 마감 API와 분리한다. 마감 API가 LLM 속도에 묶이면 안 된다.
-
-```
-ConversationDay 마감 (즉시 반환)
-  → ConversationDayClosed 발행
-  → Conversation이 Moment 추출 Job 시작 (비동기)
-  → Moment 추출 완료
-  → MomentsPrepared 발행 (Moment 스냅샷 포함)
-  → Journal이 MomentsPrepared를 구독해 일기 생성
-```
-
-MomentsPrepared 페이로드에 Moment 스냅샷을 포함해 Journal이 Conversation API를 재호출하지 않도록 한다. 서비스 분리 시에도 Journal이 Conversation DB를 볼 필요가 없다.
-
-**모듈 의존 방향 (단방향 엄수)**
-
-```
-identity        ← 독립 (다른 모듈에 의존하지 않음)
-conversation    → shared-kernel(UserId)  [Identity API는 필요 시만]
-journal         → (MomentsPrepared 이벤트 기반이면 conversation 직접 의존 불필요)
-insight         → journal integration event
-gamification    → journal integration event
-notification    → 여러 모듈의 integration event
-```
-
-**Identity 의존 최소화**
-
-대부분의 모듈은 인증된 UserId만 필요하다. JWT 검증 후 SecurityContext에서 UserId를 꺼내면 Identity API 호출이 필요 없다. JWT claim에 userId, subscriptionTier 등 자주 쓰는 컨텍스트를 포함해 모듈 간 컴파일 의존을 줄인다.
-
-Identity publicapi 호출이 필요한 경우만:
-- 사용자 탈퇴 여부 확인
-- 구독 상태 실시간 검증
-- 동의 정보 조회
-
-JWT claim 구조는 `platform/security`에서 정의한다.
-
-순환 의존 금지: `conversation → journal`, `journal → conversation` 양방향 불가.
-Journal 결과를 Conversation이 알아야 한다면 이벤트로 역방향 전달.
-
-**다른 컨텍스트의 데이터가 필요할 때**
-- ID 참조만 보관 (크로스 schema FK 없음)
-- 원본 수정 권한 없음
-- publicapi 또는 Integration Event 경유
-
----
-
-## PostgreSQL Schema 분리
-
-```sql
-identity.users
-identity.accounts
-
-conversation.messages
-conversation.conversation_days
-conversation.moments
-
-journal.journals
-journal.journal_revisions
-
-insight.emotion_observations
-insight.patterns
-
-gamification.point_ledger
-gamification.streaks
-```
-
-하나의 DB 인스턴스라도 schema를 분리해 논리적 소유권을 강제한다.
-
----
-
-## 필수 스키마 규칙 (Day 1)
-
-### 1. 시간/날짜 — 모든 사용자 입력에
-
-```sql
-occurred_at  TIMESTAMPTZ  -- UTC 저장
-timezone     TEXT         -- 'Asia/Seoul'
-local_date   DATE         -- 사용자 현지 날짜
-```
-
-### 2. UserId — auth provider와 분리
-
-```sql
--- identity.users
-id          UUID PRIMARY KEY  -- 내부 식별자
-google_id   TEXT              -- auth 연결은 별도 칼럼
-```
-
-### 3. AI 생성 결과 — 메타데이터 필수 (대화 응답 포함)
-
-AI가 생성한 모든 결과에 적용한다. 대화 응답(message.role=assistant)도 포함.
-
-```sql
--- 일기/Insight: 별도 generation_log 테이블
-generation_id    UUID
-provider         TEXT        -- 'anthropic', 'google'
-model            TEXT        -- 'claude-haiku-4-5'
-prompt_version   TEXT
-generated_at     TIMESTAMPTZ
-attempt_count    INT
-latency_ms       INT NULL
-input_tokens     INT NULL
-output_tokens    INT NULL
-error_code       TEXT NULL
-
--- 대화 응답: messages 테이블에 컬럼 추가
-generation_id    UUID NULL   -- AI 응답에만 값 있음
-model            TEXT NULL
-prompt_version   TEXT NULL
-```
-
-### 4. 삭제 정책 — 데이터 유형별 정의
-
-Soft Delete를 모든 것에 일괄 적용하지 않는다.
-
-| 유형 | 정책 |
-|------|------|
-| 일반 UI 삭제 | Soft Delete (deleted_at), 복구 창 내 복원 가능 |
-| 계정 탈퇴 / 영구 삭제 | 유예 기간(예: 30일) 후 Hard Delete 또는 비가역 익명화 |
-| PointLedger / 결제 기록 | 법적·회계 보존 정책에 따라 별도 처리 |
-
-```sql
-deleted_at       TIMESTAMPTZ NULL   -- Soft Delete
-purge_after      TIMESTAMPTZ NULL   -- 이 시각 이후 물리 삭제 예정
-```
-
----
-
-## AI 추상화 인터페이스
-
-```kotlin
-// platform/llm
-interface ConversationResponder {
-    suspend fun respond(context: ConversationContext): ConversationResponse
-}
-
-interface JournalGenerator {
-    suspend fun generate(day: ConversationDaySummary): JournalDraft
-}
-
-interface InsightGenerator {
-    suspend fun analyze(period: AnalysisPeriod): InsightReport
-}
-```
-
-모델명과 공급자는 도메인 코드에 직접 등장하지 않는다.
-
----
-
-## 이벤트 계약
-
-이벤트는 이미 발생한 사실이다. 명령이 아니다.
-
-### Domain Event (모듈 내부)
-
-Aggregate가 발생시키는 이벤트. 타입 안전. 모듈 외부로 직접 노출하지 않는다.
-
-```kotlin
-sealed interface JournalDomainEvent
-
-data class JournalConfirmed(
-    val journalId: JournalId,
-    val userId: UserId,
-    val revision: Long,
-    val confirmedAt: Instant
-) : JournalDomainEvent
-```
-
-### Integration Event (모듈 간 공개 계약)
-
-다른 모듈 또는 향후 다른 서비스에 공개하는 계약. 명시적 버전 관리.
-
-```kotlin
-data class JournalConfirmedV1(
-    val eventId: UUID,
-    val eventType: String = "JournalConfirmed",
-    val eventVersion: Int = 1,
-    val occurredAt: Instant,
-    val correlationId: UUID,
-    val causationId: UUID?,
-    val journalId: UUID,
-    val userId: UUID,
-    val revision: Long,
-    val localDate: LocalDate
-)
-```
-
-`Map<String, Any>`는 Outbox 직렬화 결과에만 사용. 애플리케이션 코드에서는 타입 있는 이벤트를 사용한다.
-
-**계약 변경 원칙**
-- 기존 필드 삭제 금지
-- 새 필드는 optional로 추가
-- 파괴적 변경은 새 버전 (V2)으로
-
-**핵심 이벤트 목록**
-
-```
-ConversationDayClosed       — 하루가 마감됐다는 사실 (빠른 반환, Moment 미포함)
-MomentsPrepared             — Moment 추출 완료, 스냅샷 페이로드 포함 (Journal 구독 대상)
-JournalGenerationRequested
-JournalGenerated
-JournalConfirmed
-InsightGenerated
-RewardGranted
-UserDataDeletionRequested
-```
-
-**Integration Event 소유 위치**
-
-Integration Event는 생산자 모듈이 소유한다. shared-kernel에 업무 이벤트를 두지 않는다.
-
-```
-journal/application/publicapi/events/JournalConfirmedV1.kt
-conversation/application/publicapi/events/MomentsPreparedV1.kt
-```
-
-계약 파일 (JSON Schema)은 `contracts/events/`에 별도 보관한다.
-
-**계약 파일 위치**
-```
-contracts/events/
-├─ journal-confirmed-v1.json
-├─ conversation-day-closed-v1.json
-└─ ...
-```
-
----
-
-## 장애 허용 범위
-
-| 허용 가능 | 허용 불가 |
-|----------|----------|
-| AI 반응 지연 | 사용자 기록 유실 |
-| 일기 생성 지연 | 다른 사용자 데이터 노출 |
-| 알림 실패 | 중복 보상 지급 |
-| Insight 생성 실패 | 삭제한 데이터 재노출 |
-
-LLM 장애가 메시지 저장에 영향을 주지 않아야 한다.
-
-사용자 메시지 저장이 먼저 성공해야 한다.
-AI 응답 생성은 메시지 저장 트랜잭션과 분리하며,
-실패해도 사용자 메시지 저장을 롤백하지 않는다.
-
----
-
-## 핵심 관측 식별자
-
-```
-traceId       — HTTP 요청 단위
-correlationId — 전체 업무 흐름
-causationId   — 이전 이벤트 ID
-eventId       — 현재 이벤트
-userId        — 사용자
-journalId     — 일기
-generationId  — AI 생성 단위
-promptVersion — 프롬프트 버전
-```
+# 모음 — 목표 아키텍처
+
+작성일: 2026-10-12. 상태: 구현 기준 설계. 현재 코드의 완료 상태를 뜻하지 않는다.
+문서 진입점: [개발 문서](README.md).
+기존 설계 이력의 누적 대신 이 문서를 새 기준으로 사용한다.
+
+## 서비스 목표와 범위
+
+일기 쓰기 귀찮은 사용자가 인상적인 일을 친구에게 말하듯 AI와 대화하면,
+설정한 하루 마감 시각에 일기가 자동으로 생성·보관된다.
+마감 타임존은 마지막 **사용자 발화**의 장소를 따른다. 위치 좌표는 필요하지 않으며 IANA timezone을 받는다.
+
+초기 핵심은 요금제 한도 내 대화 기록, 자동 생성, 조회와 구독자의 일기 수정이다.
+수동 확정은 요구하지 않는다. 구독 기능은 대화 가능 횟수 증가와 생성된 일기 제목·본문 수정이다.
+AI 재작성·문체·길이 설정은 현재 제공 범위에서 제외한다.
+실제 결제, Moment, Insight, 보상, 첨부, 고급 검색은 이번 재설계의 구현 범위가 아니다.
+
+## 결정과 가정
+
+| 구분   | 내용                                                                                                              |
+|--------|-------------------------------------------------------------------------------------------------------------------|
+| 결정   | Conversation과 Journal은 별도 업무 모듈로 유지한다.                                                               |
+| 결정   | Conversation이 하루 귀속·마감 예약·원본 변경을 소유한다. Journal은 생성 결과를 소유한다.                          |
+| 결정   | 일기 배치는 대화와 별도 프로세스로 실행하고 자원 예산을 분리한다.                                                 |
+| 결정   | DB는 존재하지 않는 것으로 보고 초기 Flyway 이력을 새로 작성한다. 호환 코드·이중 쓰기·데이터 이전은 만들지 않는다. |
+| 결정   | 리팩터링으로 불필요해진 코드·설정·테스트·문서는 해당 작업에서 제거한다.                                           |
+| 가정   | 초기 작업 전달은 PostgreSQL을 사용한다. 공급자 처리량과 DB 부하가 목표를 충족하는지 부하 시험으로 검증한다.       |
+| 가정   | 세부 날짜 표시·오프라인 정책은 [하루 기록 정책](RECORD_DAY.md)의 명시된 기본안을 사용한다.                        |
+| 미확정 | 6개월 예상 DAU, 공급자 실제 할당량·예산, 운영 DB 사양. [부하 기준](CAPACITY.md)은 검증용 가정이다.                |
+
+## 모듈과 실행 역할
+
+| 모듈          | 책임                                                  |
+|---------------|-------------------------------------------------------|
+| identity      | 사용자·Google 로그인·인증 세션·기능 권한              |
+| conversation  | 메시지·하루 기록·마감 설정·응답 순서·마감 전달 상태   |
+| journal       | 생성 요청·일기 현재 내용·수정 충돌·사용자 수정본 보호 |
+| platform      | 공급자 연결·작업 실행 도구·보안·관측 어댑터           |
+| shared-kernel | 사용자 식별자·시간 등 실제 공유하는 최소 타입         |
+| bootstrap     | 실행 역할별 빈·설정 조합                              |
+
+다른 업무 모듈의 domain/infrastructure를 직접 import하지 않는다.
+Journal → Conversation publicapi, Journal/Conversation → Identity publicapi 방향을 유지한다.
+Conversation은 Journal을 import하지 않는다. 모듈 간 순환 의존은 테스트로 차단한다.
+도메인은 JPA 어노테이션을 갖지 않는다. publicapi 계약에 JPA 엔티티를 노출하지 않는다.
+
+실행 역할은 세 가지다. R1에서 역할별 빈·실행 슬롯·DB pool/LLM 예산을 구현했다.
+현재 실행 방법과 검증 범위는 [실행 역할](WORKER_ROLES.md)을 따른다.
+
+- API: HTTP 처리와 짧은 저장 트랜잭션. LLM 호출·배치 스케줄 등록 없음.
+- conversation-worker: 대화 응답만 실행.
+- journal-worker: Conversation publicapi로 마감/전달 대상을 선점하고 Journal에 작업을 등록·실행. 원본 스캔 Planner는 사용하지 않는다.
+  소유권과 실행 위치는 다르다. Conversation 소유 행의 변경은 반드시 그 publicapi 안에서 한다.
+
+운영은 역할별 프로세스·배포 수·DB 풀·LLM 예산을 분리한다.
+같은 산출물을 역할 설정으로 실행할 수 있으며 MSA/별도 DB는 요구하지 않는다.
+로컬에서만 복합 역할을 허용하되 활성 역할을 기동 로그로 명시한다.
+기본 역할은 API이며 복합 역할은 local 개발/테스트에서만 허용한다.
+
+## Aggregate와 데이터 접근
+
+RecordDay는 하나의 기록 단위다. 날짜는 표시 속성이며 ID가 아니다.
+메시지는 별도 행으로 저장하고 recordDayId를 직접 참조한다.
+사용자별 생성/귀속 경합은 작은 사용자 기록 상태 행으로 직렬화한다.
+RecordDay는 원본 순번·마감·전달 상태를 보호하며 메시지 컬렉션을 로딩하지 않는다.
+고빈도 단일 사용자의 경합은 허용하되 서로 다른 사용자 사이에는 잠금이 퍼지지 않게 한다.
+
+Journal은 recordDayId당 현재 결과 하나를 가진다. 사용자 수정본 전체 이력은 초기 범위에서 저장하지 않는다.
+생성 요청은 결과와 생명주기가 다르므로 별도 작업 상태를 갖는다.
+화면 목록은 본문을 제외한 projection으로 읽고, 원문은 상세/생성 시에만 읽는다.
+다른 schema JOIN과 JPA 컬렉션 연관관계를 사용하지 않는다.
+단건 CRUD는 Spring Data, 원자적 선점/upsert/카운터는 작은 native SQL/JDBC 어댑터로 구현한다.
+SQL을 피하려고 전체 행을 JVM으로 가져와 집계하지 않는다.
+
+## 메시지 저장 트랜잭션
+
+Conversation 안에서 다음을 한 트랜잭션으로 수행한다.
+
+1. 사용자 기록 상태를 잠그고 clientMessageId 중복을 확인한다.
+2. 하루 귀속을 결정한다. 해당 기록의 생성 입력이 이미 확정됐으면 조용한 폐기 결과로 종료한다.
+   이미 저장한 clientMessageId의 재전송에는 기존 결과를 반환한다. 접수할 새 원본에만 순번을 발급한다.
+3. 메시지를 저장하고 마지막 사용자 발화·closeAt·원본 변경 번호를 갱신한다.
+4. 서버 기준 요금제 한도를 원자적으로 확인·차감하고 대화 응답 작업을 등록한다.
+   한도를 초과하면 트랜잭션을 롤백해 새 메시지·원본 변경·예약 변경·작업을 남기지 않는다.
+5. 커밋 후 응답한다. API는 LLM을 실행하지 않는다.
+
+원본 저장 실패와 AI 실행 실패는 분리한다. 중복 요청은 원본 변경 번호·quota·작업 수를 늘리지 않는다.
+클라이언트 occurredAt은 표시/귀속 입력이며, 서버 비용 제한 기간은 서버 시각으로 정한다.
+클라이언트가 과거 날짜를 보내 AI 비용 제한을 회피할 수 없어야 한다.
+
+## 마감과 Journal 전달
+
+원본 메시지의 created_at 범위 스캔으로 생성 대상을 복원하지 않는다.
+Conversation의 작은 예약/미전달 상태를 인덱스로 조회한다.
+전달에는 recordDayId, userId, displayDate를 사용한다. 마감 전달과 생성 입력 확정은 별개다.
+sourceRevision은 사용자 원본 변경 순번이며 UUID의 시간 정렬이나 커밋 시각 추정에 의존하지 않는다.
+
+세 트랜잭션은 독립적이다. bootstrap에서 둘을 하나의 트랜잭션으로 감싸지 않는다.
+
+1. Conversation publicapi: 마감 대상 선점·CLOSED 전환, 기록 ID와 전달 리스 토큰을 반환하고 커밋.
+2. Journal application: (userId, recordDayId, AUTO)를 멱등키로 최초 생성 작업을 등록하고 커밋.
+3. Conversation publicapi: 전달 리스 토큰을 검증하고 전달 완료를 기록해 커밋.
+
+1 직후 죽으면 전달 리스 만료 후 회수한다.
+2 직후 죽으면 같은 기록을 다시 전달하되 Journal의 멱등키가 중복을 막는다.
+전달 중/작업 대기 중 늦은 원본은 생성 입력 확정 전까지 접수할 수 있다. 추가 전달이나 생성 요청은 만들지 않는다.
+ack는 일기 생성 성공이 아니라 **Journal의 영속 작업 등록 성공**을 뜻한다.
+Journal 생성 실패의 복구는 Journal이 맡는다.
+
+리스 재선점 토큰으로 오래된 전달자의 ack를 거부한다.
+최초 생성 실행 직전에 Conversation이 입력을 확정한다. 이 상태는 전달 ack와 독립적이다.
+범용 이벤트 버스/Outbox 프레임워크는 만들지 않는다.
+이 전달 상태는 업무상 필요한 최소 내구성 장치이며, 인메모리 알림이나 로그로 대체하지 않는다.
+유실 방지를 위해 범위가 제한된 최근 3일 재스캔에 의존하지 않는다.
+
+## 생성과 사용자 수정
+
+Journal의 작업 선점, 외부 호출, 저장은 각각 분리한다.
+
+- 선점: 실행 슬롯 확보 후 짧은 트랜잭션으로 lease/fencing token을 얻는다.
+- 입력 확정: Conversation publicapi가 원본 추가와 같은 잠금 아래 sourceRevision을 한 번 고정하고 커밋한다.
+  이미 확정됐으면 같은 값을 반환한다. 이 시점 이후 해당 기록의 새 원본은 저장하지 않는다.
+- 입력 조회: 확정한 sourceRevision의 원본을 읽는다. 최초 확정 이후 프로세스가 종료돼도 재시도는 같은 입력을 사용한다.
+- 생성: 트랜잭션 밖에서 LLM 호출.
+- 저장: 작업 행을 잠그고 현재 소유권을 검증한 뒤 최초 결과 INSERT와 작업 완료를 함께 커밋한다.
+  기존 결과는 UPDATE하지 않으며 동결 원본 버전이 같아야 재사용할 수 있다. 사용자 수정은 version으로 충돌을 검사한다.
+- 실패: 재시도 가능한 오류만 backoff로 예약. 소진 시 명시적인 실패 상태.
+
+원본 사실은 사용자 발화다. AI 질문을 해석 문맥으로 전달할 경우 역할을 분리하고 AI 진술을 사실로 채택하지 않는다.
+생성한 일기는 즉시 읽을 수 있다. DRAFT/CONFIRMED·확정 API·확정 이벤트는 제거한다.
+사용자가 직접 수정하면 version이 증가한다. 이 version이 사용자 편집 순번이며 별도 카운터는 저장하지 않는다.
+자동 저장은 INSERT 전용이므로 편집 version 비교 후 덮어쓰는 경로 자체를 만들지 않는다. 상세 계약은 [일기 계약](JOURNAL.md)을 따른다.
+LLM 실행 중 사용자가 수정했으면 늦은 생성 결과는 현재 내용을 덮어쓰지 않는다.
+지연 원본 때문에 기존 일기를 자동 갱신하지 않는다. 입력은 생성 실패·재시도에도 다시 열지 않는다.
+
+실패 재시도는 같은 요청을 이어서 실행하는 일이다.
+생성 완료된 일기의 AI 재작성은 제공하지 않는다. 구독자가 직접 제목·본문을 수정한다.
+서버 실패 복구는 유료 기능으로 취급하지 않는다.
+
+## 대화 응답
+
+같은 대화 스트림에서 동시에 하나의 응답만 실행한다.
+작업에는 답할 사용자 원본 순번과 입력 상한을 고정한다.
+재시도 시 뒤에 도착한 발화를 섞지 않는다. 성공한 이전 응답은 후속 작업의 문맥에 포함할 수 있다.
+선행 작업이 재시도 대기 중이면 후속 작업은 순서를 지킨다.
+선행 작업의 최종 실패 후에는 다음 작업이 진행할 수 있다.
+후속 응답이 실행 중이거나 완료된 뒤 과거 실패 응답을 다시 끼워 넣는 요청은 거절하고 새 사용자 요청으로 안내한다.
+현재 서버 계약과 개발 기본값은 [대화 계약](CONVERSATION.md)을 따른다.
+오프라인으로 닫힌 기록에 추가한 발화는 생성 입력 확정 전까지만 접수하며 과거 AI 응답은 생성하지 않는다.
+확정 이후의 미접수 원본은 내부 종결 결과 DISCARDED_INPUT_FROZEN으로 응답한다.
+클라이언트는 사용자 알림 없이 전송 대기열에서 제거한다. 저장된 메시지의 중복 전송은 기존 결과를 반환한다.
+
+메시지 커서는 표시 순서와 구분한다. UUIDv7만으로 다중 인스턴스의 커밋 가시성 순서를 보장한다고 가정하지 않는다.
+증분 스트림 순번은 해당 스트림의 짧은 저장 잠금 안에서 발급하고 커밋 순서를 보장한다.
+기존 작업의 실패/완료 변경은 새 메시지 커서로 추적하지 않는다.
+미완료 작업 ID 목록에 대한 묶음 상태 조회를 제공하고 사용자 소유권을 검증한다.
+
+## 기능 권한과 구독
+
+인증된 UserId는 내부 식별자이며 auth provider ID와 분리한다.
+기존 Google ID Token 검증·짧은 access token·기기별 refresh 회전 설계는 유지한다.
+구독 상태는 JWT에 넣지 않는다. 업무 코드는 기능 권한 인터페이스만 의존한다.
+권한 조회는 사용자 전체 구독 이력을 매번 가져오는 방식 대신 현재 유효 권한만 조회한다.
+초기에는 정확한 DB 조회로 시작하며, 캐시 도입 시 만료·변경 반영 시간을 명시한다.
+
+무료: 무료 요금제의 대화 한도 내 기록, 자동 생성, 조회, 서버 실패 재시도.
+구독: 무료보다 높은 유한한 대화 한도와 생성된 일기 제목·본문 직접 수정.
+JOURNAL_EDIT 권한은 유지한다. 소비처 없는 운영 구독 지급 서비스와 전용 저장 포트는 제거했다. 실제 결제·구독 관리는 별도 제품 작업이다.
+AI 재작성·문체·길이 설정은 제공하지 않는다. 가격과 요금제별 횟수는 미확정이다.
+새 권한만 선언하고 실제 기능은 없는 상태를 완료로 처리하지 않는다.
+
+### 대화 한도와 클라이언트 계약
+
+- 서버는 현재 요금제의 limit, used, remaining, resetAt을 제공한다. 클라이언트가 총한도·남은 횟수·초기화 시각을 사전에 표시한다.
+- remaining이 0이면 클라이언트에서 새 메시지 전송을 막는다. 기록만 저장하는 우회 모드는 제공하지 않는다.
+- 서버도 새 메시지 접수 트랜잭션에서 한도를 검증한다. 여러 기기의 동시 요청에도 한도를 초과해 접수하지 않는다.
+- 한도 초과는 명시적인 QUOTA_EXCEEDED 결과와 현재 사용량으로 반환한다. 늦은 기록의 조용한 폐기와 구분한다.
+- 횟수는 접수된 새 사용자 대화 메시지당 1회다. 중복 전송·서버 자동 재시도·동일 작업의 실패 복구 재시도는 추가 차감하지 않는다.
+- 입력 오류·입력 확정 후 폐기·저장 롤백은 차감하지 않는다. 접수 후 AI 생성 실패가 나더라도 원본은 남고 최초 차감은 유지한다.
+- 자동 일기 생성·일기 조회·일기 수정은 대화 횟수를 소비하지 않는다. 한도 소진 후에도 이미 접수한 원본으로 일기를 생성한다.
+- 초기화 기간은 서버 UTC 일 단위를 기본안으로 두며 제품 확정값은 아니다. 타임존·과거 occurredAt·기기 시각으로 기간을 바꾸지 않는다.
+- 구독 변경 시 같은 기간의 used는 유지하고 새 limit을 적용한다. limit보다 used가 크면 remaining은 0이다.
+- 요금제 한도와 저장 API 남용 제한·공급자 호출 예산은 별도로 집행한다. 대화 한도가 공급자 호출 횟수 자체를 뜻하지는 않는다.
+
+## 저장과 관측
+
+DB에는 원본·현재 결과·멱등성·복구 상태·실제로 집행하는 사용량을 저장한다.
+LLM 지연·사용 토큰 수·오류 분류는 구조화 로그/메트릭으로 보낸다. 원래 예외 메시지/cause 대신 코드 위치와 오류 분류로 조사한다.
+Sentry 등 수집기 장애는 메시지·일기 저장을 실패시키지 않아야 한다.
+비동기 로그 버퍼도 크기를 제한하고 유실 수를 관측한다. 진단 로그 유실과 업무 작업 유실은 다르다.
+
+생성 결과에는 generationId, provider/model, promptVersion 등 재현·지원에 쓰는 최소 메타데이터를 둔다.
+메시지/작업별 토큰 중복 컬럼과 호출별 DB 원장을 제거했다. 작업 문맥을 전달하는 bounded 관측 큐와 역할별 완료 작업 정리는 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.
+정확한 사용자 과금/토큰 상한이 필요해지면 샘플링 로그 대신 별도 정확한 카운터를 설계한다.
+현재 구현은 요청 수 quota만 집행하며 토큰 quota가 구현됐다고 문서화하지 않는다.
+
+일기 본문은 우선 TEXT. 실제 구조화 섹션 소비처가 생길 때 JSON 구조를 도입한다.
+일기 리비전은 조회/복원 기능이 없는 초기 범위에서 제거한다.
+삭제 정책을 구현하지 않은 채 deleted_at/purge_after 컬럼만으로 삭제를 지원한다고 간주하지 않는다.
+탈퇴 시 새 작업 차단과 늦은 결과 저장 차단까지 포함한 삭제 흐름은 공개 출시 전 별도 완료 조건이다.
+
+## 대안과 선택 이유
+
+| 대안                        | 판단                                                                  |
+|-----------------------------|-----------------------------------------------------------------------|
+| Conversation/Journal 통합   | 원자성은 쉬워지지만 생성 부하·책임 경계를 유지하기 위해 선택하지 않음 |
+| 원본 반복 스캔 Planner 유지 | 마지막 타임존 반영과 대량 본문 조회 문제 때문에 교체                  |
+| 인메모리 이벤트만으로 전달  | 프로세스 종료 시 누락되어 선택하지 않음                               |
+| 관리형 큐 즉시 도입         | DB-큐 이중 쓰기와 추가 운영 의존을 만들므로 측정 후 결정              |
+| 모듈별 DB 즉시 분리         | 현재 필요 없음. 공개 계약과 자원 예산을 먼저 분리                     |
+| 모든 호출을 DB에 기록       | 복구와 진단을 분리하고 저장 비용을 줄이기 위해 선택하지 않음          |
+
+PostgreSQL의 SKIP LOCKED는 큐 형태의 다중 소비자 처리에 사용할 수 있다.
+관리형 큐로 교체해도 결과 저장 멱등성과 오래된 결과 차단은 유지해야 한다.
+참고: [PostgreSQL SELECT](https://www.postgresql.org/docs/current/sql-select.html),
+[AWS SQS 전달 특성](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-queue-types.html).
+
+## 현재 구현과의 차이
+
+현재 코드는 실행 역할 분리, RecordDay 귀속·마감 전달·입력 동결, 구독별 서버 대화 한도,
+기록별 응답 순서·입력 상한·증분 커서·묶음 상태 조회를 갖춘다.
+Journal은 생성 즉시 조회·구독 수정·INSERT 전용 자동 저장을 제공하며 본문은 TEXT다.
+확정·리비전·이벤트·미사용 구독 지급 경로는 제거했다. LLM 호출은 진단용 DB INSERT 대신 안전한 구조화 로그·메트릭을 사용한다.
+실행 역할 분리와 RecordDay 마감/전달을 구현했다. Conversation은 사용자 상태 → 기록 순서로 잠그고 입력 귀속·마감·동결을 소유한다. Journal은 기록 ID를 멱등키로 생성 작업과 결과를 소유한다. V1부터 초기 스키마를 구성하고 V3/V4는 이 구조를 사용한다.
+구현·삭제 순서는 [개발 단계](DEVELOPMENT_STAGES.md)를 따른다.

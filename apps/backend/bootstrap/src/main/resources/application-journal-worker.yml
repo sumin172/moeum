@@ -1,0 +1,17 @@
+spring:
+  main:
+    web-application-type: none
+  datasource:
+    hikari:
+      maximum-pool-size: ${JOURNAL_DB_POOL_SIZE:2}
+      minimum-idle: 1
+      pool-name: journal-db
+
+moeum:
+  runtime:
+    roles: journal-worker
+    journal-concurrency: ${JOURNAL_WORKER_CONCURRENCY:2}
+  llm:
+    max-concurrent-calls:
+      gemini: ${JOURNAL_LLM_CONCURRENCY:2}
+      claude: ${JOURNAL_LLM_CONCURRENCY:2}

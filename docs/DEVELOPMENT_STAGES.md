@@ -1,451 +1,228 @@
-# 모음 — 단계별 개발 계획
-
-> 원칙: 지배권을 유지하며 단계별로 완성도를 올린다.
-> 나중에 되돌리기 어려운 것만 초기에 잡고, 나머지는 필요할 때 추가한다.
-
----
-
-## 개발 단계 개요
-
-```
-Stage 0: 골격 (Clean Architecture + DDD 모듈 구조)
-Stage 1: 대화 코어 (메시지 저장 + AI 반응)
-Stage 2: 일기 생성 (하루 마감 + 초안 + 확정)
-Stage 3: 아카이브 (조회 + 검색)
-Stage 4: 게이미피케이션 (스트릭 + 포인트)
-Stage 5: Insight (감정 패턴 + 회고)
-Stage 6: 상용화 (구독 + 결제 + 관리자)
-```
-
----
-
-## Stage 0: 골격
-
-> 목표: 이후 모든 기능이 올바른 위치에 들어가는 구조를 만든다.
-> 기능 없음. 구조만.
-
-**할 것**
-
-Gradle 모듈 (실제 기능이 있는 것만 생성)
-- `app` — 부트스트랩, 설정 조합
-- `identity` — 사용자, 인증
-- `conversation` — 메시지, ConversationDay, Moment
-- `journal` — 일기 생성, 확정
-- `platform` — LLM 추상화, 보안, 관측가능성, 공통 인프라
-- `shared-kernel` — UserId, Money, DomainEvent, TimeProvider
-
-insight, gamification, notification은 해당 Stage에서 모듈 추가.
-논리적 Bounded Context는 설계 문서에 정의하되, Gradle 모듈은 구현 시 생성한다.
-
-각 모듈 내 레이어 패키지
-- `domain/`, `application/command/`, `application/query/`, `application/publicapi/`
-- `infrastructure/`, `interfaces/`
-
-공통
-- PostgreSQL schema 분리 (conversation.*, journal.*, identity.*)
-- Shared Kernel 정의
-- LLM 추상화 인터페이스 (ConversationResponder, JournalGenerator)
-- JWT 인증 구조 (auth provider ID와 내부 UserId 분리)
-- Domain Event / Integration Event 타입 기반 구조 정의
-- 로컬 개발 환경 (Docker Compose: PostgreSQL)
-
-**절대 하지 않을 것**
-- 실제 기능 구현
-- Outbox, Kafka, Redis
-- 모든 클래스에 인터페이스 생성
-
-**이 단계 완료 기준**
-- 앱이 실행된다
-- 모듈 간 크로스 참조 없이 각자 독립된 패키지를 가진다
-- DB schema가 모듈별로 분리되어 있다
-
----
-
-## Stage 1: 대화 코어
-
-> 목표: 사용자가 메시지를 보내면 AI가 반응하고, 기록이 저장된다.
-> 이 단계에서 MVP의 핵심 가치를 검증한다.
-
-**할 것**
-
-Identity
-- 사용자 가입 / OAuth 로그인
-- UserId 생성 (내부 UUID, auth ID와 분리)
-- JWT 발급
-
-Conversation
-- 메시지 수신 및 저장 (occurred_at, timezone, local_date 포함)
-- ConversationDay 자동 생성 및 관리
-- AI 반응 호출 (Gemini 2.5 Flash, 최근 8개 메시지 컨텍스트)
-- AI 응답 저장
-- 오늘 대화 조회 API
-
-**스키마 핵심**
-```sql
-conversation.messages
-  id                UUID PK
-  conversation_day_id UUID
-  user_id           UUID
-  role              TEXT        -- 'user' | 'assistant'
-  content           TEXT
-  occurred_at       TIMESTAMPTZ
-  timezone          TEXT
-  local_date        DATE
-  client_message_id UUID NULL   -- 클라이언트 멱등키 (user 메시지만)
-  response_status   TEXT NULL   -- 'user' 메시지만: PENDING | PROCESSING | COMPLETED | FAILED
-  generation_id     UUID NULL   -- AI 응답에만 값 있음
-  model             TEXT NULL
-  prompt_version    TEXT NULL
-  deleted_at        TIMESTAMPTZ NULL
-
-  UNIQUE (user_id, client_message_id)  -- 중복 메시지 방지
-
-conversation.conversation_days
-  id              UUID PK
-  user_id         UUID
-  local_date      DATE
-  timezone        TEXT          -- 최초 생성 시 고정
-  status          TEXT          -- OPEN | CLOSED
-  source_revision BIGINT DEFAULT 0  -- 메시지 추가·마감 시 증가
-  version         BIGINT        -- @Version 낙관적 락
-  opened_at       TIMESTAMPTZ
-  closed_at       TIMESTAMPTZ NULL
-
-  UNIQUE (user_id, local_date)  -- 하루에 하나
-```
-
-**response_status 사용**
-- user 메시지 저장 시 PENDING
-- AI 응답 생성 시작 시 PROCESSING
-- 응답 저장 완료 시 COMPLETED
-- AI 호출 실패 시 FAILED
-- "어떤 메시지의 답변이 빠졌는지" 쿼리 가능
-- retry/backoff 복잡도가 높아지면 별도 `response_generation_jobs` 테이블로 분리
-
-**client_message_id 사용법**
-```json
-{
-  "clientMessageId": "uuid-generated-on-device",
-  "content": "오늘 정말 피곤했다",
-  "occurredAt": "2026-07-19T14:30:00+09:00"
-}
-```
-네트워크 단절 후 재시도해도 같은 clientMessageId면 중복 저장하지 않는다.
-
-**이 단계에서 Moment는 추출하지 않는다**
-- Moment 추출은 ConversationDay 마감 시 Conversation 모듈이 담당
-- 지금은 메시지 원본 저장이 전부
-
-**이 단계 완료 기준**
-- 실제 대화 흐름이 된다
-- AI 반응 실패 시 메시지는 저장된 상태를 유지한다
-- 메시지에 local_date + timezone이 정상 저장된다
-- 동일 clientMessageId 재전송 시 중복 저장되지 않는다
-
----
-
-## Stage 2: 일기 생성
-
-> 목표: 하루 대화를 일기로 변환하고 확정하는 흐름을 완성한다.
-
-**할 것**
-
-Conversation
-- ConversationDay 마감 트리거 (수동 or 스케줄러, 즉시 반환)
-- ConversationDayClosed 발행 (source_revision 포함)
-- 비동기로 Moment 추출 Job 시작 (LLM 배치 호출)
-- Moment 추출 완료 → MomentsPrepared 발행 (Moment 스냅샷 + source_revision 포함)
-
-Journal
-- **MomentsPrepared 구독** → 일기 생성 Job 생성 (ConversationDayClosed 직접 구독 안 함)
-- 페이로드의 Moment 스냅샷 사용 (Conversation API 재호출 없음)
-- Claude Haiku로 일기 초안 생성
-- 구조화 출력 (JSON Schema 검증)
-- AI 생성 메타데이터 저장
-- 일기 확정
-
-**상태 분리 — Journal 생명주기 ≠ 생성 Job 상태**
-
-```sql
-journal.journals
-  lifecycle_status TEXT  -- DRAFT | CONFIRMED | OUTDATED
-  -- OUTDATED: 확정 후 원본 대화가 추가된 경우
-
-journal.generation_jobs
-  generation_status TEXT  -- PENDING | PROCESSING | COMPLETED | FAILED
-  request_key TEXT UNIQUE -- conversationDayId + type + promptVersion
-  attempt_count INT
-```
-
-하나의 status 컬럼에 합치지 않는다.
-AI가 PROCESSING 중에도 Journal은 DRAFT 상태를 유지할 수 있다.
-
-**스키마 핵심**
-```sql
-journal.journals
-  id                    UUID PK
-  user_id               UUID
-  conversation_day_id   UUID        -- FK 없음, ID 참조만
-  local_date            DATE
-  lifecycle_status      TEXT        -- DRAFT | CONFIRMED | OUTDATED
-  title                 TEXT
-  content               JSONB
-  current_revision      INT DEFAULT 1
-  version               BIGINT      -- @Version 낙관적 락
-  confirmed_at          TIMESTAMPTZ NULL
-  deleted_at            TIMESTAMPTZ NULL
-  purge_after           TIMESTAMPTZ NULL
-
-journal.journal_revisions
-  id            UUID PK
-  journal_id    UUID
-  revision_no   INT
-  title         TEXT
-  content       JSONB
-  edited_by     TEXT    -- 'user' | 'ai'
-  created_at    TIMESTAMPTZ
-
--- journals.title/content는 현재 최신 스냅샷이며,
--- journal_revisions는 변경 이력 보존용이다.
--- 두 값은 동일 트랜잭션에서 갱신한다.
-
-journal.generation_jobs
-  id                  UUID PK
-  journal_id          UUID NULL
-  conversation_day_id UUID
-  source_revision     BIGINT        -- 어떤 ConversationDay 버전 기준으로 생성했는지
-  request_key         TEXT UNIQUE   -- 멱등키: {conversationDayId}:{sourceRevision}:{type}:{promptVersion}
-  generation_status   TEXT          -- PENDING | PROCESSING | COMPLETED | FAILED
-  attempt_count       INT DEFAULT 0
-  provider            TEXT NULL
-  model               TEXT NULL
-  prompt_version      TEXT NULL
-  generation_id       UUID NULL
-  generated_at        TIMESTAMPTZ NULL
-  error_code          TEXT NULL
-  created_at          TIMESTAMPTZ
-
-conversation.moment_sets
-  id                  UUID PK
-  conversation_day_id UUID
-  source_revision     BIGINT        -- 어떤 ConversationDay 버전 기준으로 추출했는지
-  generation_id       UUID
-  model               TEXT
-  prompt_version      TEXT
-  is_current          BOOLEAN DEFAULT true
-  superseded_at       TIMESTAMPTZ NULL
-  created_at          TIMESTAMPTZ
-
-conversation.moments
-  id              UUID PK
-  moment_set_id   UUID              -- MomentSet FK
-  conversation_day_id UUID
-  type            TEXT              -- 'MEAL', 'WORK', 'EXERCISE', ...
-  summary         TEXT
-  emotion         TEXT NULL
-  confidence      FLOAT NULL
-  occurred_at     TIMESTAMPTZ NULL
-  deleted_at      TIMESTAMPTZ NULL
-```
-
-**request_key 구성**
-마감 후 메시지가 추가되면 source_revision이 증가하므로 같은 날짜라도 새 Job이 생성된다.
-동일 조건 재시도 → 기존 키로 멱등 처리. 내용 변경 재생성 → 새 키로 새 Job.
-
-**ConversationDay 마감 후 메시지 추가 정책 (Option 3 채택)**
-- CLOSED 상태에서도 메시지 추가 허용 (원본 기록 우선)
-- Journal이 CONFIRMED 상태였다면 OUTDATED로 변경
-- 사용자에게 재생성 여부 제공
-- 재생성 요청은 generation_jobs의 request_key로 중복 방지
-
-**미확정 일기 정책 (결정 필요)**
-- 선택지: N일 후 자동 확정 or 영구 DRAFT 유지
-- Insight 집계에 DRAFT 포함 여부
-
-**@TransactionalEventListener + @Async 구현 주의사항**
-
-Stage 2 기본: `@TransactionalEventListener(AFTER_COMMIT) + @Async`로 in-process 처리.
-마감 트랜잭션 커밋 후 별도 스레드에서 Moment 추출이 시작되므로, 마감 API가 LLM을 기다리지 않는다.
-
-```kotlin
-@Async
-@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-fun handle(event: ConversationDayClosedV1) {
-    runCatching {
-        momentExtractionProcessor.process(event)
-    }.onFailure { e ->
-        // markFailed 자체가 실패해도 로그는 남아야 한다
-        runCatching { momentJobFailureHandler.markFailed(event, e) }
-            .onFailure { log.error("Moment extraction failure handler failed", it) }
-    }
-}
-```
-
-**리스너 내 트랜잭션 구조 (핵심)**
-
-AFTER_COMMIT 시점에는 원래 트랜잭션이 이미 닫혔다. DB 저장 시 `REQUIRES_NEW`로 새 트랜잭션 명시적 시작.
-LLM 호출 동안 DB 커넥션을 붙잡지 않는 것이 핵심이다.
-
-```
-새 트랜잭션 → MomentExtractionJob PENDING 저장 → 커밋
-트랜잭션 밖 → LLM 호출
-새 트랜잭션 → MomentSet 저장 → Job COMPLETED → MomentsPrepared 발행 → 커밋
-실패 시     → 새 트랜잭션 → Job FAILED, errorCode, attemptCount 기록 → 커밋
-```
-
-**유실 가능성 인지**
-
-in-process 이벤트는 신뢰성 있는 메시지 큐가 아니다.
-서버 종료 타이밍에 따라 ConversationDay가 CLOSED됐지만 Moment 추출이 시작되지 않을 수 있다.
-
-최소 복구 통로로 다음을 제공한다:
-- `MomentExtractionJob`에 FAILED/PENDING 상태 기록
-- MomentSet이 없는 CLOSED ConversationDay 조회 API 또는 스케줄러
-- 수동 재처리 트리거
-
-유실이 제품상 허용되지 않는 시점 → Outbox 도입.
-
-**Outbox 조기 도입 기준**
-ConversationDayClosed 유실로 일기가 생성되지 않고 사용자가 인지 못하는 상황이 실제로 문제라면 Stage 2에서 조기 도입한다.
-
-**이 단계 완료 기준**
-- 대화 → Moment 추출(Conversation) → 일기 생성 → 수정 → 확정 흐름이 작동한다
-- AI 생성 실패 시 FAILED 상태로 기록되고 재시도 가능하다
-- 모바일/웹 동시 수정 시 @Version 낙관적 락이 충돌을 감지한다
-- JournalConfirmed Integration Event가 발행된다 (현재는 in-process)
-
----
-
-## Stage 3: 아카이브 & 조회
-
-> 목표: 쌓인 일기를 날짜별, 감정별로 탐색할 수 있다.
-
-**할 것**
-- 날짜별 일기 목록 API
-- 월간 캘린더 뷰 (일기 유무 표시)
-- 태그 정확 일치 검색 (`journal.journal_tags` INDEX)
-- 제목/본문 기본 LIKE 검색
-- 일기 상세 조회 (원본 대화 연결)
-- 연도별 아카이브
-
-**검색 전략**
-- 태그: 정확 일치 (LIKE 사용 안 함)
-- 제목/본문: LIKE → 필요 시 pg_trgm → FTS로 점진적 확장
-- 벡터 검색 / 전문 검색 엔진: 실제 필요성 확인 후
-
----
-
-## Stage 4: 게이미피케이션
-
-> 목표: 기록 지속성을 유도하는 보상 구조를 추가한다.
-> 이 단계에서 Outbox 패턴을 도입한다 (PointLedger 중복 지급 방지).
-
-**할 것**
-- 연속 기록 스트릭
-- PointLedger (이벤트 기반, source_event_id UNIQUE로 중복 방지)
-- 기본 미션 (첫 기록, 7일 연속 등)
-- 업적 배지
-
-**Outbox 도입 기준 (Stage보다 내구성 요구로 판단)**
-
-기준: 이벤트가 유실되면 업무 결과가 틀어지는 첫 시점.
-Stage 4가 기본이지만, 이전 단계에서 유실 복구가 어렵다고 판단되면 조기 도입한다.
-단순 스케줄러 기반 폴러로 시작 (Debezium, CDC 불필요).
-
-```sql
-gamification.point_ledger
-  id UUID PK
-  user_id UUID
-  amount INT
-  reason TEXT
-  source_event_id UUID UNIQUE  -- 멱등성 보장
-  created_at TIMESTAMPTZ
-```
-
----
-
-## Stage 5: Insight
-
-> 목표: 장기 기록을 바탕으로 패턴과 변화를 보여준다.
-
-**할 것**
-- 감정 변화 주간/월간 분석
-- 활동 패턴 (Claude Sonnet 4.6)
-- 분석 근거 참조 (어떤 일기/Moment 기반인지)
-- 불확실성 표시 필수
-- 분석 숨기기 / 삭제 / 피드백
-
-**이 단계에서 Read Model 도입 검토**
-- 홈 화면에 5개 이상 조회가 필요해지면 HomeDashboardProjection 추가
-
-**반드시 피할 표현**
-```
-❌ 우울증 위험 72%
-✅ 최근 2주간 피곤하다는 기록이 이전보다 많았습니다
-```
-
----
-
-## Stage 6: 상용화
-
-> 목표: 실제 과금과 운영 도구를 추가한다.
-
-**할 것**
-- 구독 플랜 / 결제
-- 사용량 제한 (Rate Limit)
-- 데이터 내보내기 (전체 기록 ZIP)
-- 계정 탈퇴 + 파생 데이터 연쇄 삭제
-- 관리자 도구
-- 모델 라우팅 최적화 (비용 vs 품질)
-- AI 학습 사용 동의 처리
-
----
-
-## 단계별 인프라 도입 계획
-
-| 인프라 | 기본 계획 | 조기 도입 조건 |
-|--------|----------|--------------|
-| PostgreSQL | Stage 0 | — |
-| Redis | Stage 1 이후 | 세션 필요 시 (초기엔 DB 세션) |
-| Outbox 패턴 | Stage 4 | 이벤트 유실이 업무 손실로 이어지는 시점 |
-| Read Model | Stage 5 | N+1 실측 시 |
-| Kafka | MSA 분리 시 | Outbox transport 교체 |
-
----
-
-## 변경하면 나중에 크게 아픈 것 (절대 초기에 잡기)
-
-1. 메시지 스키마 — occurred_at + timezone + local_date + client_message_id
-2. UserId — 내부 UUID, auth ID와 분리
-3. 원본/파생 테이블 분리 — conversation vs journal
-4. AI 생성 메타데이터 — 모든 AI 결과에 (대화 응답 포함)
-5. 데이터 유형별 삭제·보존 정책 — deleted_at + purge_after + Hard Delete 기준 정의
-6. PostgreSQL schema 분리 — 모듈별
-7. ConversationDay.source_revision — OUTDATED 판단 기준
-8. MomentSet 구조 — source_revision 기반 버전 관리
-
-## 나중에 고쳐도 되는 것
-
-- Clean Architecture 레이어 완성도
-- Outbox 도입 시점 (내구성 요구 발생 시)
-- 검색 전략 (LIKE → 전문 검색)
-- 이벤트 인프라 고도화 (Kafka, CDC)  ← 이벤트 계약 버전 필드는 처음부터
-- Projection / CQRS
-- 복수 AI 제공자 구현
-- response_generation_jobs 테이블 분리 (retry 복잡도 증가 시)
-
----
-
-## 구현하면서 결정해도 되는 것
-
-실제 사용 흐름을 본 뒤 결정한다. 지금 확정하지 않아도 된다.
-
-| 항목 | 결정 시점 |
-|------|----------|
-| 미확정 일기 자동 확정 여부 (N일 후 vs 영구 DRAFT) | 사용자 행동 패턴 관찰 후 |
-| Insight 집계에 DRAFT 일기 포함 여부 | Insight 기능 구현 시 |
-| AI 응답 상태를 Message 컬럼으로 유지 vs 별도 Job 테이블 | retry 복잡도 증가 시 |
-| Outbox를 Stage 2에 조기 도입할지 | 이벤트 유실 허용 여부 판단 시 |
-| Moment confidence를 제품 UI에 노출할지 | UX 설계 시 |
-| Redis 도입 여부 | 세션/캐시 실제 필요 발생 시 |
-| 검색을 LIKE → pg_trgm → FTS 중 어디까지 발전시킬지 | 검색 품질 불만 발생 시 |
+# 단계별 구현 계획
+
+이번 계획은 과거 Stage 0~6의 누적 계획을 대체한다.
+DB는 미생성으로 간주한다. 데이터 이전·이중 쓰기·구버전 호환은 범위에서 제외한다.
+각 단계는 독립적인 한국어 이슈와 영어 브랜치로 진행한다.
+이 문서는 원격 GitHub issue를 생성했다는 뜻이 아니다.
+
+## 공통 완료 조건
+
+- 새 경로가 실제 호출부에 연결되어 있다.
+- 대체한 코드·설정·의존성·테스트·문서를 같은 이슈에서 제거했다.
+- 스키마를 바꿨다면 Flyway 초기 파일을 V1부터 최종 상태로 다시 구성하고 신규 DB에서 검증했다.
+- 변경 범위의 단위/통합 테스트와 필요한 실행 역할 기동 검증을 완료했다.
+- 가정·구현·검증 결과를 문서에서 구분했다.
+- 성능 목표를 달성하지 못했으면 범위와 병목을 기록하고 달성으로 표시하지 않았다.
+- DB/volume 파괴, Git commit/push/원격 issue·PR 변경은 이 완료 조건에 포함하지 않는다.
+
+## R0 — 하루 기록·마감 정책 및 대화/일기 부하 격리 기준 확정
+
+브랜치: docs/record-day-worker-design
+상태: 이번 작업의 설계 산출물. 운영 코드·스키마는 미변경.
+
+목적:
+하루 마감과 생성 책임, 비동기 전달의 복구, 사용자 경험과 검증 규모를 구현 가능한 기준으로 정한다.
+
+산출물:
+
+- [아키텍처](ARCHITECTURE.md): 소유권, 트랜잭션, 마감 전달, 실행 역할.
+- [하루 기록](RECORD_DAY.md): 시간·타임존·오프라인·경합·수정 시나리오.
+- [부하 기준](CAPACITY.md): 목표 부하, 용량 산식, 장애 시험, 성능 가정.
+- [개발 원칙](PRINCIPLES.md): 데드 코드 제거, 새 Flyway 이력, 관측/저장 기준.
+- 이 문서: 후속 이슈별 범위·제거 대상·완료 기준.
+
+완료 기준:
+주요 시나리오와 실패 복구 규칙이 명시되고 후속 작업을 착수할 수 있다.
+미확정 제품 숫자와 외부 용량은 명시적으로 가정으로 남긴다.
+이 문서 작성이 사용자 확정·실행 검증을 대신하지 않는다.
+
+## R1 — API·대화 응답·일기 생성 실행 역할 분리
+
+브랜치: refactor/isolate-worker-roles
+의존: R0.
+상태: 실행 역할/자원 상한과 관련 데드 코드 제거 완료. 현재 전체 검증 결과는 [실행 역할](WORKER_ROLES.md)을 따른다.
+역할 격리 시험의 범위와 운영 검증의 한계는 [실행 역할](WORKER_ROLES.md)을 따른다.
+
+작업:
+
+- API, conversation-worker, journal-worker를 독립 실행할 수 있게 설정과 빈 등록을 분리한다.
+- API는 AI 실행·스케줄러를 등록하지 않는다. 워커는 업무 HTTP 엔드포인트를 제공하지 않는다.
+- 대화/일기별 executor·실행 슬롯·DB pool 예산·LLM 호출 예산을 나눈다.
+- 스케줄러의 긴 실행 루프를 제거하고 실행 슬롯 확보 후 필요한 만큼만 선점한다.
+- 같은 provider의 인스턴스 합산 호출 제한과 최대 replica 수의 설정 관계를 문서화한다.
+- 새 하루 모델 없이 현재 작업으로도 실행 격리를 검증한다.
+
+제거:
+worker.enabled, API의 즉시 AI 실행 경로, 불필요해진 ResponseJobTrigger와 관련 테스트/설정.
+대체한 스케줄러 동기 생성 루프.
+
+검증:
+
+- 역할별 기동 시 허용된 endpoint/worker만 존재하는지 확인.
+- Journal에 느린 fake provider를 주입해도 대화 poll/HTTP가 진행되는지 확인.
+- 여러 워커의 선점·리스 회수·fencing 기존 보장 유지.
+- bounded 동시 실행과 DB pool 총량 설정 검증.
+
+완료:
+Journal 프로세스를 중단해도 API·대화가 동작하며 재기동 후 일기 작업이 회수된다.
+단일 역할 분리 결과를 기록한다. 전체 규모 성능 승인은 R6에서 한다.
+
+## R2 — 하루 기록과 마감 예약 및 Journal 전달 모델 구현
+
+브랜치: refactor/#46-record-day-scheduling
+상태: 구현 완료. RecordDay 귀속·마감·독립 전달·입력 동결과 기록 ID API, 초기 스키마 재구성, 대체 경로의 데드 코드 제거를 완료했다. 검증 범위와 현재 전체 테스트 결과는 WORKER_ROLES를 따른다. OS 강제 종료·실제 공급자·대규모 부하 검증은 R6 범위다.
+의존: R1. 날짜 표시/미래 입력 허용 오차 등은 RECORD_DAY의 명시된 가정을 적용하되 구현 시작 시 확인한다.
+
+작업:
+
+- Conversation에 RecordDay, 사용자 기록 상태, 마감 설정 스냅샷을 도입한다.
+- 메시지 저장과 원본 순번·마지막 장소·마감 예약·응답 작업 등록을 원자적으로 처리한다.
+- Journal의 내부 키와 전달 계약을 displayDate에서 recordDayId로 교체한다.
+- 최초 생성 직전 원본 추가와 동일한 잠금으로 sourceRevision을 확정하고 재시도에도 입력을 다시 열지 않는다.
+- 마감 선점 → Journal 멱등 등록 → Conversation ack의 독립 트랜잭션을 구현한다.
+- 전달 중단·입력 확정 전 지연 원본·다중 워커의 중복 등록과 오래된 ack를 처리한다.
+- 입력 확정 후 미접수 원본은 저장·quota 소비 없이 DISCARDED_INPUT_FROZEN으로 종결한다.
+- 클라이언트 계약에 알림 없는 전송 대기열 제거와 기존 저장 메시지 재전송의 구분을 명시한다.
+- 날짜 기반 외부 조회는 필터로 정리하고 ID 기반 상세 계약을 제공한다. 구 API alias는 남기지 않는다.
+- 이 단계에서는 기존 일기 확정/수정 흐름을 새 키로 연결한다. 제품 상태 단순화는 R4에서 한다.
+
+제거:
+findCreatedBetween/findActiveDays, GenerationPlanner의 원본 스캔·3일 reconciliation,
+소비처가 사라진 ActiveDay DTO·created_at 배치 인덱스,
+dayDate 유일키 의존·기존 DayPreference의 중복 경계 계산.
+이름만 바꾸어 기존 스캔을 유지하지 않는다.
+
+검증:
+RECORD_DAY D01~D12, D14~D18, D21~D26의 단위/실제 PostgreSQL 통합 테스트.
+timezone 이동·DST·오프라인·설정 변경·마감과 입력 경합·전달 지점별 프로세스 종료.
+멱등 등록 충돌은 해당 제약만 처리하며 모든 DataIntegrityViolation을 중복으로 삼지 않는다.
+
+완료:
+원본 본문을 스캔하지 않고 마감·전달·복구가 가능하다.
+최신 사용자 장소로 예약이 갱신되고 중복·누락 없이 생성 대상이 Journal에 남는다.
+
+## R3 — 대화 응답 순서·입력 범위·상태 조회 정비
+
+브랜치: refactor/#49-conversation-response-ordering
+상태: 구현·데드 코드 삭제·초기 스키마 재구성 완료. 현재 전체 검증 결과는 WORKER_ROLES를 따른다. 실제 PostgreSQL 동시 접수·다중 워커 선점·리스 회수·응답 입력 범위·구독 변경·독립 상태 조회를 검증했다. 클라이언트 화면과 대규모 운영 부하 검증은 포함하지 않는다. 현재 계약은 [대화 계약](CONVERSATION.md)을 따른다.
+의존: R2.
+
+작업:
+
+- 대화 스트림별 하나의 활성 응답과 작업별 입력 상한을 보장한다.
+- 선행 재시도 대기/최종 실패/후속 완료 이후 재요청의 순서를 정의대로 처리한다.
+- 대화 문맥은 필요한 범위만 DB에서 읽고 입력 예산을 적용한다.
+- 미완료 작업 ID 묶음 상태 조회와 독립적인 메시지 스트림 커서를 제공한다.
+- 서버 수신 시각 기준 저장 요청 제한·AI 요청 quota·자동 실행 예산을 분리한다.
+- Identity의 현재 요금제로 무료·구독의 유한한 대화 한도를 적용하고 limit/used/remaining/resetAt 조회를 제공한다.
+- 클라이언트가 한도를 사전 표시·전송 차단할 계약을 정의하고 서버도 원자적으로 검증한다.
+- 한도 소진 시 원본만 저장하지 않는다. 중복 전송·서버 자동/실패 복구 재시도는 추가 차감하지 않는다.
+- 오프라인 과거 원본에 새 AI 응답을 무조건 생성하지 않는다.
+
+제거:
+실행 시점 하루 전체 재조회에 의존하는 응답 경로,
+UUID만으로 커밋 순서를 추정하는 커서,
+신규 메시지 조회에만 의존하는 작업 상태 갱신 계약,
+AiQuotaGuard/AiQuotaProperties, 접수·재시도를 함께 세던 AI 시도 카운터와 QUOTA_EXCEEDED 실패 작업 경로.
+현재 구독 조회로 대체한 전체 구독 이력 조회와 사용처가 사라진 isActive 메서드.
+
+검증:
+연속 발화·재시도·다중 인스턴스·동시 커밋·후속 완료 후 과거 재요청.
+새 메시지 없이 FAILED만 바뀌는 경우의 상태 노출.
+중복 전송이 quota/원본 순번을 증가시키지 않는지 확인.
+RECORD_DAY D27~D30: 한도 소진·여러 기기의 마지막 잔여 횟수 경합·실패 재시도·구독 변경을 검증한다.
+
+완료:
+대화 순서와 작업 상태가 서버 재시작·실패·다중 워커에서도 일관된다.
+
+## R4 — 일기 자동 보관·구독 수정 정책 구현
+
+브랜치: refactor/#51-automatic-journal-lifecycle
+상태: 구현·초기 V2~V4 스키마 재구성·관련 데드 코드 삭제와 R1~R4 잔여 항목 점검 완료. 전체 검증 결과는 [실행 역할](WORKER_ROLES.md)을 따른다. 신규 PostgreSQL에서 즉시 조회·구독 수정·동시 수정 충돌·늦은 생성 결과 차단·원본 버전 불일치·무료 실패 복구 동일 입력/무차감을 검증했다. 실제 공급자·대규모 부하·독립 JVM 강제 종료는 R6 범위다. 현재 계약은 [일기 계약](JOURNAL.md)을 따른다.
+의존: R2, R3.
+
+작업:
+
+- 생성 즉시 보관하고 제목·본문 직접 수정은 JOURNAL_EDIT 구독 권한으로 제공한다.
+- 사용자 수정은 version으로 충돌을 검사하고 자동 생성은 소유권 검사·INSERT 전용 저장으로 기존 결과를 보존한다. 동결 원본 버전이 다른 결과는 거절한다.
+- 늦은 원본으로 기존 일기를 자동 갱신하지 않는다. 입력 확정 후 폐기 정책과 수정본 보호를 유지한다.
+- 서버 실패 복구 재시도는 같은 생성 작업·확정 입력으로 제공하고 대화 횟수를 추가 차감하지 않는다.
+- AI 재작성·문체·길이 설정은 구현하지 않는다.
+- 일기 본문을 TEXT로 단순화하고 사용자 이력 조회가 없는 전체 리비전 저장을 제거한다.
+
+제거:
+confirm API/서비스/DTO, DRAFT/CONFIRMED 전이,
+JournalConfirmedV1, 소비처 없는 IntegrationEvent 공통 계약/테스트 recorder,
+GrantComplimentarySubscriptionService와 전용 저장 포트/어댑터/팩터리,
+사용처 없는 Journal deleted_at/purge_after,
+SubscriptionSource와 구독 source 필드/컬럼, 메시지 localDate/deletedAt와 미사용 ConversationResponse.provider,
+사용하지 않는 Spring Security/Testcontainers JUnit 테스트 의존성,
+journal_revisions 및 관련 모델/포트/어댑터/테스트,
+JournalContentCodec과 body만 담는 JSON 변환.
+
+검증:
+RECORD_DAY D13/D19/D31과 일기 생성·구독 수정·지연 원본 폐기 전체 흐름.
+생성 중 편집, 과거 결과 지연 도착, 무료/구독 권한, 실패 재시도 무료 제공.
+이력 삭제 후에도 현재 결과와 사용자 수정본 보호가 유지되는지 확인.
+
+완료:
+사용자가 확정하지 않아도 일기가 완성되며 어떤 자동 작업도 사용자 수정본을 덮어쓰지 않는다.
+
+## R5 — 관측 데이터 분리와 저장 수명 정리
+
+브랜치: refactor/telemetry-and-retention
+의존: R4.
+상태: 관측·완료 작업 정리 구현과 관련 데드 코드·초기 스키마 재구성 완료. 관측 수집기와 콘솔 전송의 정체를 각각 격리하는 비차단 버퍼를 구현했다. 전체 백엔드 테스트 155개 통과(실패·오류·생략 0개). JSON 로그·JMX 메트릭 경로, 수집기/콘솔 정체·유실, 원문 미노출과 정리 후 멱등성·수정본 보존을 검증했다. 계약과 외부 수집·부하 검증의 한계는 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.
+
+작업:
+
+- LLM 호출 관측을 구조화 로그/메트릭으로 연결하고 실제 수집 경로를 검증한다.
+- 작업 ID를 안정적인 traceId로 사용하고 job/record/attempt/generation ID가 비동기 실행에서도 이어지게 한다.
+- 본문·인증 토큰·인증 정보가 로그와 예외에 포함되지 않게 한다. 사용 토큰 수는 관측 수치로 제공한다.
+- 관측 수집 실패 시 bounded buffer와 유실 수를 제공한다.
+- 완료 작업 보존 기간을 설정하고 활성·실패 작업을 제외한 작은 batch 정리를 구현한다.
+- 공급자/프롬프트 등 결과 메타데이터와 실제 사용량 집행에 필요한 상태만 남긴다.
+
+제거:
+platform.llm_invocations와 platform 스키마, 원장 전용 포트/엔티티/테스트,
+platform의 JPA 플러그인·의존성,
+결과·작업의 미사용 토큰 중복 컬럼, 일기 작업의 중복 생성 메타데이터,
+사용자 ID·공급자·토큰 수만 전달하던 소비처 없는 LLM/생성 계약 필드와 인자,
+관측 경로 교체 후 소비처가 사라진 전달 필드,
+구형 문서·설정·의존성.
+로그로 대체한다며 업무 재시도·멱등성 상태를 함께 지우지 않는다.
+
+검증:
+LLM timeout/429/파싱 실패를 수집기에서 jobId로 추적.
+원문 미노출, 수집기 장애 중 메시지 처리, 정리 작업 중 활성 데이터 보존.
+현재 결과의 원본 버전/생성 식별자가 작업 정리 뒤에도 유지되는지 확인.
+
+완료:
+호출마다 진단용 DB INSERT를 하지 않고도 장애 원인과 작업 상태를 연결해 조사할 수 있다.
+
+## R6 — 사용자 급증·마감 집중·장애 복구 검증
+
+브랜치: test/growth-and-failure-capacity
+의존: R1~R5.
+
+작업:
+CAPACITY의 P0→P1→P2 순으로 실제 실행 경로의 부하를 올린다.
+정상·긴 호출·실패·워커 종료·마감 집중·누적 데이터·정리 작업을 측정한다.
+실제 공급자의 작은 스모크와 공급자 용량 확인을 fake 시험과 분리한다.
+
+검증:
+API p95/p99, batch 추가 시 대화 지연 변화, backlog 배수 시간,
+DB query/전송량/pool/잠금, 자원 상한, 결과 중복·누락·수정본 보호.
+운영 사양·설정·데이터 크기·공급자 한도를 재현 가능하게 기록한다.
+
+완료:
+검증한 규모와 못 버틴 규모를 구분한 보고서가 있고 배포 상한을 결정할 수 있다.
+P1 실패면 병목 수정 후 재시험하며 단순히 이슈를 닫지 않는다.
+P2는 탐색 목표이므로 실패 시 증설/구조 변경 조건을 후속 이슈로 구체화한다.
+
+## 이후 제품 작업
+
+재설계 중 아카이브·Insight·보상으로 범위를 넓히지 않는다.
+재설계 후 최소 클라이언트와 날짜 목록·원본 조회 경험을 연결해 실제 사용을 검증한다.
+실제 결제·계정 삭제·데이터 내보내기·백업/복구·배포 보안은 공개 서비스 출시 전 별도 이슈로 완성한다.
+삭제 필드나 구독 모델의 존재만으로 이 기능들이 완료됐다고 간주하지 않는다.

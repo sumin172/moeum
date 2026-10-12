@@ -1,0 +1,58 @@
+package com.moeum.identity.infrastructure.jpa
+
+import com.moeum.identity.domain.SubscriptionRepository
+import com.moeum.identity.domain.model.Plan
+import com.moeum.identity.domain.model.Subscription
+import com.moeum.identity.domain.model.SubscriptionId
+import com.moeum.kernel.UserId
+import jakarta.persistence.Column
+import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
+import jakarta.persistence.Id
+import jakarta.persistence.Table
+import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.stereotype.Component
+import java.time.Instant
+import java.util.UUID
+
+@Entity
+@Table(name = "subscriptions", schema = "identity")
+class SubscriptionJpaEntity(
+    @Id
+    val id: UUID,
+    @Column(name = "user_id", nullable = false)
+    val userId: UUID,
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    val plan: Plan,
+    @Column(name = "starts_at", nullable = false)
+    val startsAt: Instant,
+    @Column(name = "ends_at")
+    val endsAt: Instant?,
+    @Column(name = "revoked_at")
+    val revokedAt: Instant?,
+    @Column(name = "created_at", nullable = false)
+    val createdAt: Instant,
+)
+
+interface SubscriptionJpaRepository : JpaRepository<SubscriptionJpaEntity, UUID> {
+    @org.springframework.data.jpa.repository.Query(value = """
+        SELECT * FROM identity.subscriptions WHERE user_id=:userId AND starts_at<=:now
+            AND (ends_at IS NULL OR ends_at>:now) AND revoked_at IS NULL
+        """, nativeQuery = true)
+    fun findActiveByUserId(userId: UUID, now: Instant): List<SubscriptionJpaEntity>
+}
+
+@Component
+class SubscriptionRepositoryImpl(
+    private val jpaRepository: SubscriptionJpaRepository,
+) : SubscriptionRepository {
+
+    override fun findActiveByUserId(userId: UserId, now: Instant): List<Subscription> =
+        jpaRepository.findActiveByUserId(userId.value, now).map { it.toDomain() }
+
+}
+
+private fun SubscriptionJpaEntity.toDomain(): Subscription =
+    Subscription(SubscriptionId(id), UserId(userId), plan, startsAt, endsAt, revokedAt, createdAt)
