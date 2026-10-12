@@ -42,9 +42,9 @@ class ConversationExceptionHandler {
     }
 
     @ExceptionHandler(AiQuotaExceededException::class)
-    fun handleQuotaExceeded(e: AiQuotaExceededException): ResponseEntity<ErrorResponse> {
+    fun handleQuotaExceeded(e: AiQuotaExceededException): ResponseEntity<QuotaErrorResponse> {
         log.warn("AI 응답 quota 초과: {}", e.message)
-        return error(HttpStatus.TOO_MANY_REQUESTS, ConversationErrorCode.QUOTA_EXCEEDED)
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(QuotaErrorResponse("QUOTA_EXCEEDED", "대화 한도를 초과했습니다", e.quota))
     }
 
     @ExceptionHandler(RecordDayNotFoundException::class)
@@ -53,6 +53,14 @@ class ConversationExceptionHandler {
     @ExceptionHandler(RecordAssignmentConflictException::class)
     fun handleRecordConflict(): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse(code = "RECORD_ASSIGNMENT_CONFLICT", message = "발화의 기록 구간이 일치하지 않습니다"))
+    @ExceptionHandler(com.moeum.conversation.domain.ResponseSupersededException::class)
+    fun superseded(): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse(code="RESPONSE_SUPERSEDED",message="후속 응답이 시작됐습니다. 새 메시지로 이어서 대화해주세요"))
+    @ExceptionHandler(com.moeum.conversation.domain.ConversationRateExceededException::class)
+    fun rateExceeded(): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ErrorResponse(code="MESSAGE_RATE_EXCEEDED",message="잠시 후 다시 전송해주세요"))
     private fun error(status: HttpStatus, code: ConversationErrorCode): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(status).body(ErrorResponse(code = code.code, message = code.description))
 }
+
+data class QuotaErrorResponse(val code: String, val message: String, val quota: com.moeum.conversation.domain.ConversationQuota)

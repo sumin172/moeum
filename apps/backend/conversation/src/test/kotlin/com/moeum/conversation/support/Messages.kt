@@ -15,6 +15,7 @@ fun userMessage(
     recordDayId: RecordDayId,
     timezone: String = "Asia/Seoul",
     createdAt: Instant = occurredAt,
+    sourceSequence: Long = 1,
 ): Message =
     Message.userMessage(
         id = MessageId.generate(),
@@ -24,7 +25,7 @@ fun userMessage(
         timezone = timezone,
         localDate = occurredAt.atZone(ZoneId.of(timezone)).toLocalDate(),
         recordDayId = recordDayId,
-        sourceSequence = 1,
+        sourceSequence = sourceSequence,
         clientMessageId = UUID.randomUUID(),
         now = createdAt,
     )

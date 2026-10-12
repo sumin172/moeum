@@ -44,4 +44,6 @@ class ResponseJobJpaEntity(
     val createdAt: Instant,
     @Column(name = "updated_at", nullable = false)
     val updatedAt: Instant,
+    @Column(name = "input_source_revision", nullable = false)
+    val inputSourceRevision: Long,
 )

@@ -25,6 +25,7 @@ class ResponseJobExecutor(
     private val markResponseFailedService: MarkResponseFailedService,
     responseJobProperties: ResponseJobProperties,
     private val timeProvider: TimeProvider,
+    private val limits: com.moeum.conversation.infrastructure.config.ConversationLimitProperties,
 ) {
     private val log = LoggerFactory.getLogger(ResponseJobExecutor::class.java)
     private val policy = responseJobProperties.toPolicy()
@@ -46,7 +47,7 @@ class ResponseJobExecutor(
         try {
             val userMessage = messageRepository.findByUserIdAndId(job.userId, job.userMessageId)
                 ?: error("응답 작업의 유저 메시지가 없습니다: messageId=${job.userMessageId.value}")
-            val context = messageRepository.findAllByUserIdAndRecordDayId(job.userId, job.recordDayId)
+            val context = messageRepository.findContext(job.userId, job.recordDayId, job.inputSourceRevision, limits.contextMessageLimit)
             val response = conversationResponder.respond(job.userId, context)
             saveGeneratedResponseService.save(job, userMessage, response)
         } catch (_: OptimisticLockingFailureException) {

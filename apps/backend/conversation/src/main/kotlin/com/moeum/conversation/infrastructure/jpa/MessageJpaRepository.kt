@@ -10,20 +10,22 @@ interface MessageJpaRepository : JpaRepository<MessageJpaEntity, UUID> {
 
     fun findByUserIdAndClientMessageId(userId: UUID, clientMessageId: UUID): MessageJpaEntity?
 
-    fun findByUserIdAndRecordDayIdAndIdGreaterThanOrderByIdAsc(
+    fun findByUserIdAndRecordDayIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
         userId: UUID,
         recordDayId: UUID,
-        id: UUID,
+        streamSequence: Long,
         pageable: Pageable,
     ): List<MessageJpaEntity>
 
-    fun findByUserIdAndRecordDayIdOrderByIdDesc(
+    fun findByUserIdAndRecordDayIdOrderByStreamSequenceDesc(
         userId: UUID,
         recordDayId: UUID,
         pageable: Pageable,
     ): List<MessageJpaEntity>
 
-    fun findByUserIdAndRecordDayIdOrderByIdAsc(userId: UUID, recordDayId: UUID): List<MessageJpaEntity>
+    fun findByUserIdAndRecordDayIdAndSourceSequenceLessThanEqualOrderBySourceSequenceDescRoleAsc(
+        userId: UUID, recordDayId: UUID, sourceRevision: Long, pageable: Pageable,
+    ): List<MessageJpaEntity>
 
     fun findByUserIdAndRecordDayIdAndRoleAndSourceSequenceLessThanEqualOrderByOccurredAtAscSourceSequenceAsc(
         userId: UUID, recordDayId: UUID, role: com.moeum.conversation.domain.model.MessageRole, sourceRevision: Long,

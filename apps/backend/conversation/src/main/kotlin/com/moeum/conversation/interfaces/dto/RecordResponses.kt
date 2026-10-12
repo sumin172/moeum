@@ -9,9 +9,9 @@ data class RecordSummaryResponse(val recordDayId: UUID, val displayDate: LocalDa
         fun from(record: RecordDay) = RecordSummaryResponse(record.id.value,record.displayDate,record.startAt,record.closeAt,record.closedAt,record.frozenSourceRevision != null)
     }
 }
-data class RecordConversationResponse(val record: RecordSummaryResponse, val messages: List<MessageResponse>) {
+data class RecordConversationResponse(val record: RecordSummaryResponse, val messages: List<MessageResponse>, val nextCursor: Long?) {
     companion object {
         fun from(result: RecordMessages) = RecordConversationResponse(RecordSummaryResponse.from(result.record),
-            result.messages.map { MessageResponse.from(it,result.responseJobs[it.id]) })
+            result.messages.map { MessageResponse.from(it,result.responseJobs[it.id],result.responseJobs[it.id]?.let { job -> job.retryable && job.id !in result.supersededIds }) }, result.nextCursor)
     }
 }

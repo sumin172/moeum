@@ -1,6 +1,8 @@
 package com.moeum.conversation.application.command
 
-import com.moeum.conversation.domain.AiQuotaExceededException
+import com.moeum.conversation.domain.ResponseSupersededException
+import com.moeum.conversation.domain.model.RecordDay
+import java.time.ZoneId
 import com.moeum.conversation.domain.MessageNotFoundException
 import com.moeum.conversation.domain.ResponseAlreadyCompletedException
 import com.moeum.conversation.domain.model.ResponseJob
@@ -20,10 +22,11 @@ class RetryResponseServiceTest {
     private val now = Instant.parse("2026-08-08T10:00:00Z")
     private val messageRepository = InMemoryMessageRepository()
     private val jobRepository = InMemoryResponseJobRepository()
-    private val usage = InMemoryAiUsageRepository()
 
-    private fun service(quotaLimit: Int = 20) =
-        RetryResponseService(messageRepository, jobRepository, quotaGuard(quotaLimit, usage), FixedTimeProvider(now))
+    private val records = InMemoryRecordDayRepository().also {
+        it.insert(RecordDay.create(userId,now,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,null).copy(id=recordDayId))
+    }
+    private fun service() = RetryResponseService(messageRepository, jobRepository, records, FixedTimeProvider(now))
 
     private fun messageWithJob(transform: (ResponseJob) -> ResponseJob): ResponseJob {
         val message = messageRepository.append(userMessage(userId, "질문", now, recordDayId))
@@ -33,7 +36,7 @@ class RetryResponseServiceTest {
     private fun failed(job: ResponseJob) = job.failedPermanently("ConversationResponseException", now)
 
     @Test
-    fun `최종 실패한 응답을 다시 요청하면 바로 실행할 수 있는 상태로 되돌리고 quota를 1 쓴다`() {
+    fun `최종 실패한 응답을 재요청하면 즉시 실행 가능한 대기 상태로 되돌린다`() {
         val job = messageWithJob(::failed)
 
         val result = service().retry(userId, job.userMessageId)
@@ -41,7 +44,6 @@ class RetryResponseServiceTest {
         assertThat(result.responseJob.state.status).isEqualTo(JobStatus.PENDING)
         assertThat(result.responseJob.state.nextAttemptAt).isEqualTo(now)
         assertThat(result.responseJob.failureReason).isNull()
-        assertThat(usage.counts[userId to now.atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate()]).isEqualTo(1)
     }
 
     @Test
@@ -51,7 +53,6 @@ class RetryResponseServiceTest {
         val result = service().retry(userId, job.userMessageId)
 
         assertThat(result.responseJob).isEqualTo(job)
-        assertThat(usage.counts).isEmpty()
     }
 
     @Test
@@ -63,11 +64,11 @@ class RetryResponseServiceTest {
     }
 
     @Test
-    fun `하루 quota를 넘겼으면 거부한다`() {
+    fun `후속 응답이 시작되면 과거 실패 응답의 재요청을 거절한다`() {
         val job = messageWithJob(::failed)
-
-        assertThatThrownBy { service(quotaLimit = 0).retry(userId, job.userMessageId) }
-            .isInstanceOf(AiQuotaExceededException::class.java)
+        val laterMessage = messageRepository.append(userMessage(userId,"다음 질문",now,recordDayId,sourceSequence=2))
+        jobRepository.save(ResponseJob.pending(laterMessage,now).completed(now))
+        assertThatThrownBy { service().retry(userId,job.userMessageId) }.isInstanceOf(ResponseSupersededException::class.java)
         assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.FAILED)
     }
 

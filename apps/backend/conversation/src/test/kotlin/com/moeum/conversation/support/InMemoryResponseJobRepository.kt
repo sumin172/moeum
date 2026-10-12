@@ -29,9 +29,19 @@ class InMemoryResponseJobRepository : ResponseJobRepository {
     override fun findAllByUserIdAndUserMessageIdIn(userId: UserId, userMessageIds: Collection<MessageId>): List<ResponseJob> =
         jobs.values.filter { it.userId == userId && it.userMessageId in userMessageIds }
 
+    override fun hasLaterStarted(job: ResponseJob) =
+        jobs.values.any { it.recordDayId==job.recordDayId && it.inputSourceRevision>job.inputSourceRevision && it.state.status in listOf(JobStatus.PROCESSING,JobStatus.COMPLETED) }
+    override fun supersededIds(userId: UserId, ids: Collection<ResponseJobId>) =
+        jobs.values.filter { it.userId==userId && it.id in ids && hasLaterStarted(it) }.map { it.id }.toSet()
+    override fun findAllByUserIdAndIdIn(userId: UserId, ids: Collection<ResponseJobId>) =
+        jobs.values.filter { it.userId==userId && it.id in ids }
+
     override fun claimNext(now: Instant, leaseExpiresAt: Instant): ResponseJob? =
         jobs.values
-            .filter { isClaimable(it, now) }
+            .filter { isClaimable(it, now) && jobs.values.none { earlier ->
+                earlier.recordDayId==it.recordDayId && earlier.inputSourceRevision<it.inputSourceRevision &&
+                    earlier.state.status in listOf(JobStatus.PENDING,JobStatus.PROCESSING)
+            } }
             .minByOrNull { it.state.nextAttemptAt }
             ?.let { claimed(it, now, leaseExpiresAt) }
 
