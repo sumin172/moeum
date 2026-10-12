@@ -58,7 +58,7 @@ class ConversationOrderingIntegrationTest {
     private fun command(content: String="기억") = SaveMessageCommand(UUID.randomUUID(),content,now,"Asia/Seoul")
     private fun accepted(user: UserId, cmd: SaveMessageCommand=command()) = save.save(user,cmd) as SaveMessageResult.Accepted
     private fun headers(jwt: String) = HttpHeaders().apply { setBearerAuth(jwt);contentType=MediaType.APPLICATION_JSON }
-    private fun answer() = ConversationResponse(UUID.randomUUID(),"응답","fake","test",1,1)
+    private fun answer() = ConversationResponse(UUID.randomUUID(),"응답","fake","test")
 
     @Test fun `남은 한도 하나에 동시 요청해도 하나만 저장되고 재전송은 추가 차감하지 않는다`() {
         val user = UserId.generate()

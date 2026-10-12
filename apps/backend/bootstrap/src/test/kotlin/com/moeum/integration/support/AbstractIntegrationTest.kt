@@ -43,13 +43,15 @@ import java.util.UUID
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     // 재시도 흐름을 몇 초 안에 끝까지 검증할 수 있도록 응답 작업 backoff와 poll 주기를 줄인다
     properties = [
+        "spring.jmx.enabled=true",
+        "moeum.jobs.retention.initial-delay=PT1H",
         "moeum.journal.generation-job.initial-delay=PT1H",
         "moeum.journal.delivery.initial-delay=PT1H",
         "moeum.journal.generation-job.max-attempts=2",
         "moeum.journal.generation-job.backoff=200ms",
         "moeum.conversation.response-job.backoff=200ms",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
-        // 실제 provider 없이 LlmClient → 호출 원장 경로를 검증하기 위한 용도(FakeLlmProvider)
+        // 실제 provider 없이 LlmClient → 관측 수집 경로를 검증하기 위한 용도(FakeLlmProvider)
         "moeum.llm.routes.integration-test.provider=fake",
         "moeum.llm.routes.integration-test.model=fake-model",
         "moeum.llm.routes.integration-test.max-output-tokens=100",

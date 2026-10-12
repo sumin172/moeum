@@ -3,28 +3,26 @@ package com.moeum.platform.llm
 import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
 
-import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UuidV7
-import com.moeum.platform.llm.ledger.LlmInvocation
-import com.moeum.platform.llm.ledger.LlmInvocationLedger
+import com.moeum.platform.observability.LlmCallEvent
+import com.moeum.platform.observability.LlmTelemetry
+import com.moeum.platform.observability.SafeFailure
+import com.moeum.platform.observability.WorkTrace
 import com.moeum.platform.llm.provider.LlmProvider
 import com.moeum.platform.llm.provider.LlmProviderResult
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
-// 용도(purpose)별 라우팅 → provider별 동시 호출 상한 → provider 호출(서킷브레이커는 provider에) → 호출 원장 기록.
+// 용도(purpose)별 라우팅 → provider별 동시 호출 상한 → provider 호출(서킷브레이커는 provider에) → 비차단 관측 기록.
 @ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @Component
 class RoutingLlmClient(
     providers: List<LlmProvider>,
     private val properties: LlmProperties,
-    private val ledger: LlmInvocationLedger,
-    private val timeProvider: TimeProvider,
+    private val telemetry: LlmTelemetry,
 ) : LlmClient {
 
-    private val log = LoggerFactory.getLogger(RoutingLlmClient::class.java)
     private val providersByName = providers.associateBy { it.name }
     private val permits = providersByName.keys.associateWith {
         Semaphore(properties.concurrentLimit(it))
@@ -45,68 +43,57 @@ class RoutingLlmClient(
         val provider = providersByName.getValue(route.provider)
         val permit = permits.getValue(route.provider)
 
-        if (!permit.tryAcquire(properties.acquireTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            throw LlmException("LLM 동시 호출 상한 초과: provider=${route.provider}, purpose=${request.purpose}")
-        }
+        val generationId = UuidV7.generate()
+        WorkTrace.generation(generationId)
         val startedAt = System.nanoTime()
+        if (!permit.tryAcquire(properties.acquireTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            val error = LlmException("LLM 동시 호출 상한 초과", errorCode = "BULKHEAD_FULL")
+            record(request, provider, route, startedAt, null, generationId, error)
+            throw error
+        }
         try {
             val result = provider.generate(route, request)
-            val generationId = UuidV7.generate()
             record(request, provider, route, startedAt, result = result, generationId = generationId, error = null)
             return LlmResult(
                 generationId = generationId,
                 text = result.text,
-                provider = provider.vendor,
                 model = result.model,
                 promptVersion = request.promptVersion,
-                inputTokens = result.inputTokens,
-                outputTokens = result.outputTokens,
             )
         } catch (e: Exception) {
-            record(request, provider, route, startedAt, result = null, generationId = null, error = e)
-            throw e as? LlmException ?: LlmException("LLM 호출 실패: provider=${route.provider}, purpose=${request.purpose}", e)
+            record(request, provider, route, startedAt, result = null, generationId = generationId, error = e)
+            // 외부 예외의 응답 본문·URL·인증 정보가 업무 예외와 로그로 전파되지 않게 한다.
+            throw LlmException("LLM 호출 실패", errorCode = SafeFailure.code(e))
         } finally {
             permit.release()
         }
     }
 
-    // 원장 기록 실패가 LLM 호출 결과를 바꾸면 안 된다 — 로그만 남긴다.
     private fun record(
         request: LlmRequest,
         provider: LlmProvider,
         route: LlmRoute,
         startedAt: Long,
         result: LlmProviderResult?,
-        generationId: java.util.UUID?,
+        generationId: java.util.UUID,
         error: Exception?,
     ) {
+        // 관측 구현이 실패해도 결과나 작업 재시도 판정은 바뀌지 않는다.
         runCatching {
-            ledger.record(
-                LlmInvocation(
-                    id = UuidV7.generate(),
-                    purpose = request.purpose,
-                    userId = request.userId,
-                    provider = provider.vendor,
-                    model = result?.model ?: route.model,
-                    promptVersion = request.promptVersion,
-                    generationId = generationId,
-                    inputTokens = result?.inputTokens ?: 0,
-                    outputTokens = result?.outputTokens ?: 0,
-                    cachedInputTokens = result?.cachedInputTokens ?: 0,
-                    latencyMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
-                    succeeded = error == null,
-                    finishReason = result?.finishReason,
-                    errorCode = error?.let { rootCauseName(it) },
-                    createdAt = timeProvider.now(),
-                ),
-            )
-        }.onFailure { e -> log.warn("LLM 호출 원장 기록 실패: purpose={}, error={}", request.purpose, e.message) }
+            telemetry.record(LlmCallEvent(
+                purpose = request.purpose,
+                provider = provider.vendor,
+                model = route.model,
+                promptVersion = request.promptVersion,
+                generationId = generationId,
+                latencyMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
+                succeeded = error == null,
+                errorCode = error?.let(SafeFailure::code),
+                inputTokens = result?.inputTokens ?: 0,
+                outputTokens = result?.outputTokens ?: 0,
+                cachedInputTokens = result?.cachedInputTokens ?: 0,
+                finishReason = result?.finishReason?.let { if (it in setOf("STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "end_turn", "max_tokens", "stop_sequence")) it else "OTHER" },
+            ))
+        }
     }
-}
-
-// 감싼 예외보다 실제 원인(HttpServerErrorException, CallNotPermittedException 등)이 집계에 유용하다
-private fun rootCauseName(e: Throwable): String {
-    var cause: Throwable = e
-    while (cause.cause != null && cause.cause !== cause) cause = cause.cause!!
-    return cause::class.simpleName ?: "UNKNOWN"
 }

@@ -79,7 +79,7 @@ class JournalFlowIntegrationTest : AbstractIntegrationTest() {
         val jwt = issueJwt()
         val user = jwtProvider.parse(jwt).userId
         val day = sendMessage(jwt,"서버 실패 복구").recordDayId
-        fakeLlmProvider.failNextJournal(user,2)
+        fakeLlmProvider.failNextJournal(day,2)
         deliveryWorker.runBatch()
         assertThat(awaitGeneration(jwt,day,"FAILED").journal).isNull()
         assertThat(jdbc.queryForObject<Long>("SELECT frozen_source_revision FROM conversation.record_days WHERE id=?",
@@ -90,8 +90,8 @@ class JournalFlowIntegrationTest : AbstractIntegrationTest() {
         val complete = awaitGeneration(jwt,day,"COMPLETED")
         assertThat(complete.journal!!.editable).isFalse()
         assertThat(quota.current(user).used).isEqualTo(before)
-        assertThat(fakeLlmProvider.inputsFor(user)).hasSize(3)
-        assertThat(fakeLlmProvider.inputsFor(user).distinct()).hasSize(1)
+        assertThat(fakeLlmProvider.inputsFor(day)).hasSize(3)
+        assertThat(fakeLlmProvider.inputsFor(day).distinct()).hasSize(1)
         val again = restTemplate.exchange<ErrorResponse>("/api/journals/$day/generation-attempts",HttpMethod.POST,HttpEntity<Void>(authHeaders(jwt)))
         assertThat(again.statusCode).isEqualTo(HttpStatus.CONFLICT)
     }

@@ -14,7 +14,6 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 class RetryJournalGenerationServiceTest {
 
@@ -22,7 +21,7 @@ class RetryJournalGenerationServiceTest {
     private val day = RecordDayId.generate()
     private val now = Instant.parse("2026-08-03T05:00:00Z")
     private val jobs = InMemoryGenerationJobRepository()
-    private val service = RetryJournalGenerationService(jobs, MutableTimeProvider(now))
+    private val service = RetryJournalGenerationService(jobs, MutableTimeProvider(now), com.moeum.journal.support.InMemoryJournalRepository())
 
     private fun job(transform: (GenerationJob) -> GenerationJob) =
         jobs.save(transform(GenerationJob.pending(userId, day, LocalDate.of(2026,8,2), now.minusSeconds(3600), now.minusSeconds(7200))))
@@ -40,7 +39,7 @@ class RetryJournalGenerationServiceTest {
 
     @Test
     fun `이미 생성된 일기는 거부하고, 생성할 일기가 없는 하루도 거부한다`() {
-        job { it.completed(JournalId.generate(), "p", "m", "v", 1, 1, UUID.randomUUID(), now) }
+        job { it.completed(JournalId.generate(), now) }
 
         assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
         assertThatThrownBy { service.retry(userId, RecordDayId.generate()) }.isInstanceOf(JournalNotFoundException::class.java)

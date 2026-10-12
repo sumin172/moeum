@@ -6,7 +6,6 @@ import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.JournalGenerator
-import com.moeum.kernel.UserId
 import com.moeum.platform.llm.LlmClient
 import com.moeum.platform.llm.LlmMessage
 import com.moeum.platform.llm.LlmRequest
@@ -19,7 +18,7 @@ import java.time.LocalDate
 // moeum.llm.routes.journal-generation으로 provider·모델·토큰 상한이 정해진다(Gemini ↔ Claude 전환도 설정으로).
 const val JOURNAL_GENERATION_PURPOSE = "journal-generation"
 
-// 프롬프트를 바꾸면 버전을 올린다(생성 메타데이터·호출 원장에 남아 품질 비교의 기준이 된다).
+// 프롬프트를 바꾸면 버전을 올린다(생성 메타데이터·관측 로그에 남아 품질 비교의 기준이 된다).
 // v2: 대화 원본 앞에 날짜를 붙임(v1은 날짜를 넘겨받고도 쓰지 않았다)
 private const val PROMPT_VERSION = "v2"
 
@@ -39,7 +38,7 @@ class LlmJournalGenerator(
     private val jsonMapper: JsonMapper,
 ) : JournalGenerator {
 
-    override fun generate(userId: UserId, displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
+    override fun generate(displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
         val result = llmClient.generate(
             LlmRequest(
                 purpose = JOURNAL_GENERATION_PURPOSE,
@@ -47,7 +46,6 @@ class LlmJournalGenerator(
                 messages = listOf(LlmMessage(LlmRole.USER, buildTranscript(displayDate, messages))),
                 promptVersion = PROMPT_VERSION,
                 responseFormat = LlmResponseFormat.JSON,
-                userId = userId,
             ),
         )
 
@@ -59,10 +57,7 @@ class LlmJournalGenerator(
             title = payload.title,
             body = payload.body,
             model = result.model,
-            provider = result.provider,
             promptVersion = result.promptVersion,
-            inputTokens = result.inputTokens,
-            outputTokens = result.outputTokens,
         )
     }
 }

@@ -3,6 +3,7 @@ package com.moeum.platform.web
 import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
 
+import com.moeum.platform.observability.SafeFailure
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -26,7 +27,7 @@ class GlobalFallbackExceptionHandler {
         MethodArgumentTypeMismatchException::class,
     )
     fun handleBadRequest(e: Exception): ResponseEntity<ErrorResponse> {
-        log.info("잘못된 요청 형식: {}", e.message)
+        log.info("잘못된 요청 형식: {}", SafeFailure.code(e))
         return ResponseEntity.badRequest()
             .body(ErrorResponse(code = PlatformErrorCode.INVALID_REQUEST.code, message = PlatformErrorCode.INVALID_REQUEST.description))
     }
@@ -37,7 +38,7 @@ class GlobalFallbackExceptionHandler {
         if (e is org.springframework.web.ErrorResponse && e.statusCode.value() == 404) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse(code="NOT_FOUND",message="요청한 경로가 없습니다"))
         }
-        log.error("처리되지 않은 예외", e)
+        log.error("처리되지 않은 예외: code={}, location={}", SafeFailure.code(e), SafeFailure.location(e))
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(ErrorResponse(code = PlatformErrorCode.INTERNAL_ERROR.code, message = PlatformErrorCode.INTERNAL_ERROR.description))
     }

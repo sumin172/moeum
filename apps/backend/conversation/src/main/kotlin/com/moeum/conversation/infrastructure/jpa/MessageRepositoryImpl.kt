@@ -76,8 +76,6 @@ private fun MessageJpaEntity.toDomain(): Message =
         generationId = generationId,
         model = model,
         promptVersion = promptVersion,
-        inputTokens = inputTokens,
-        outputTokens = outputTokens,
         createdAt = createdAt,
         streamSequence = streamSequence,
     )
@@ -96,8 +94,6 @@ private fun Message.toEntity(): MessageJpaEntity =
         generationId = generationId,
         model = model,
         promptVersion = promptVersion,
-        inputTokens = inputTokens,
-        outputTokens = outputTokens,
         createdAt = createdAt,
         streamSequence = streamSequence,
     )

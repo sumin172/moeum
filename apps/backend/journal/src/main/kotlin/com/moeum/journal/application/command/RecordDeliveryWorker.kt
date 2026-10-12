@@ -1,6 +1,7 @@
 package com.moeum.journal.application.command
 import com.moeum.conversation.application.publicapi.RecordDayOperations
 import com.moeum.platform.runtime.*
+import com.moeum.platform.observability.SafeFailure
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 @Service
@@ -8,7 +9,10 @@ import org.springframework.stereotype.Service
 class RecordDeliveryWorker(private val records: RecordDayOperations, private val registration: RegisterRecordGenerationService) {
     private val log = LoggerFactory.getLogger(javaClass)
     fun runBatch() {
-        for (i in 0 until 100) { if (!records.closeNext()) break }
+        var closedCount = 0
+        while (closedCount < 100 && records.closeNext()) {
+            closedCount++
+        }
         repeat(100) {
             val delivery = records.claimDelivery() ?: return
             try {
@@ -17,7 +21,7 @@ class RecordDeliveryWorker(private val records: RecordDayOperations, private val
                 log.info("기록 전달: recordDayId={}, version={}, registered={}, acknowledged={}",
                     delivery.recordDayId.value, delivery.version, created, acknowledged)
             } catch (e: Exception) {
-                log.error("기록 전달 실패: recordDayId={}, version={}", delivery.recordDayId.value, delivery.version, e)
+                log.error("기록 전달 실패: recordDayId={}, version={}, code={}", delivery.recordDayId.value, delivery.version, SafeFailure.code(e))
                 // 리스 만료 후 재전달한다. 다른 기록은 계속 처리한다.
             }
         }

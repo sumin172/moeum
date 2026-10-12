@@ -7,6 +7,7 @@ import com.moeum.platform.security.jwt.JwtProvider
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
+import com.moeum.platform.observability.SafeFailure
 import org.slf4j.LoggerFactory
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
@@ -39,7 +40,7 @@ class JwtAuthenticationFilter(
                         UsernamePasswordAuthenticationToken(claims.userId, null, emptyList())
                 }
                 .onFailure { e ->
-                    log.debug("JWT 인증 실패: {}", e.message)
+                    log.debug("JWT 인증 실패: {}", SafeFailure.code(e))
                 }
         }
 

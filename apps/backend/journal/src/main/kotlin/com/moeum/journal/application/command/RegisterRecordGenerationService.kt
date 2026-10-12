@@ -15,9 +15,10 @@ class RegisterRecordGenerationService(private val jdbc: JdbcTemplate, private va
         return jdbc.update("""
             INSERT INTO journal.generation_jobs
             (id,user_id,record_day_id,display_date,status,attempt_count,next_attempt_at,version,created_at,updated_at)
-            VALUES (?,?,?,?,'PENDING',0,?,0,?,?)
+            SELECT ?,?,?,?,'PENDING',0,?,0,?,?
+            WHERE NOT EXISTS (SELECT 1 FROM journal.journals WHERE user_id=? AND record_day_id=?)
             ON CONFLICT (user_id,record_day_id) DO NOTHING
         """.trimIndent(), UuidV7.generate(), delivery.userId.value, delivery.recordDayId.value, delivery.displayDate,
-            Timestamp.from(delivery.closedAt), now, now) == 1
+            Timestamp.from(delivery.closedAt), now, now, delivery.userId.value, delivery.recordDayId.value) == 1
     }
 }

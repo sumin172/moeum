@@ -9,6 +9,7 @@ import com.moeum.journal.domain.JournalGenerationNotRetryableException
 import com.moeum.journal.domain.JournalNotFoundException
 import com.moeum.journal.domain.JournalVersionConflictException
 import com.moeum.platform.web.ErrorResponse
+import com.moeum.platform.observability.SafeFailure
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpStatus
@@ -40,7 +41,7 @@ class JournalExceptionHandler {
         error(HttpStatus.CONFLICT, JournalErrorCode.GENERATION_NOT_RETRYABLE, e)
 
     private fun error(status: HttpStatus, code: JournalErrorCode, e: Exception): ResponseEntity<ErrorResponse> {
-        log.info("일기 요청 거부: code={}, reason={}", code.code, e.message)
+        log.info("일기 요청 거부: code={}, reason={}", code.code, SafeFailure.code(e))
         return ResponseEntity.status(status).body(ErrorResponse(code = code.code, message = code.description))
     }
 }

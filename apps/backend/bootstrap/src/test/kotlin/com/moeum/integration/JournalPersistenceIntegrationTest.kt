@@ -41,7 +41,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var jwtProvider: JwtProvider
 
     private fun generation(body: String = "본문") =
-        GeneratedJournal(UUID.randomUUID(),"제목",body,"m","p","v",10,5)
+        GeneratedJournal(UUID.randomUUID(),"제목",body,"m", "v")
     private fun claimed(user: UserId): GenerationJob {
         val future = Instant.now().plus(Duration.ofDays(600))
         val pending = generationJobRepository.save(GenerationJob.pending(user,RecordDayId.generate(),LocalDate.of(2027,2,1),future,Instant.now()))
@@ -140,7 +140,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         created.forEachIndexed { index,id ->
             val job = generateSequence { generationJobRepository.claimNext(future.plusSeconds(1),future.plusSeconds(300)) }.first { it.id == id }
             saveGeneratedJournalService.save(job,GeneratedJournal(UUID.randomUUID(),
-                "제목$index", "본문$index","m","p","v",10,5),1)
+                "제목$index", "본문$index","m", "v"),1)
         }
         assertThat(journalRepository.findByDate(user,date)).hasSize(2)
         assertThat(journalRepository.findByUserIdAndRecordDayId(user,ids[0])!!.body).isEqualTo("본문0")
@@ -159,7 +159,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
 
         val journal = saveGeneratedJournalService.save(
             job,
-            GeneratedJournal(UUID.randomUUID(), "제목", "본문", "m", "p", "v", 10, 5),
+            GeneratedJournal(UUID.randomUUID(), "제목", "본문", "m", "v"),
             sourceRevision = 1,
         )
 

@@ -20,6 +20,7 @@ dependencies {
     implementation(project(":journal"))
 
     implementation(libs.spring.boot.starter.web)
+    implementation(libs.spring.boot.starter.actuator)
     implementation(libs.spring.boot.starter.data.jpa)
     // MoeumApplication의 UserDetailsServiceAutoConfiguration 참조를 컴파일하기 위해 필요.
     // 런타임 보안 설정 자체는 platform 모듈이 제공한다.

@@ -13,7 +13,6 @@ import com.moeum.platform.llm.LlmRoute
 import com.moeum.platform.llm.provider.LlmProvider
 import com.moeum.platform.llm.provider.LlmProviderResult
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
-import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
@@ -24,8 +23,6 @@ class GeminiProvider(
     private val geminiRestClient: RestClient,
     private val properties: GeminiProperties,
 ) : LlmProvider {
-
-    private val log = LoggerFactory.getLogger(GeminiProvider::class.java)
 
     override val name = "gemini"
     override val vendor = "google"
@@ -55,14 +52,10 @@ class GeminiProvider(
         val candidate = response.candidates.firstOrNull()
         val text = candidate?.content?.parts.orEmpty().filterNot { it.thought == true }.mapNotNull { it.text }.joinToString("")
         if (text.isBlank()) {
-            throw LlmException("Gemini 응답에 유효한 content가 없습니다(안전 필터·토큰 상한 등): finishReason=${candidate?.finishReason}")
+            throw LlmException("Gemini 응답에 유효한 content가 없습니다", errorCode = "EMPTY_CONTENT")
         }
 
         val usage = response.usageMetadata
-        // Gemini 2.5+는 같은 prefix로 시작하는 요청에 암묵적 캐싱을 자동 적용한다 — 실제 히트 여부 관측용 로그.
-        if ((usage?.cachedContentTokenCount ?: 0) > 0) {
-            log.debug("Gemini 캐시 히트: cachedTokens={}, promptTokens={}", usage?.cachedContentTokenCount, usage?.promptTokenCount)
-        }
         return LlmProviderResult(
             text = text,
             model = response.modelVersion ?: route.model,

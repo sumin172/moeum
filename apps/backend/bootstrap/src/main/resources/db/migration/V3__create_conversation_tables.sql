@@ -45,8 +45,6 @@ CREATE TABLE conversation.messages (
     generation_id UUID NULL,
     model TEXT NULL,
     prompt_version TEXT NULL,
-    input_tokens INT NULL,
-    output_tokens INT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_conversation_messages_user_client_message_id UNIQUE (user_id, client_message_id)
 );
@@ -99,3 +97,5 @@ CREATE TABLE conversation.conversation_usage (
     request_window TIMESTAMPTZ NOT NULL,
     request_count INT NOT NULL CHECK (request_count >= 0)
 );
+
+CREATE INDEX idx_conversation_response_jobs_retention ON conversation.response_jobs (updated_at,id) WHERE status='COMPLETED';
