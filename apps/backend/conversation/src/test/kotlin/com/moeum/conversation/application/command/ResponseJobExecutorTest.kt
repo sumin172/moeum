@@ -42,7 +42,7 @@ class ResponseJobExecutorTest {
 
     private class ScriptedResponder(private val outcomes: ArrayDeque<() -> ConversationResponse>) : ConversationResponder {
         val requests = mutableListOf<List<Message>>()
-        override fun respond(userId: UserId, context: List<Message>): ConversationResponse {
+        override fun respond(context: List<Message>): ConversationResponse {
             requests += context
             return outcomes.removeFirst().invoke()
         }
@@ -56,8 +56,6 @@ class ResponseJobExecutorTest {
             content,
             "gemini-flash-latest",
             "v1",
-            10,
-            5,
         )
     }
 

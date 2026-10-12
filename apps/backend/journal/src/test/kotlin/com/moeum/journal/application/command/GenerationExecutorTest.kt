@@ -45,10 +45,10 @@ class GenerationExecutorTest {
 
     private class ScriptedGenerator(private val failures: Int) : JournalGenerator {
         var calls = 0
-        override fun generate(userId: UserId, displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
+        override fun generate(displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
             calls++
             if (calls <= failures) throw LlmException("생성 실패")
-            return GeneratedJournal(UUID.randomUUID(), "산책", "산책을 했다", "gemini", "google", "v1", 100, 50)
+            return GeneratedJournal(UUID.randomUUID(), "산책", "산책을 했다", "gemini", "v1")
         }
     }
 

@@ -39,20 +39,6 @@ class GenerationJobJpaEntity(
     @Version
     @Column(nullable = false)
     val version: Long,
-    @Column
-    val provider: String? = null,
-    @Column
-    val model: String? = null,
-    @Column(name = "prompt_version")
-    val promptVersion: String? = null,
-    @Column(name = "input_tokens")
-    val inputTokens: Int? = null,
-    @Column(name = "output_tokens")
-    val outputTokens: Int? = null,
-    @Column(name = "generation_id")
-    val generationId: UUID? = null,
-    @Column(name = "generated_at")
-    val generatedAt: Instant? = null,
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant,
     @Column(name = "updated_at", nullable = false)

@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.spring)
-    alias(libs.plugins.kotlin.jpa)
     alias(libs.plugins.spring.boot)
     alias(libs.plugins.spring.dependency.management)
 }
@@ -26,8 +25,8 @@ dependencies {
     implementation(project(":shared-kernel"))
 
     implementation(libs.spring.boot.starter.security)
-    // LLM 호출 원장(platform.llm_invocations) 저장용
-    implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.micrometer.core)
+    compileOnly(libs.logback.classic)
     compileOnly(libs.jakarta.servlet.api)
     compileOnly(libs.jackson.databind)
     implementation(libs.jjwt.api)

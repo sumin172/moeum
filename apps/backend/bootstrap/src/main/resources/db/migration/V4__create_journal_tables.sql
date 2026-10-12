@@ -28,13 +28,6 @@ CREATE TABLE journal.generation_jobs (
     lease_expires_at TIMESTAMPTZ NULL,
     last_error_code TEXT NULL,
     version BIGINT NOT NULL DEFAULT 0,
-    provider TEXT NULL,
-    model TEXT NULL,
-    prompt_version TEXT NULL,
-    input_tokens INT NULL,
-    output_tokens INT NULL,
-    generation_id UUID NULL,
-    generated_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT fk_journal_generation_jobs_journal
@@ -46,3 +39,5 @@ CREATE INDEX idx_journal_generation_jobs_pending ON journal.generation_jobs (nex
     WHERE status = 'PENDING';
 CREATE INDEX idx_journal_generation_jobs_processing ON journal.generation_jobs (lease_expires_at)
     WHERE status = 'PROCESSING';
+
+CREATE INDEX idx_journal_generation_jobs_retention ON journal.generation_jobs (updated_at,id) WHERE status='COMPLETED';

@@ -11,6 +11,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  jmx:
+    enabled: true
+    unique-names: true
   threads:
     virtual:
       enabled: true
@@ -21,9 +24,24 @@ server:
     connection-timeout: 15s
     keep-alive-timeout: 5s
 
+management:
+  endpoints:
+    web:
+      exposure:
+        exclude: "*"
+    jmx:
+      exposure:
+        include: health,metrics
+
 logging:
+  structured:
+    format:
+      console: logstash
   level:
-    com.moeum: DEBUG
+    com.moeum: INFO
+    # PostgreSQL 오류 DETAIL은 실패한 행의 본문을 포함할 수 있다. 업무 경로에서 SQLSTATE/위치만 기록한다.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+    org.hibernate.orm.jdbc.error: OFF
 
 resilience4j:
   circuitbreaker:
@@ -50,6 +68,15 @@ resilience4j:
         baseConfig: llm
 
 moeum:
+  telemetry:
+    buffer-capacity: 1024
+    shutdown-timeout: 2s
+  jobs:
+    retention:
+      completed-age: 30d
+      batch-size: 100
+      interval: PT1M
+      initial-delay: PT1M
   identity:
     conversation:
       # 제품 확정값이 아닌 개발 기본안. 무료·구독 모두 유한한 한도.

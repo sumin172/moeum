@@ -30,8 +30,8 @@ class SaveGeneratedJournalService(
         // 같은 기록의 입력은 이미 동결됐다. 다른 입력 버전의 결과를 기존 결과로 가장하지 않는다.
         check(journal.sourceRevision == sourceRevision) { "일기 생성 입력 버전이 기존 결과와 다릅니다" }
         generationJobRepository.save(job.completed(
-            journalId=journal.id,provider=generation.provider,model=journal.model,promptVersion=journal.promptVersion,
-            inputTokens=generation.inputTokens,outputTokens=generation.outputTokens,generationId=journal.generationId,now=now,
+            journalId=journal.id,
+            now=now,
         ))
         return journal
     }

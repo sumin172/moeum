@@ -1,5 +1,6 @@
 package com.moeum.platform.runtime
 
+import com.moeum.platform.observability.SafeFailure
 import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.util.concurrent.Executors
@@ -28,7 +29,7 @@ class WorkerPool(
                 try {
                     task()
                 } catch (e: Exception) {
-                    log.error("Worker 실행 실패: role={}", name, e)
+                    log.error("Worker 실행 실패: role={}, code={}", name, SafeFailure.code(e))
                 } finally {
                     slots.release()
                 }

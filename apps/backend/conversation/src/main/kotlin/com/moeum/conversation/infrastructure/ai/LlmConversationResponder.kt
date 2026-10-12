@@ -8,7 +8,6 @@ import com.moeum.conversation.domain.ConversationResponse
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageRole
 import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
-import com.moeum.kernel.UserId
 import com.moeum.platform.llm.LlmClient
 import com.moeum.platform.llm.LlmMessage
 import com.moeum.platform.llm.LlmRequest
@@ -19,7 +18,7 @@ import org.springframework.stereotype.Component
 // moeum.llm.routes.conversation-response로 provider·모델·토큰 상한이 정해진다.
 const val CONVERSATION_RESPONSE_PURPOSE = "conversation-response"
 
-// 프롬프트를 바꾸면 버전을 올린다(생성 메타데이터·호출 원장에 남아 품질 비교의 기준이 된다).
+// 프롬프트를 바꾸면 버전을 올린다(생성 메타데이터·관측 로그에 남아 품질 비교의 기준이 된다).
 // v2: 응답 토큰 상한(150)에 맞춰 짧게 답하도록 지시 추가
 private const val PROMPT_VERSION = "v2"
 
@@ -38,12 +37,12 @@ class LlmConversationResponder(
 
     private val log = LoggerFactory.getLogger(LlmConversationResponder::class.java)
 
-    override fun respond(userId: UserId, context: List<Message>): ConversationResponse {
+    override fun respond(context: List<Message>): ConversationResponse {
         val fitted = fitToBudget(context, limits.contextCharBudget)
         if (fitted.size < context.size) {
             log.info(
-                "AI 컨텍스트가 예산을 넘어 최근 대화만 전달: userId={}, total={}, sent={}, budgetChars={}",
-                userId.value, context.size, fitted.size, limits.contextCharBudget,
+                "AI 컨텍스트가 예산을 넘어 최근 대화만 전달: total={}, sent={}, budgetChars={}",
+                context.size, fitted.size, limits.contextCharBudget,
             )
         }
         val result = llmClient.generate(
@@ -52,7 +51,6 @@ class LlmConversationResponder(
                 systemPrompt = SYSTEM_PROMPT,
                 messages = fitted.map { LlmMessage(role = it.role.toLlmRole(), content = it.content) },
                 promptVersion = PROMPT_VERSION,
-                userId = userId,
             ),
         )
         return ConversationResponse(
@@ -60,8 +58,6 @@ class LlmConversationResponder(
             content = result.text,
             model = result.model,
             promptVersion = result.promptVersion,
-            inputTokens = result.inputTokens,
-            outputTokens = result.outputTokens,
         )
     }
 }

@@ -14,6 +14,9 @@ testcontainers = "2.0.5"
 spring-cloud-dependencies = "2025.1.2"
 
 [libraries]
+spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+micrometer-core = { module = "io.micrometer:micrometer-core" }
+logback-classic = { module = "ch.qos.logback:logback-classic" }
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
 spring-web = { module = "org.springframework:spring-web" }
 spring-cloud-starter-circuitbreaker-resilience4j = { module = "org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j" }

@@ -8,6 +8,7 @@ import com.moeum.identity.domain.InvalidRefreshTokenException
 import com.moeum.identity.domain.RefreshTokenAlreadyRotatedException
 import com.moeum.identity.domain.UserDeletedException
 import com.moeum.platform.web.ErrorResponse
+import com.moeum.platform.observability.SafeFailure
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -22,25 +23,25 @@ class IdentityExceptionHandler {
 
     @ExceptionHandler(InvalidGoogleTokenException::class)
     fun handleInvalidGoogleToken(e: InvalidGoogleTokenException): ResponseEntity<ErrorResponse> {
-        log.warn("Google 로그인 실패: {}", e.message)
+        log.warn("Google 로그인 실패: {}", SafeFailure.code(e))
         return error(HttpStatus.UNAUTHORIZED, IdentityErrorCode.INVALID_GOOGLE_TOKEN)
     }
 
     @ExceptionHandler(InvalidRefreshTokenException::class)
     fun handleInvalidRefreshToken(e: InvalidRefreshTokenException): ResponseEntity<ErrorResponse> {
-        log.info("refresh 거부: {}", e.message)
+        log.info("refresh 거부: {}", SafeFailure.code(e))
         return error(HttpStatus.UNAUTHORIZED, IdentityErrorCode.INVALID_REFRESH_TOKEN)
     }
 
     @ExceptionHandler(RefreshTokenAlreadyRotatedException::class)
     fun handleAlreadyRotated(e: RefreshTokenAlreadyRotatedException): ResponseEntity<ErrorResponse> {
-        log.info("동시 refresh: {}", e.message)
+        log.info("동시 refresh: {}", SafeFailure.code(e))
         return error(HttpStatus.CONFLICT, IdentityErrorCode.REFRESH_TOKEN_ROTATED)
     }
 
     @ExceptionHandler(UserDeletedException::class)
     fun handleUserDeleted(e: UserDeletedException): ResponseEntity<ErrorResponse> {
-        log.warn("탈퇴 사용자 인증 시도: {}", e.message)
+        log.warn("탈퇴 사용자 인증 시도: {}", SafeFailure.code(e))
         return error(HttpStatus.FORBIDDEN, IdentityErrorCode.USER_DELETED)
     }
 

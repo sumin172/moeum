@@ -20,8 +20,6 @@ data class Message(
     val generationId: UUID? = null,
     val model: String? = null,
     val promptVersion: String? = null,
-    val inputTokens: Int? = null,
-    val outputTokens: Int? = null,
     val createdAt: Instant,
     val streamSequence: Long = 0,
 ) {
@@ -34,8 +32,8 @@ data class Message(
         fun assistantMessage(
             id: MessageId, userId: UserId, content: String, occurredAt: Instant, timezone: String,
             recordDayId: RecordDayId, generationId: UUID, model: String,
-            promptVersion: String, inputTokens: Int, outputTokens: Int, sourceSequence: Long,
+            promptVersion: String, sourceSequence: Long,
         ) = Message(id,userId,MessageRole.ASSISTANT,content,occurredAt,timezone,recordDayId,sourceSequence,null,
-            generationId,model,promptVersion,inputTokens,outputTokens,occurredAt)
+            generationId,model,promptVersion,occurredAt)
     }
 }

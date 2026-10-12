@@ -17,11 +17,17 @@ import org.springframework.transaction.annotation.Transactional
 class RetryJournalGenerationService(
     private val generationJobRepository: GenerationJobRepository,
     private val timeProvider: TimeProvider,
+    private val journals: com.moeum.journal.domain.JournalRepository,
 ) {
     @Transactional
     fun retry(userId: UserId, recordDayId: RecordDayId): GenerationJob {
         val job = generationJobRepository.findByUserIdAndRecordDayId(userId, recordDayId)
-            ?: throw JournalNotFoundException("그 하루에 생성할 일기가 없습니다: recordDayId=${recordDayId.value}")
+            ?: run {
+                if (journals.findByUserIdAndRecordDayId(userId, recordDayId) != null) {
+                    throw JournalGenerationNotRetryableException("이미 생성된 일기입니다")
+                }
+                throw JournalNotFoundException("그 하루에 생성할 일기가 없습니다: recordDayId=${recordDayId.value}")
+            }
         return when (job.state.status) {
             // 이미 대기·진행 중이면 같은 요청을 다시 받은 것으로 보고 현재 상태를 돌려준다
             JobStatus.PENDING, JobStatus.PROCESSING -> job

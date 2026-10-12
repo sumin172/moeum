@@ -36,8 +36,6 @@ class SaveGeneratedResponseService(
                 generationId = response.generationId,
                 model = response.model,
                 promptVersion = response.promptVersion,
-                inputTokens = response.inputTokens,
-                outputTokens = response.outputTokens,
             ),
         )
     }

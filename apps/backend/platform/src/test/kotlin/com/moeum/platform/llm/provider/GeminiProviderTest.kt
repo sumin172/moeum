@@ -84,12 +84,12 @@ class GeminiProviderTest {
     }
 
     @Test
-    fun `토큰 상한 등으로 내용 없이 끝나면 finishReason과 함께 LlmException을 던진다`() {
+    fun `내용 없이 끝나면 원문 없는 LlmException을 던진다`() {
         server.expect(requestTo("https://gemini.test/v1beta/models/flash:generateContent"))
             .andRespond(withSuccess("""{"candidates":[{"content":{"parts":[]},"finishReason":"MAX_TOKENS"}]}""", MediaType.APPLICATION_JSON))
 
         assertThatThrownBy { provider.generate(LlmRoute("gemini", "flash", 10), request) }
             .isInstanceOf(LlmException::class.java)
-            .hasMessageContaining("MAX_TOKENS")
+            .hasMessageContaining("유효한 content")
     }
 }

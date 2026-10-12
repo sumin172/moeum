@@ -38,10 +38,6 @@ class MessageJpaEntity(
     val model: String? = null,
     @Column(name = "prompt_version")
     val promptVersion: String? = null,
-    @Column(name = "input_tokens")
-    val inputTokens: Int? = null,
-    @Column(name = "output_tokens")
-    val outputTokens: Int? = null,
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant,
     @Column(name = "stream_sequence", nullable = false)

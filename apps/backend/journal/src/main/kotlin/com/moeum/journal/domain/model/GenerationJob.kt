@@ -6,7 +6,6 @@ import com.moeum.platform.job.JobPolicy
 import com.moeum.platform.job.JobState
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 // 마감된 기록당 하나의 최초 일기 생성 작업. 날짜는 표시 속성이고 recordDayId가 멱등키다.
 data class GenerationJob(
@@ -17,36 +16,16 @@ data class GenerationJob(
     val recordDayId: RecordDayId,
     val displayDate: LocalDate,
     val state: JobState,
-    val provider: String? = null,
-    val model: String? = null,
-    val promptVersion: String? = null,
-    val inputTokens: Int? = null,
-    val outputTokens: Int? = null,
-    val generationId: UUID? = null,
-    val generatedAt: Instant? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
     fun completed(
         journalId: JournalId,
-        provider: String,
-        model: String,
-        promptVersion: String,
-        inputTokens: Int,
-        outputTokens: Int,
-        generationId: UUID,
         now: Instant,
     ): GenerationJob =
         copy(
             journalId = journalId,
             state = state.completed(),
-            provider = provider,
-            model = model,
-            promptVersion = promptVersion,
-            inputTokens = inputTokens,
-            outputTokens = outputTokens,
-            generationId = generationId,
-            generatedAt = now,
             updatedAt = now,
         )
 

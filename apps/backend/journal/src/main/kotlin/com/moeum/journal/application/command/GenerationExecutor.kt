@@ -8,6 +8,8 @@ import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.kernel.TimeProvider
 import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
+import com.moeum.platform.observability.SafeFailure
+import com.moeum.platform.observability.WorkTrace
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
@@ -32,7 +34,7 @@ class GenerationExecutor(
     fun executeNext(): Boolean {
         val now = timeProvider.now()
         val job = generationJobRepository.claimNext(now, policy.leaseExpiresAt(now)) ?: return false
-        execute(job)
+        WorkTrace.run(job.id.value, job.recordDayId.value, job.state.attemptCount) { execute(job) }
         return true
     }
 
@@ -45,15 +47,16 @@ class GenerationExecutor(
 
         try {
             val input = recordDayOperations.freezeInput(job.userId, job.recordDayId)
-            val generation = journalGenerator.generate(job.userId, job.displayDate, input.messages)
+            val generation = journalGenerator.generate(job.displayDate, input.messages)
             saveGeneratedJournalService.save(job, generation, input.sourceRevision)
+            log.atInfo().addKeyValue("event", "job.completed").log("Worker job completed")
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 일기 생성 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
         } catch (e: Exception) {
-            log.error(
-                "Journal 생성 실패: jobId={}, userId={}, displayDate={}, attempt={}, error={}",
-                job.id.value, job.userId.value, job.displayDate, job.state.attemptCount, e.message, e,
-            )
+            log.atError().addKeyValue("event", "job.failed")
+                .addKeyValue("errorCode", SafeFailure.code(e))
+                .addKeyValue("location", SafeFailure.location(e))
+                .log("Worker job failed")
             recordFailure(job) { markGenerationFailedService.markFailed(job, e) }
         }
     }
@@ -61,7 +64,7 @@ class GenerationExecutor(
     // 실패 기록 자체가 실패해도(리스를 뺏긴 경우 포함) 로그는 남아야 한다.
     private fun recordFailure(job: GenerationJob, record: () -> Unit) {
         runCatching(record).onFailure { e ->
-            log.warn("일기 생성 작업 실패 기록을 남기지 못함: jobId={}, error={}", job.id.value, e.message)
+            log.warn("일기 생성 작업 실패 기록을 남기지 못함: jobId={}, error={}", job.id.value, SafeFailure.code(e))
         }
     }
 }

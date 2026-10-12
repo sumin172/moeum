@@ -104,3 +104,11 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 
 기능·동시성 검증은 실제 PostgreSQL과 fake 공급자를 사용한다.
 독립 JVM 강제 종료·실제 공급자 할당량·P0/P1/P2 부하·6개월 누적 데이터 성능 승인은 R6 범위다.
+
+## 완료 작업 보존
+
+완료 상태를 확인한 클라이언트는 해당 작업을 미완료 polling 목록에서 제거한다.
+입력이 동결되고 미완료·실패 작업이 없는 기록의 오래된 완료 작업은 정리될 수 있다.
+정리된 작업 ID 상태 조회·재시도는 404이며 메시지와 AI 응답은 계속 조회할 수 있다.
+기존 메시지의 중복 전송은 quota나 작업을 새로 만들지 않고 원본을 반환하되 responseJob은 null일 수 있다.
+세부 조건과 기본 기간은 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.

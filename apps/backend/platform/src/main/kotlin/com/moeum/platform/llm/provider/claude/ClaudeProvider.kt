@@ -52,7 +52,7 @@ class ClaudeProvider(
 
         val text = response.content.filter { it.type == "text" }.mapNotNull { it.text }.joinToString("")
         if (text.isBlank()) {
-            throw LlmException("Claude 응답에 유효한 content가 없습니다: stopReason=${response.stopReason}")
+            throw LlmException("Claude 응답에 유효한 content가 없습니다", errorCode = "EMPTY_CONTENT")
         }
 
         return LlmProviderResult(
