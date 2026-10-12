@@ -18,6 +18,8 @@ streamSequence는 USER·ASSISTANT를 합친 메시지 증분 순번이다.
 메시지 추가 시 RecordDay의 카운터를 UPDATE하고 잠금을 커밋까지 유지한다.
 UUID 생성 시각이나 occurredAt으로 커밋 순서를 추정하지 않는다.
 화면은 occurredAt으로 정렬할 수 있지만 다음 조회 커서는 최대 streamSequence를 사용한다.
+현지 달력 날짜는 occurredAt/timezone으로 계산하며 localDate 컬럼으로 중복 보관하지 않는다.
+현재 삭제 흐름이 없는 메시지에 삭제 상태 컬럼을 미리 두지 않는다.
 
 ## 접수와 한도
 

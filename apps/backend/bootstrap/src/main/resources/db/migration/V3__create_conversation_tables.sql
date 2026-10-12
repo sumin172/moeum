@@ -38,7 +38,6 @@ CREATE TABLE conversation.messages (
     content TEXT NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL,
     timezone TEXT NOT NULL,
-    local_date DATE NOT NULL,
     record_day_id UUID NOT NULL,
     source_sequence BIGINT NOT NULL CHECK (source_sequence > 0),
     stream_sequence BIGINT NOT NULL CHECK (stream_sequence > 0),
@@ -49,7 +48,6 @@ CREATE TABLE conversation.messages (
     input_tokens INT NULL,
     output_tokens INT NULL,
     created_at TIMESTAMPTZ NOT NULL,
-    deleted_at TIMESTAMPTZ NULL,
     CONSTRAINT uq_conversation_messages_user_client_message_id UNIQUE (user_id, client_message_id)
 );
 

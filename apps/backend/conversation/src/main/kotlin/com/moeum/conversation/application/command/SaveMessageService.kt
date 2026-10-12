@@ -111,7 +111,7 @@ class SaveMessageService(
         }
         val message = Message.userMessage(
             id = MessageId.generate(), userId = userId, content = command.content,
-            occurredAt = occurredAt, timezone = zone.id, localDate = occurredAt.atZone(zone).toLocalDate(),
+            occurredAt = occurredAt, timezone = zone.id,
             recordDayId = record.id, sourceSequence = record.sourceRevision,
             clientMessageId = command.clientMessageId, now = now,
         )

@@ -38,7 +38,6 @@ import java.util.UUID
     AbstractIntegrationTest.FakeGoogleVerifierConfig::class,
     AbstractIntegrationTest.FakeConversationResponderConfig::class,
     AbstractIntegrationTest.FakeLlmProviderConfig::class,
-    AbstractIntegrationTest.EventRecorderConfig::class,
 )
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -46,6 +45,8 @@ import java.util.UUID
     properties = [
         "moeum.journal.generation-job.initial-delay=PT1H",
         "moeum.journal.delivery.initial-delay=PT1H",
+        "moeum.journal.generation-job.max-attempts=2",
+        "moeum.journal.generation-job.backoff=200ms",
         "moeum.conversation.response-job.backoff=200ms",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
         // 실제 provider 없이 LlmClient → 호출 원장 경로를 검증하기 위한 용도(FakeLlmProvider)
@@ -64,8 +65,10 @@ abstract class AbstractIntegrationTest {
     @Autowired
     lateinit var conversationResponder: ControllableConversationResponder
 
+    @Autowired lateinit var fakeLlmProvider: FakeLlmProvider
+
     @BeforeEach
-    fun resetResponder() = conversationResponder.reset()
+    fun resetResponder() { conversationResponder.reset(); fakeLlmProvider.reset() }
 
     // 새 사용자로 로그인한다(FakeGoogleVerifier는 idToken마다 다른 구글 계정으로 본다)
     protected fun login(idToken: String = "dummy-${UUID.randomUUID()}", deviceId: UUID = UUID.randomUUID()): AuthTokenResponse {
@@ -127,9 +130,4 @@ abstract class AbstractIntegrationTest {
         fun fakeLlmProvider(): FakeLlmProvider = FakeLlmProvider()
     }
 
-    @TestConfiguration
-    class EventRecorderConfig {
-        @Bean
-        fun integrationEventRecorder(): IntegrationEventRecorder = IntegrationEventRecorder()
-    }
 }

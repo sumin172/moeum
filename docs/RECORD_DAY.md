@@ -1,6 +1,6 @@
 # 하루 기록과 자동 일기 정책
 
-상태: 귀속·마감·전달·입력 동결과 R3 서버 한도·응답 순서·조회 계약을 구현했다. 자동 보관·확정/리비전 제거는 R4의 목표 규칙이다.
+상태: 귀속·마감·전달·입력 동결과 R3 서버 한도·응답 순서·조회 계약을 구현했다. R4의 자동 보관·구독 수정·수정본 보호도 구현했으며 현재 계약은 [일기 계약](JOURNAL.md)을 따른다.
 사용자가 설정한 마감 시각과 마지막 사용자 발화 장소의 타임존을 따른다는 요구는 확정이다.
 아래 숫자·날짜 표시 기본안은 사용자 행동 데이터가 없는 설계 가정이며 구현 전 변경 가능하다.
 
@@ -179,7 +179,7 @@ D01~D31을 구현 단계에서 단위·PostgreSQL 통합 테스트로 변환한�
 - 저장된 clientMessageId 재전송은 동결 여부와 관계없이 기존 성공을 반환한다. 소유권 또는 발화 구간 불일치는 404/409이며 미래 5분 초과 입력은 400이다.
 - `GET /api/conversations/records?date=&limit=`은 기록 목록, `GET /api/conversations/records/{recordDayId}?after=&limit=`은 메시지·응답 상태·nextCursor를 반환한다. after는 정수 streamSequence이며 조회는 장소를 갱신하지 않는다.
 - `GET/PUT /api/conversations/preferences`는 `closeTime`을 조회/저장한다. 새 설정은 다음 기록부터 사용하고 열린 기록의 스냅샷을 바꾸지 않는다.
-- `GET /api/journals?date=`는 같은 표시 날짜의 여러 일기를 반환한다. 상세/수정/확정/실패 재시도는 `/api/journals/{recordDayId}` 기준이다. 날짜 기반 기존 경로와 /today 별칭은 제공하지 않는다.
+- `GET /api/journals?date=`는 같은 표시 날짜의 여러 일기를 반환한다. 상세/수정/실패 재시도는 `/api/journals/{recordDayId}` 기준이다. 날짜 기반 기존 경로와 /today 별칭은 제공하지 않는다.
 
 Conversation의 UserRecordState와 RecordDay는 메시지 컬렉션·JPA 관계를 보유하지 않는다. 저장·마감·동결은 사용자 상태 → 기록 잠금 순서로 직렬화한다. 발화/접수 시각은 PostgreSQL과 같은 마이크로초 정밀도로 맞춰 동시 발화는 sourceRevision 순서로 처리한다. 메시지는 recordDayId와 USER sourceSequence로 직접 조회한다.
 마감 poll은 작은 열린 예약만 조회하고, 전달 poll은 닫힌 미확인 기록만 선점한다. 생성 요청은 Journal의 UNIQUE(user_id, record_day_id)로 한 번 등록한다. 확인 실패 후 재전달은 해당 제약만 충돌을 무시하고 다른 DB 오류는 전파한다.

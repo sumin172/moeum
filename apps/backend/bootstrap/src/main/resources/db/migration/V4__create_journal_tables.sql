@@ -3,35 +3,18 @@ CREATE TABLE journal.journals (
     user_id UUID NOT NULL,
     record_day_id UUID NOT NULL,
     display_date DATE NOT NULL,
-    lifecycle_status TEXT NOT NULL,
     title TEXT NOT NULL,
-    content JSONB NOT NULL,
-    current_revision INT NOT NULL DEFAULT 1,
+    body TEXT NOT NULL,
     version BIGINT NOT NULL DEFAULT 0,
     source_revision BIGINT NOT NULL,
-    confirmed_at TIMESTAMPTZ NULL,
-    deleted_at TIMESTAMPTZ NULL,
-    purge_after TIMESTAMPTZ NULL,
+    generation_id UUID NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    generated_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_journal_journals_user_record_day UNIQUE (user_id, record_day_id)
 );
 
 CREATE INDEX idx_journal_user_display_date ON journal.journals (user_id,display_date);
-
-CREATE TABLE journal.journal_revisions (
-    id UUID PRIMARY KEY,
-    journal_id UUID NOT NULL,
-    user_id UUID NOT NULL,
-    revision_no INT NOT NULL,
-    title TEXT NOT NULL,
-    content JSONB NOT NULL,
-    edited_by TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    CONSTRAINT fk_journal_journal_revisions_journal
-        FOREIGN KEY (journal_id) REFERENCES journal.journals (id)
-);
-
-CREATE INDEX idx_journal_journal_revisions_journal_id ON journal.journal_revisions (journal_id);
-CREATE INDEX idx_journal_journal_revisions_user_id ON journal.journal_revisions (user_id);
 
 CREATE TABLE journal.generation_jobs (
     id UUID PRIMARY KEY,

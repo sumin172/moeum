@@ -28,6 +28,14 @@ class GenerationJobRepositoryImpl(
     override fun save(job: GenerationJob): GenerationJob =
         jpaRepository.save(job.toEntity()).toDomain()
 
+    override fun lockClaim(job: GenerationJob) {
+        val current = jpaRepository.findLockedByUserIdAndId(job.userId.value,job.id.value)
+        if (current == null || current.recordDayId != job.recordDayId.value ||
+            current.version != job.state.version || current.status != com.moeum.platform.job.JobStatus.PROCESSING) {
+            throw org.springframework.orm.ObjectOptimisticLockingFailureException(GenerationJob::class.java,job.id.value)
+        }
+    }
+
     override fun findByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): GenerationJob? =
         jpaRepository.findByUserIdAndRecordDayId(userId.value, recordDayId.value)?.toDomain()
 

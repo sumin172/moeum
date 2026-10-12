@@ -5,17 +5,14 @@ import com.moeum.platform.runtime.ExecutionRole
 
 import com.moeum.identity.application.publicapi.Feature
 import com.moeum.identity.application.publicapi.FeatureAccessQuery
-import com.moeum.journal.application.command.ConfirmJournalService
 import com.moeum.journal.application.command.EditJournalService
 import com.moeum.journal.application.command.RetryJournalGenerationService
 import com.moeum.journal.application.query.GetJournalService
-import com.moeum.journal.interfaces.dto.ConfirmJournalRequest
 import com.moeum.journal.interfaces.dto.EditJournalRequest
 import com.moeum.journal.interfaces.dto.GenerationStatusResponse
 import com.moeum.journal.interfaces.dto.JournalDayResponse
 import com.moeum.journal.interfaces.dto.JournalResponse
 import com.moeum.kernel.UserId
-import com.moeum.kernel.UuidV7
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
@@ -38,7 +35,6 @@ import com.moeum.kernel.RecordDayId
 class JournalController(
     private val getJournalService: GetJournalService,
     private val editJournalService: EditJournalService,
-    private val confirmJournalService: ConfirmJournalService,
     private val retryJournalGenerationService: RetryJournalGenerationService,
     private val featureAccessQuery: FeatureAccessQuery,
 ) {
@@ -61,17 +57,6 @@ class JournalController(
     ): JournalResponse =
         // 수정은 JOURNAL_EDIT 권한이 있어야만 성공하므로 응답의 editable은 항상 true
         JournalResponse.from(editJournalService.edit(userId, RecordDayId(recordDayId), request.title, request.body, request.version), editable = true)
-
-    @PostMapping("/{recordDayId}/confirm")
-    fun confirm(
-        @AuthenticationPrincipal userId: UserId,
-        @PathVariable recordDayId: UUID,
-        @RequestBody request: ConfirmJournalRequest,
-    ): JournalResponse {
-        // 이 요청이 확정 → JournalConfirmed로 이어지는 흐름의 시작이다
-        val confirmed = confirmJournalService.confirm(userId, RecordDayId(recordDayId), request.version, correlationId = UuidV7.generate())
-        return JournalResponse.from(confirmed, featureAccessQuery.isEnabled(userId, Feature.JOURNAL_EDIT))
-    }
 
     @PostMapping("/{recordDayId}/generation-attempts")
     @ResponseStatus(HttpStatus.ACCEPTED)

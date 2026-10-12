@@ -4,7 +4,6 @@ import com.moeum.identity.domain.SubscriptionRepository
 import com.moeum.identity.domain.model.Plan
 import com.moeum.identity.domain.model.Subscription
 import com.moeum.identity.domain.model.SubscriptionId
-import com.moeum.identity.domain.model.SubscriptionSource
 import com.moeum.kernel.UserId
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -27,9 +26,6 @@ class SubscriptionJpaEntity(
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     val plan: Plan,
-    @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
-    val source: SubscriptionSource,
     @Column(name = "starts_at", nullable = false)
     val startsAt: Instant,
     @Column(name = "ends_at")
@@ -56,12 +52,7 @@ class SubscriptionRepositoryImpl(
     override fun findActiveByUserId(userId: UserId, now: Instant): List<Subscription> =
         jpaRepository.findActiveByUserId(userId.value, now).map { it.toDomain() }
 
-    override fun save(subscription: Subscription): Subscription =
-        jpaRepository.save(subscription.toEntity()).toDomain()
 }
 
 private fun SubscriptionJpaEntity.toDomain(): Subscription =
-    Subscription(SubscriptionId(id), UserId(userId), plan, source, startsAt, endsAt, revokedAt, createdAt)
-
-private fun Subscription.toEntity(): SubscriptionJpaEntity =
-    SubscriptionJpaEntity(id.value, userId.value, plan, source, startsAt, endsAt, revokedAt, createdAt)
+    Subscription(SubscriptionId(id), UserId(userId), plan, startsAt, endsAt, revokedAt, createdAt)

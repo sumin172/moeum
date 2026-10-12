@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
-// 업무 모듈의 예외 처리기가 다루지 않은 예외의 마지막 처리기. 클라이언트 요청 형식 오류는 400, 나머지는 500.
+// 업무 모듈의 예외 처리기가 다루지 않은 예외의 마지막 처리기. 요청 형식 오류는 400, 없는 경로는 404, 나머지는 500.
 @ConditionalOnRole(ExecutionRole.API)
 @RestControllerAdvice
 class GlobalFallbackExceptionHandler {
@@ -33,6 +33,10 @@ class GlobalFallbackExceptionHandler {
 
     @ExceptionHandler(Exception::class)
     fun handleUnexpected(e: Exception): ResponseEntity<ErrorResponse> {
+        // 삭제되거나 없는 경로의 Spring 404를 일반 서버 오류로 바꾸지 않는다.
+        if (e is org.springframework.web.ErrorResponse && e.statusCode.value() == 404) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse(code="NOT_FOUND",message="요청한 경로가 없습니다"))
+        }
         log.error("처리되지 않은 예외", e)
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(ErrorResponse(code = PlatformErrorCode.INTERNAL_ERROR.code, message = PlatformErrorCode.INTERNAL_ERROR.description))

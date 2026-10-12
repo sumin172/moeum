@@ -55,7 +55,6 @@ class ResponseJobExecutorTest {
             UUID.randomUUID(),
             content,
             "gemini-flash-latest",
-            "google",
             "v1",
             10,
             5,

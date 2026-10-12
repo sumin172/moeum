@@ -5,7 +5,6 @@ import com.moeum.conversation.domain.model.MessageId
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import java.time.Instant
-import java.time.ZoneId
 import java.util.*
 
 fun userMessage(
@@ -23,7 +22,6 @@ fun userMessage(
         content = content,
         occurredAt = occurredAt,
         timezone = timezone,
-        localDate = occurredAt.atZone(ZoneId.of(timezone)).toLocalDate(),
         recordDayId = recordDayId,
         sourceSequence = sourceSequence,
         clientMessageId = UUID.randomUUID(),
