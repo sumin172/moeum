@@ -8,6 +8,7 @@ import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.Instant
@@ -18,11 +19,13 @@ import java.util.UUID
 @Repository
 class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayRepository {
     override fun lockState(userId: UserId): UserRecordState {
-        jdbc.update(
-            "INSERT INTO conversation.user_record_states(user_id, close_time) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING",
-            userId.value, RecordDay.DEFAULT_CLOSE_TIME,
-        )
-        return jdbc.query("SELECT * FROM conversation.user_record_states WHERE user_id = ? FOR UPDATE", stateMapper, userId.value).single()
+        val lockSql="SELECT * FROM conversation.user_record_states WHERE user_id = ? FOR UPDATE"
+        jdbc.query(lockSql,stateMapper,userId.value).firstOrNull()?.let { return it }
+        return jdbc.query("""
+            INSERT INTO conversation.user_record_states(user_id,close_time) VALUES (?,?)
+            ON CONFLICT (user_id) DO NOTHING RETURNING *
+        """.trimIndent(),stateMapper,userId.value,RecordDay.DEFAULT_CLOSE_TIME).firstOrNull()
+            ?: jdbc.query(lockSql,stateMapper,userId.value).single()
     }
 
     override fun findState(userId: UserId): UserRecordState? =
@@ -43,12 +46,12 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayReposit
 
     override fun latestClosedBoundary(userId: UserId, occurredAt: Instant): Instant? =
         jdbc.query("SELECT closed_at FROM conversation.record_days WHERE user_id = ? AND closed_at <= ? ORDER BY closed_at DESC LIMIT 1",
-            RowMapper { rs, _ -> rs.getTimestamp(1).toInstant() }, userId.value, ts(occurredAt)).firstOrNull()
+            { rs, _ -> rs.getTimestamp(1).toInstant() }, userId.value, ts(occurredAt)).firstOrNull()
 
     override fun overlaps(userId: UserId, startAt: Instant, endAt: Instant): Boolean =
-        jdbc.queryForObject(
+        jdbc.queryForObject<Boolean>(
             "SELECT EXISTS(SELECT 1 FROM conversation.record_days WHERE user_id = ? AND start_at < ? AND COALESCE(closed_at, close_at) > ?)",
-            Boolean::class.java, userId.value, ts(endAt), ts(startAt),
+            userId.value, ts(endAt), ts(startAt),
         )!!
 
     override fun list(userId: UserId, displayDate: LocalDate?, limit: Int): List<RecordDay> =
@@ -81,7 +84,7 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayReposit
     override fun claimDueClosure(now: Instant): RecordDay? {
         val candidates = jdbc.query(
             "SELECT user_id,id FROM conversation.record_days WHERE closed_at IS NULL AND close_at <= ? ORDER BY close_at LIMIT 32",
-            RowMapper { rs, _ -> UserId(rs.getObject("user_id", UUID::class.java)) to RecordDayId(rs.getObject("id", UUID::class.java)) },
+            { rs, _ -> UserId(rs.getObject("user_id", UUID::class.java)) to RecordDayId(rs.getObject("id", UUID::class.java)) },
             ts(now),
         )
         for ((userId, id) in candidates) {

@@ -39,8 +39,35 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
 }
 
-tasks.withType<Test> {
-    useJUnitPlatform()
+tasks.named<Test>("test") {
+    useJUnitPlatform { excludeTags("capacity", "provider-smoke") }
+}
+
+tasks.register<Test>("capacityTest") {
+    description = "Disposable PostgreSQL and separate JVM capacity/failure experiments"
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("capacity") }
+    maxHeapSize = "2g"
+    outputs.upToDateWhen { false }
+    doFirst {
+        val runtimeClasspathFile = layout.buildDirectory.file("capacity/runtime-classpath.txt").get().asFile
+        runtimeClasspathFile.parentFile.mkdirs()
+        runtimeClasspathFile.writeText(sourceSets.test.get().runtimeClasspath.asPath)
+        systemProperty("capacity.classpathFile", runtimeClasspathFile.absolutePath)
+    }
+    providers.gradlePropertiesPrefixedBy("capacity.").get().forEach { (key, value) -> systemProperty(key, value) }
+    testLogging { showStandardStreams = true }
+}
+
+tasks.register<Test>("providerSmokeTest") {
+    description = "At most two synthetic Gemini requests; requires GEMINI_API_KEY"
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("provider-smoke") }
+    outputs.upToDateWhen { false }
 }
 
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {

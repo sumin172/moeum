@@ -1,0 +1,56 @@
+{
+  "at": "2026-10-18T03:10:00.936Z",
+  "command": "gradlew.bat test :bootstrap:providerSmokeTest --console=plain --offline --no-daemon -Pkotlin.compiler.execution.strategy=in-process",
+  "modules": {
+    "bootstrap": {
+      "tests": 62,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "conversation": {
+      "tests": 41,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "identity": {
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "journal": {
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "platform": {
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "shared-kernel": {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "total": {
+    "tests": 161,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "providerSmoke": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "providerSmokeNote": "GEMINI_API_KEY environment condition was not met; real provider calls and quotas were not verified",
+  "scope": "Normal regression excludes capacity, capacity-jdbc and provider-smoke tags. Unchanged tasks may be up-to-date. Full regression ran during the five-minute lease wait, after performance injection and offline conversation checks."
+}

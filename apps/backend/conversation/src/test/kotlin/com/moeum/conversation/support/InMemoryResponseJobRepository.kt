@@ -13,6 +13,11 @@ import java.time.Instant
 class InMemoryResponseJobRepository : ResponseJobRepository {
     val jobs = linkedMapOf<ResponseJobId, ResponseJob>()
 
+    override fun insert(job: ResponseJob) {
+        check(job.id !in jobs)
+        jobs[job.id]=job
+    }
+
     override fun save(job: ResponseJob): ResponseJob {
         val current = jobs[job.id]
         if (current != null && current.state.version != job.state.version) {
@@ -36,14 +41,18 @@ class InMemoryResponseJobRepository : ResponseJobRepository {
     override fun findAllByUserIdAndIdIn(userId: UserId, ids: Collection<ResponseJobId>) =
         jobs.values.filter { it.userId==userId && it.id in ids }
 
-    override fun claimNext(now: Instant, leaseExpiresAt: Instant): ResponseJob? =
+    override fun claimBatch(now: Instant, leaseExpiresAt: Instant, limit: Int): List<ResponseJob> =
         jobs.values
+            .asSequence()
             .filter { isClaimable(it, now) && jobs.values.none { earlier ->
                 earlier.recordDayId==it.recordDayId && earlier.inputSourceRevision<it.inputSourceRevision &&
-                    earlier.state.status in listOf(JobStatus.PENDING,JobStatus.PROCESSING)
+                        earlier.state.status in listOf(JobStatus.PENDING,JobStatus.PROCESSING)
             } }
-            .minByOrNull { it.state.nextAttemptAt }
-            ?.let { claimed(it, now, leaseExpiresAt) }
+            .sortedBy { it.state.nextAttemptAt }
+            .distinctBy { it.recordDayId }
+            .take(limit)
+            .map { claimed(it, now, leaseExpiresAt) }
+            .toList()
 
     private fun isClaimable(job: ResponseJob, now: Instant): Boolean {
         val state = job.state

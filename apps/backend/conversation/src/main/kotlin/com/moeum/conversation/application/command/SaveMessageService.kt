@@ -67,32 +67,38 @@ class SaveMessageService(
             return SaveMessageResult.Accepted(existing,
                 responseJobRepository.findByUserIdAndUserMessageId(userId, existing.id), record)
         }
-        val active = state.activeRecordDayId?.let { recordDayRepository.find(userId, it, lock = true)!! }
+        var active = state.activeRecordDayId?.let { recordDayRepository.find(userId, it, lock = true)!! }
         if (active != null && active.closedAt == null && now >= active.closeAt) {
-            recordDayRepository.update(active.closeIfDue(now))
+            active = active.closeIfDue(now)
+            recordDayRepository.update(active)
             state = state.copy(activeRecordDayId = null)
             recordDayRepository.saveState(state)
         }
+        val lockedActive = active
         var created = false
         var record = if (command.recordDayId != null) {
-            recordDayRepository.find(userId, command.recordDayId, lock = true)
+            lockedActive?.takeIf { it.id == command.recordDayId }
+                ?: recordDayRepository.find(userId, command.recordDayId, lock = true)
                 ?: throw RecordDayNotFoundException("기록이 없습니다")
         } else {
-            val candidates = recordDayRepository.findContaining(userId, occurredAt)
-            if (candidates.size > 1) throw RecordAssignmentConflictException("기록 구간이 모호합니다")
-            candidates.singleOrNull()?.let { recordDayRepository.find(userId, it.id, lock = true)!! }
-                ?: run {
-                    val next = RecordDay.create(userId, occurredAt, zone, state.closeTime,
-                        recordDayRepository.latestClosedBoundary(userId, occurredAt)).closeIfDue(now)
-                    if (recordDayRepository.overlaps(userId, next.startAt, next.closedAt ?: next.closeAt)) {
-                        throw RecordAssignmentConflictException("기존 기록 구간과 겹칩니다")
+            // 같은 사용자 상태 잠금 아래 기록 구간의 비중첩을 보장한다. 이미 잠근 활성 기록은 재조회하지 않는다.
+            lockedActive?.takeIf { it.contains(occurredAt) } ?: run {
+                val candidates = recordDayRepository.findContaining(userId, occurredAt)
+                if (candidates.size > 1) throw RecordAssignmentConflictException("기록 구간이 모호합니다")
+                candidates.singleOrNull()?.let { recordDayRepository.find(userId, it.id, lock = true)!! }
+                    ?: run {
+                        val next = RecordDay.create(userId, occurredAt, zone, state.closeTime,
+                            recordDayRepository.latestClosedBoundary(userId, occurredAt)).closeIfDue(now)
+                        if (recordDayRepository.overlaps(userId, next.startAt, next.closedAt ?: next.closeAt)) {
+                            throw RecordAssignmentConflictException("기존 기록 구간과 겹칩니다")
+                        }
+                        if (next.closedAt == null && state.activeRecordDayId != null) {
+                            throw RecordAssignmentConflictException("이미 다른 열린 기록이 있습니다")
+                        }
+                        created = true
+                        next
                     }
-                    if (next.closedAt == null && state.activeRecordDayId != null) {
-                        throw RecordAssignmentConflictException("이미 다른 열린 기록이 있습니다")
-                    }
-                    created = true
-                    next
-                }
+            }
         }
         if (!record.contains(occurredAt)) throw RecordAssignmentConflictException("발화 시각이 기록 구간 밖입니다")
         if (record.frozenSourceRevision != null) return SaveMessageResult.Discarded(record.id)
@@ -117,7 +123,7 @@ class SaveMessageService(
         )
         val saved = messageRepository.append(message)
         // 닫힌 과거 기록에는 AI 응답을 만들지 않는다.
-        val job = if (record.closedAt != null) null else responseJobRepository.save(ResponseJob.pending(saved, now))
+        val job = if (record.closedAt != null) null else ResponseJob.pending(saved, now).also(responseJobRepository::insert)
         return SaveMessageResult.Accepted(saved, job, record)
     }
 }

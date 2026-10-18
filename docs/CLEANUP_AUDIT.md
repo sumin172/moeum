@@ -1,7 +1,7 @@
-# R1~R5 코드 정리 점검
+# R1~R6 코드 정리 점검
 
-2026-10-12 현재 실행 경로를 기준으로 점검했다.
-Kotlin 운영 코드 147개 파일과 테스트 50개 파일의 선언·참조를 검색하고,
+2026-10-18 현재 실행 경로를 기준으로 점검했다.
+Kotlin 운영 코드 147개 파일과 테스트 57개 파일의 선언·참조를 검색하고,
 저빈도 참조 후보의 실제 호출부와 Spring/JPA/직렬화 등록을 확인했다.
 Gradle 의존성·버전 카탈로그·실행 역할 설정·초기 Flyway·관련 문서도 점검했다.
 
@@ -18,6 +18,8 @@ Gradle 의존성·버전 카탈로그·실행 역할 설정·초기 Flyway·관�
 | LLM 호출 원장 / platform 스키마 | 호출 진단을 bounded 관측 큐·로그·메트릭으로 교체. 원장 포트·JPA 엔티티·어댑터·테스트·V5와 platform의 JPA 플러그인/의존성 제거 |
 | 토큰·작업 생성 메타데이터 | Message/GenerationJob 토큰 컬럼과 전달 인자, 결과와 중복인 작업 provider/model/promptVersion/generationId/generatedAt 제거 |
 | LLM 사용자 문맥·생성 전달 계약 | 원장 제거 뒤 소비처가 사라진 LlmRequest.userId와 응답기/일기 생성기 사용자 인자, 공급자·토큰 전달 필드 제거. 테스트도 작업 문맥을 사용 |
+| 건별 대화 선점 경로 | ResponseJobRepository.claimNext·운영 ResponseJobExecutor.executeNext와 슬롯별 scheduler 반복을 배치 선점으로 교체. 별도 동시 선점 세마포어·설정·관련 옛 테스트를 제거 |
+| 저장 중복 조회 | 기존 상태의 반복 INSERT 충돌 검사, 잠근 활성 기록 재조회와 신규 응답 작업 merge 존재 검사를 제거. 최초 상태 생성 경쟁과 마감 입력 계약은 유지 |
 | 주석·문서·import                          | 하루 전체 대화 조회 등 교체된 설명과 미사용 import, 이미 정리한 항목의 후속 단계 TODO를 현재 구조로 정리                            |
 
 DB는 미생성 기준으로 V1~V4 초기 파일에 최종 스키마를 반영한다. 호출 원장 전용 V5는 제거했다.
@@ -41,4 +43,4 @@ R1~R4에서 제거한 trigger/원본 스캔 planner/날짜 키 경로/구 quota/
 기능 회귀와 새로운 초기 스키마 검증은 [실행 역할](WORKER_ROLES.md)의 현재 결과를 따른다.
 확정·리비전의 테스트 전용 객체도 운영 경로에서 제거한 상태다.
 
-R5 관측 경로와 완료 작업 정리는 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다. R6의 대규모 성능·장애 시험은 이 점검 범위에 포함하지 않는다.
+R5 관측 경로와 완료 작업 정리는 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다. R6의 부하·복구 결과와 미검증 범위는 [측정 결과](CAPACITY_RESULTS.md)를 따른다. 재사용할 부하·복구 시험 제어 서버와 합성 provider는 test 소스에만 있다. 일회성 JDBC 왕복 비교 테스트·Gradle 작업과 JFR 제어 endpoint·설정은 제거했다.

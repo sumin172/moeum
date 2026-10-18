@@ -2,6 +2,7 @@ package com.moeum.conversation.application.command
 
 import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.ConversationResponse
+import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageRole
 import com.moeum.conversation.domain.model.RecordDay
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.ArrayDeque
 import kotlin.collections.List
 import kotlin.collections.filter
@@ -61,12 +63,12 @@ class ResponseJobExecutorTest {
 
     private val failure = { throw LlmException("LLM 호출 실패") }
 
-    private fun executor(responder: ConversationResponder) = ResponseJobExecutor(
-        responseJobRepository = jobRepository,
+    private fun executor(responder: ConversationResponder, repository: ResponseJobRepository = jobRepository) = ResponseJobExecutor(
+        responseJobRepository = repository,
         messageRepository = messageRepository,
         conversationResponder = responder,
-        saveGeneratedResponseService = SaveGeneratedResponseService(messageRepository, jobRepository, timeProvider, records),
-        markResponseFailedService = MarkResponseFailedService(jobRepository, testResponseJobProperties, timeProvider),
+        saveGeneratedResponseService = SaveGeneratedResponseService(messageRepository, repository, timeProvider, records),
+        markResponseFailedService = MarkResponseFailedService(repository, testResponseJobProperties, timeProvider),
         responseJobProperties = testResponseJobProperties,
         timeProvider = timeProvider,
         limits = ConversationLimitProperties(),
@@ -79,6 +81,32 @@ class ResponseJobExecutorTest {
 
     private fun jobOf(job: ResponseJob) = jobRepository.jobs.getValue(job.id)
     private fun assistantMessages() = messageRepository.messages.values.filter { it.role == MessageRole.ASSISTANT }
+
+    private fun ResponseJobExecutor.executeNext(): Boolean {
+        val job = claim(1).singleOrNull() ?: return false
+        execute(job)
+        return true
+    }
+
+    @Test
+    fun `빈 큐는 다음 poll까지 반복 조회하지 않는다`() {
+        val probes = AtomicInteger()
+        val repository = object : ResponseJobRepository by jobRepository {
+            override fun claimBatch(now: Instant, leaseExpiresAt: Instant, limit: Int): List<ResponseJob> {
+                probes.incrementAndGet()
+                return jobRepository.claimBatch(now, leaseExpiresAt, limit)
+            }
+        }
+        val runner = executor(ScriptedResponder(ArrayDeque(listOf(answer()))), repository)
+        repeat(32) { assertThat(runner.executeNext()).isFalse() }
+        assertThat(probes.get()).isEqualTo(1)
+        enqueue()
+        assertThat(runner.canPoll()).isFalse()
+        timeProvider.fixedNow = start.plusMillis(500)
+        assertThat(runner.canPoll()).isTrue()
+        assertThat(runner.executeNext()).isTrue()
+        assertThat(assistantMessages()).hasSize(1)
+    }
 
     @Test
     fun `성공하면 assistant 메시지를 저장하고 작업을 완료한다`() {
@@ -173,7 +201,7 @@ class ResponseJobExecutorTest {
         // LLM 호출이 리스(2분)보다 오래 걸리는 사이 다른 워커가 같은 작업을 다시 잡는 상황
         val slowThenReclaimed = {
             timeProvider.fixedNow = start.plus(Duration.ofMinutes(3))
-            jobRepository.claimNext(timeProvider.fixedNow, timeProvider.fixedNow.plus(Duration.ofMinutes(2)))
+            jobRepository.claimBatch(timeProvider.fixedNow, timeProvider.fixedNow.plus(Duration.ofMinutes(2)), 1)
             answer("늦은 응답").invoke()
         }
 

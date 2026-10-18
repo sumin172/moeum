@@ -1,0 +1,204 @@
+{
+  "note": "Historical failed runs. conversationClaims is the removed per-item claim concurrency setting, not the current batch size. Baseline comparison has one conversation worker; scaled phases have two. These are sequential local experiments, not controlled repeat-trial confidence intervals.",
+  "runs": [
+    {
+      "label": "before-api-query-reduction",
+      "run": "2026-10-18T01-58-51.496956900Z-297297d7",
+      "settings": {
+        "profile": "P1",
+        "scenario": "benchmark",
+        "durationSeconds": 60,
+        "warmupSeconds": 30,
+        "rps": 250,
+        "conversationSlots": 320,
+        "journalSlots": 48,
+        "conversationReplicas": 2,
+        "conversationClaims": 4,
+        "conversationDelayMs": 1000,
+        "journalDelayMs": 10000,
+        "historyRecords": 50000,
+        "journalBurst": 1000,
+        "drainSeconds": 120,
+        "journalDrainSeconds": 400,
+        "apiPool": 16,
+        "conversationPool": 12,
+        "journalPool": 4
+      },
+      "measurementScope": "synthetic provider, local Windows JVMs and disposable PostgreSQL; not an external provider or 360M-source-row approval",
+      "phases": [
+        {
+          "name": "conversation-baseline",
+          "injection": {
+            "offered": 15000,
+            "dispatched": 13288,
+            "generatorRejected": 1712,
+            "elapsedSeconds": 62.14468,
+            "dispatchedRps": 213.82361289815958
+          },
+          "apiLatency": {
+            "samples": 13288,
+            "p50Ms": 1449.8111,
+            "p95Ms": 3528.8173,
+            "p99Ms": 4540.059,
+            "maxMs": 7376.6317
+          },
+          "responseWaiting": {
+            "samples": 13288,
+            "p50Ms": 49487.8585,
+            "p95Ms": 51015.9022,
+            "p99Ms": 51379.9306,
+            "maxMs": 51541.001
+          },
+          "responseStates": {
+            "COMPLETED": 13288
+          },
+          "integrity": {
+            "acceptedRequests": 13288,
+            "acceptedUniqueMessages": 13288,
+            "storedAcceptedMessages": 13288,
+            "ownerClientAndRecordVerified": true,
+            "acceptedWithoutResponseJob": 0
+          },
+          "apiGoalPassed": false,
+          "responseWaitingGoalPassed": false
+        },
+        {
+          "name": "conversation-scaled",
+          "injection": {
+            "offered": 15000,
+            "dispatched": 12703,
+            "generatorRejected": 2297,
+            "elapsedSeconds": 62.1067581,
+            "dispatchedRps": 204.53490712792492
+          },
+          "apiLatency": {
+            "samples": 12703,
+            "p50Ms": 2339.4177,
+            "p95Ms": 2886.235,
+            "p99Ms": 4403.292,
+            "maxMs": 7074.1572
+          },
+          "responseWaiting": {
+            "samples": 12703,
+            "p50Ms": 140.2852,
+            "p95Ms": 543.9387,
+            "p99Ms": 889.1559,
+            "maxMs": 3145.6331
+          },
+          "responseStates": {
+            "COMPLETED": 12703
+          },
+          "integrity": {
+            "acceptedRequests": 12703,
+            "acceptedUniqueMessages": 12703,
+            "storedAcceptedMessages": 12703,
+            "ownerClientAndRecordVerified": true,
+            "acceptedWithoutResponseJob": 0
+          },
+          "apiGoalPassed": false,
+          "responseWaitingGoalPassed": true
+        }
+      ]
+    },
+    {
+      "label": "after-api-query-reduction-before-batch",
+      "run": "2026-10-18T02-29-10.568484500Z-32436ae3",
+      "settings": {
+        "profile": "P1",
+        "scenario": "benchmark",
+        "durationSeconds": 60,
+        "warmupSeconds": 30,
+        "rps": 250,
+        "conversationSlots": 320,
+        "journalSlots": 48,
+        "conversationReplicas": 2,
+        "conversationClaims": 4,
+        "conversationDelayMs": 1000,
+        "journalDelayMs": 10000,
+        "historyRecords": 50000,
+        "journalBurst": 1000,
+        "drainSeconds": 120,
+        "journalDrainSeconds": 400,
+        "apiPool": 16,
+        "conversationPool": 12,
+        "journalPool": 4,
+        "profileJvm": false
+      },
+      "measurementScope": "synthetic provider, local Windows JVMs and disposable PostgreSQL; not an external provider or 360M-source-row approval",
+      "phases": [
+        {
+          "name": "conversation-baseline",
+          "injection": {
+            "offered": 15000,
+            "dispatched": 15000,
+            "generatorRejected": 0,
+            "elapsedSeconds": 60.0364501,
+            "dispatchedRps": 249.84821679188522
+          },
+          "apiLatency": {
+            "samples": 15000,
+            "p50Ms": 25.9302,
+            "p95Ms": 233.9515,
+            "p99Ms": 475.1779,
+            "maxMs": 847.9423
+          },
+          "responseWaiting": {
+            "samples": 15000,
+            "p50Ms": 14945.1755,
+            "p95Ms": 17087.3811,
+            "p99Ms": 17228.9543,
+            "maxMs": 17314.0407
+          },
+          "responseStates": {
+            "COMPLETED": 15000
+          },
+          "integrity": {
+            "acceptedRequests": 15000,
+            "acceptedUniqueMessages": 15000,
+            "storedAcceptedMessages": 15000,
+            "ownerClientAndRecordVerified": true,
+            "acceptedWithoutResponseJob": 0
+          },
+          "apiGoalPassed": true,
+          "responseWaitingGoalPassed": false
+        },
+        {
+          "name": "conversation-scaled",
+          "injection": {
+            "offered": 15000,
+            "dispatched": 15000,
+            "generatorRejected": 0,
+            "elapsedSeconds": 60.0412855,
+            "dispatchedRps": 249.82809536947704
+          },
+          "apiLatency": {
+            "samples": 15000,
+            "p50Ms": 70.1411,
+            "p95Ms": 1274.707,
+            "p99Ms": 1330.5854,
+            "maxMs": 2608.4609
+          },
+          "responseWaiting": {
+            "samples": 15000,
+            "p50Ms": 21057.1458,
+            "p95Ms": 28972.0879,
+            "p99Ms": 29713.0211,
+            "maxMs": 29855.284
+          },
+          "responseStates": {
+            "COMPLETED": 15000
+          },
+          "integrity": {
+            "acceptedRequests": 15000,
+            "acceptedUniqueMessages": 15000,
+            "storedAcceptedMessages": 15000,
+            "ownerClientAndRecordVerified": true,
+            "acceptedWithoutResponseJob": 0
+          },
+          "apiGoalPassed": false,
+          "responseWaitingGoalPassed": false
+        }
+      ]
+    }
+  ]
+}

@@ -78,11 +78,10 @@ CREATE TABLE conversation.response_jobs (
     CONSTRAINT uq_conversation_response_jobs_user_message UNIQUE (user_message_id)
 );
 
--- 작업 선점(JobClaimSql) 대상만 담는 부분 인덱스
-CREATE INDEX idx_conversation_response_jobs_pending ON conversation.response_jobs (next_attempt_at)
-    WHERE status = 'PENDING';
-CREATE INDEX idx_conversation_response_jobs_processing ON conversation.response_jobs (lease_expires_at)
-    WHERE status = 'PROCESSING';
+-- 완료 이력을 제외하고 선점할 작업을 예약 순서로 찾는다.
+CREATE INDEX idx_response_due ON conversation.response_jobs
+    ((CASE WHEN status='PENDING' THEN next_attempt_at ELSE lease_expires_at END),created_at)
+    WHERE status IN ('PENDING','PROCESSING');
 
 CREATE UNIQUE INDEX uq_response_stream_source ON conversation.response_jobs(record_day_id,input_source_revision);
 CREATE INDEX idx_response_stream_active ON conversation.response_jobs(record_day_id,input_source_revision)

@@ -17,12 +17,11 @@ class ResponseJobScheduler(
 ) {
     @Scheduled(
         scheduler = "conversationPollScheduler",
-        fixedDelayString = "\${moeum.conversation.response-job.poll-interval:PT1S}",
-        initialDelayString = "\${moeum.conversation.response-job.initial-delay:PT0S}",
+        fixedDelayString = $$"${moeum.conversation.response-job.poll-interval:PT1S}",
+        initialDelayString = $$"${moeum.conversation.response-job.initial-delay:PT0S}",
     )
     fun pollDueJobs() {
-        repeat(pool.concurrency) {
-            if (!pool.submit { responseJobExecutor.executeNext() }) return
-        }
+        if (!responseJobExecutor.canPoll()) return
+        pool.submitBatch(responseJobExecutor.claimBatchSize,responseJobExecutor::claim,responseJobExecutor::execute)
     }
 }
