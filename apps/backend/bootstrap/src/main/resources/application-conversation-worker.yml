@@ -8,6 +8,9 @@ spring:
       pool-name: conversation-db
 
 moeum:
+  conversation:
+    response-job:
+      claim-batch-size: ${CONVERSATION_CLAIM_BATCH_SIZE:32}
   runtime:
     roles: conversation-worker
     conversation-concurrency: ${CONVERSATION_WORKER_CONCURRENCY:8}

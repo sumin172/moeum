@@ -1,0 +1,756 @@
+{
+  "startedAt" : "2026-10-18T02:47:23.144546Z",
+  "state" : "measurement-failed",
+  "settings" : {
+    "profile" : "P1",
+    "scenario" : "benchmark",
+    "durationSeconds" : 60,
+    "warmupSeconds" : 30,
+    "rps" : 250,
+    "conversationSlots" : 320,
+    "journalSlots" : 48,
+    "conversationReplicas" : 2,
+    "conversationBatchSize" : 32,
+    "conversationDelayMs" : 1000,
+    "journalDelayMs" : 10000,
+    "historyRecords" : 50000,
+    "journalBurst" : 1000,
+    "drainSeconds" : 120,
+    "journalDrainSeconds" : 400,
+    "apiPool" : 16,
+    "conversationPool" : 12,
+    "journalPool" : 4,
+    "profileJvm" : false
+  },
+  "java" : "21.0.8",
+  "os" : "Windows 11 10.0",
+  "hostAvailableProcessors" : 22,
+  "driverMaxHeapBytes" : 2147483648,
+  "databaseLimits" : {
+    "cpu" : 4,
+    "memoryBytes" : 4294967296,
+    "sharedBuffers" : "256MB",
+    "maxConnections" : 100
+  },
+  "measurementScope" : "synthetic provider, local Windows JVMs and disposable PostgreSQL; not an external provider or 360M-source-row approval",
+  "runtimeSnapshot" : "workspace build outputs copied before first role starts; dependency cache entries remain immutable",
+  "activePhase" : "conversation-scaled",
+  "postgresImage" : "postgres:17-alpine",
+  "containerDisk" : "Filesystem           1K-blocks      Used Available Use% Mounted on\n/dev/sde             1055762868  23309104 978750292   2% /etc/resolv.conf",
+  "seedSeconds" : 90.1996832,
+  "initialDatabase" : {
+    "databaseBytes" : 3420791311,
+    "tables" : [ {
+      "schemaname" : "conversation",
+      "relname" : "conversation_usage",
+      "n_live_tup" : 0,
+      "total_bytes" : 8192
+    }, {
+      "schemaname" : "conversation",
+      "relname" : "messages",
+      "n_live_tup" : 2000250,
+      "total_bytes" : 3242909696
+    }, {
+      "schemaname" : "conversation",
+      "relname" : "record_days",
+      "n_live_tup" : 50000,
+      "total_bytes" : 16596992
+    }, {
+      "schemaname" : "conversation",
+      "relname" : "response_jobs",
+      "n_live_tup" : 208140,
+      "total_bytes" : 83959808
+    }, {
+      "schemaname" : "conversation",
+      "relname" : "user_record_states",
+      "n_live_tup" : 278,
+      "total_bytes" : 57344
+    }, {
+      "schemaname" : "identity",
+      "relname" : "auth_sessions",
+      "n_live_tup" : 0,
+      "total_bytes" : 24576
+    }, {
+      "schemaname" : "identity",
+      "relname" : "subscriptions",
+      "n_live_tup" : 0,
+      "total_bytes" : 24576
+    }, {
+      "schemaname" : "identity",
+      "relname" : "users",
+      "n_live_tup" : 278,
+      "total_bytes" : 98304
+    }, {
+      "schemaname" : "journal",
+      "relname" : "generation_jobs",
+      "n_live_tup" : 10008,
+      "total_bytes" : 3309568
+    }, {
+      "schemaname" : "journal",
+      "relname" : "journals",
+      "n_live_tup" : 50000,
+      "total_bytes" : 65634304
+    }, {
+      "schemaname" : "public",
+      "relname" : "flyway_schema_history",
+      "n_live_tup" : 4,
+      "total_bytes" : 49152
+    } ],
+    "sourceRows" : 1000000,
+    "assistantRows" : 999500
+  },
+  "phases" : [ {
+    "name" : "conversation-baseline",
+    "durationSeconds" : 60,
+    "startedAt" : "2026-10-18T02:50:04.681145900Z",
+    "injection" : {
+      "offered" : 15000,
+      "dispatched" : 15000,
+      "generatorRejected" : 0,
+      "elapsedSeconds" : 60.028943,
+      "dispatchedRps" : 249.87946231203838
+    },
+    "apiLatency" : {
+      "samples" : 15000,
+      "p50Ms" : 23.003,
+      "p95Ms" : 317.5811,
+      "p99Ms" : 952.6276,
+      "maxMs" : 1714.1495
+    },
+    "endToEndLatency" : {
+      "samples" : 15000,
+      "p50Ms" : 31.3732,
+      "p95Ms" : 324.1575,
+      "p99Ms" : 961.6818,
+      "maxMs" : 1716.2918
+    },
+    "generatorLag" : {
+      "samples" : 15000,
+      "p50Ms" : 7.3273,
+      "p95Ms" : 14.0638,
+      "p99Ms" : 14.8664,
+      "maxMs" : 71.6994
+    },
+    "httpStatuses" : {
+      "200" : 15000
+    },
+    "errorRate" : 0.0,
+    "responseWaiting" : {
+      "samples" : 15000,
+      "p50Ms" : 112.0018,
+      "p95Ms" : 1424.5301,
+      "p99Ms" : 1768.9275,
+      "maxMs" : 1924.8059
+    },
+    "responseStates" : {
+      "COMPLETED" : 15000
+    },
+    "responsesDrained" : true,
+    "integrity" : {
+      "acceptedRequests" : 15000,
+      "acceptedUniqueMessages" : 15000,
+      "storedAcceptedMessages" : 15000,
+      "ownerClientAndRecordVerified" : true,
+      "acceptedWithoutResponseJob" : 0
+    },
+    "maxResponseBacklog" : 746,
+    "journalBurst" : 0,
+    "journalsCompletedAfterDrains" : 0,
+    "journalAdditionalDrainSeconds" : 0.054132,
+    "journalCompletion" : {
+      "requested" : 0
+    },
+    "journalPolicyDuringLoad" : null,
+    "cleanupDeleted" : 0,
+    "metricSamples" : 59,
+    "resourcePeaks" : {
+      "api-16576" : {
+        "heapUsedBytes" : 3.5089172E8,
+        "dbActive" : 16.0,
+        "dbTotal" : 16.0,
+        "dbPending" : 221.0,
+        "providerActive" : 0.0,
+        "telemetryDropped" : 0.0,
+        "consoleDropped" : 0.0
+      },
+      "conversation-worker-18568" : {
+        "heapUsedBytes" : 1.46157776E8,
+        "dbActive" : 12.0,
+        "dbTotal" : 12.0,
+        "dbPending" : 234.0,
+        "providerActive" : 320.0,
+        "telemetryDropped" : 0.0,
+        "consoleDropped" : 0.0
+      }
+    },
+    "maxLockWaiters" : 0,
+    "databaseStatementsBefore" : {
+      "calls" : 124408,
+      "rows" : 2529326,
+      "total_exec_ms" : 134689.99358499996,
+      "shared_hits" : 59758609,
+      "shared_reads" : 936836,
+      "temp_writes" : 0
+    },
+    "databaseStatementsAfter" : {
+      "calls" : 399753,
+      "rows" : 3025749,
+      "total_exec_ms" : 170727.96019500008,
+      "shared_hits" : 68376379,
+      "shared_reads" : 938451,
+      "temp_writes" : 0
+    },
+    "databaseActivityBefore" : {
+      "xact_commit" : 27198,
+      "xact_rollback" : 1,
+      "blks_read" : 1074658,
+      "blks_hit" : 59894927,
+      "blk_read_time" : 4348.18,
+      "blk_write_time" : 10430.96,
+      "temp_bytes" : 0,
+      "deadlocks" : 0,
+      "wal_bytes" : 5853129222,
+      "wal_buffers_full" : 247940,
+      "wal_write" : 257273,
+      "wal_sync" : 8567,
+      "wal_write_time" : 2313.364,
+      "wal_sync_time" : 26734.454
+    },
+    "databaseActivityAfter" : {
+      "xact_commit" : 88266,
+      "xact_rollback" : 1,
+      "blks_read" : 1301474,
+      "blks_hit" : 68773656,
+      "blk_read_time" : 4926.546,
+      "blk_write_time" : 12348.474,
+      "temp_bytes" : 0,
+      "deadlocks" : 0,
+      "wal_bytes" : 5962634917,
+      "wal_buffers_full" : 247940,
+      "wal_write" : 270943,
+      "wal_sync" : 22230,
+      "wal_write_time" : 2848.165,
+      "wal_sync_time" : 55294.284
+    },
+    "topDatabaseStatements" : [ {
+      "query" : "insert into conversation.messages (client_message_id,content,created_at,generation_id,model,occurred_at,prompt_version,record_day_id,role,source_sequence,stream_sequence,timezone,user_id,id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+      "calls" : 29741.0,
+      "rows" : 29741.0,
+      "total_exec_time" : 4537.101812999985,
+      "mean_exec_time" : 0.15255377468814044,
+      "shared_blks_hit" : 603372.0,
+      "shared_blks_read" : 1422.0
+    }, {
+      "query" : "select mje1_0.id,mje1_0.client_message_id,mje1_0.content,mje1_0.created_at,mje1_0.generation_id,mje1_0.model,mje1_0.occurred_at,mje1_0.prompt_version,mje1_0.record_day_id,mje1_0.role,mje1_0.source_sequence,mje1_0.stream_sequence,mje1_0.timezone,mje1_0.user_id from conversation.messages mje1_0 where mje1_0.user_id=$1 and mje1_0.record_day_id=$2 and mje1_0.source_sequence<=$3 order by mje1_0.source_sequence desc,mje1_0.role fetch first $4 rows only",
+      "calls" : 14986.0,
+      "rows" : 269306.0,
+      "total_exec_time" : 4075.6228060000076,
+      "mean_exec_time" : 0.271962018283732,
+      "shared_blks_hit" : 361909.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT r.id FROM conversation.response_jobs j\n            JOIN conversation.record_days r ON r.id=j.record_day_id\n            WHERE j.status IN ($3,$4)\n                AND (CASE WHEN j.status=$5 THEN j.next_attempt_at ELSE j.lease_expires_at END)<=$1\n                AND NOT EXISTS (SELECT $6 FROM conversation.response_jobs earlier\n                    WHERE earlier.record_day_id=j.record_day_id\n                    AND earlier.input_source_revision<j.input_source_revision\n                    AND earlier.status IN ($7,$8))\n            ORDER BY (CASE WHEN j.status=$9 THEN j.next_attempt_at ELSE j.lease_expires_at END),j.created_at\n            LIMIT $2 FOR UPDATE OF r SKIP LOCKED",
+      "calls" : 855.0,
+      "rows" : 14999.0,
+      "total_exec_time" : 3913.9830509999756,
+      "mean_exec_time" : 4.577757954385937,
+      "shared_blks_hit" : 5294470.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "UPDATE conversation.record_days SET stream_sequence=stream_sequence+$3\n            WHERE user_id=$1 AND id=$2 RETURNING stream_sequence",
+      "calls" : 29741.0,
+      "rows" : 29741.0,
+      "total_exec_time" : 3837.493497000053,
+      "mean_exec_time" : 0.12903041246091435,
+      "shared_blks_hit" : 150424.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "insert into conversation.response_jobs (attempt_count,created_at,failure_reason,input_source_revision,last_error_code,lease_expires_at,next_attempt_at,record_day_id,status,updated_at,user_id,user_message_id,version,id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+      "calls" : 15000.0,
+      "rows" : 15000.0,
+      "total_exec_time" : 3678.1215650000086,
+      "mean_exec_time" : 0.2452081043333339,
+      "shared_blks_hit" : 307895.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "update conversation.response_jobs set attempt_count=$1,created_at=$2,failure_reason=$3,input_source_revision=$4,last_error_code=$5,lease_expires_at=$6,next_attempt_at=$7,record_day_id=$8,status=$9,updated_at=$10,user_id=$11,user_message_id=$12,version=$13 where id=$14 and version=$15",
+      "calls" : 14741.0,
+      "rows" : 14741.0,
+      "total_exec_time" : 2783.085427000029,
+      "mean_exec_time" : 0.18879895712638417,
+      "shared_blks_hit" : 371077.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT * FROM conversation.record_days WHERE user_id = $1 AND id = $2 FOR UPDATE",
+      "calls" : 28907.0,
+      "rows" : 28907.0,
+      "total_exec_time" : 2268.350280000006,
+      "mean_exec_time" : 0.07847062234060975,
+      "shared_blks_hit" : 115775.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "INSERT INTO conversation.conversation_usage(user_id,usage_date,message_count,request_window,request_count)\nVALUES ($1, $2, $6, $3, $7)\nON CONFLICT (user_id) DO UPDATE SET\n    usage_date=EXCLUDED.usage_date,\n    message_count=CASE WHEN conversation_usage.usage_date=EXCLUDED.usage_date THEN conversation_usage.message_count+$8 ELSE $9 END,\n    request_window=EXCLUDED.request_window,\n    request_count=CASE WHEN conversation_usage.request_window=EXCLUDED.request_window THEN conversation_usage.request_count+$10 ELSE $11 END\nWHERE (conversation_usage.usage_date<>EXCLUDED.usage_date OR conversation_usage.message_count<$4)\n    AND (conversation_usage.request_window<>EXCLUDED.request_window OR conversation_usage.request_count<$5)\nRETURNING message_count",
+      "calls" : 15000.0,
+      "rows" : 15000.0,
+      "total_exec_time" : 2230.9056129999854,
+      "mean_exec_time" : 0.1487270408666657,
+      "shared_blks_hit" : 76119.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "UPDATE conversation.record_days SET timezone=$1,close_at=$2,last_user_occurred_at=$3,source_revision=$4,\n                closed_at=$5,close_reason=$6,frozen_source_revision=$7 WHERE user_id=$8 AND id=$9",
+      "calls" : 14166.0,
+      "rows" : 14166.0,
+      "total_exec_time" : 1593.4640120000167,
+      "mean_exec_time" : 0.11248510602852017,
+      "shared_blks_hit" : 71370.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT * FROM conversation.user_record_states WHERE user_id = $1 FOR UPDATE",
+      "calls" : 15000.0,
+      "rows" : 14166.0,
+      "total_exec_time" : 1202.2441790000064,
+      "mean_exec_time" : 0.08014961193333375,
+      "shared_blks_hit" : 58338.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "select mje1_0.id,mje1_0.client_message_id,mje1_0.content,mje1_0.created_at,mje1_0.generation_id,mje1_0.model,mje1_0.occurred_at,mje1_0.prompt_version,mje1_0.record_day_id,mje1_0.role,mje1_0.source_sequence,mje1_0.stream_sequence,mje1_0.timezone,mje1_0.user_id from conversation.messages mje1_0 where mje1_0.user_id=$1 and mje1_0.id=$2",
+      "calls" : 14999.0,
+      "rows" : 14999.0,
+      "total_exec_time" : 1179.0349630000087,
+      "mean_exec_time" : 0.07860757137142534,
+      "shared_blks_hit" : 65017.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "select rjje1_0.id,rjje1_0.attempt_count,rjje1_0.created_at,rjje1_0.failure_reason,rjje1_0.input_source_revision,rjje1_0.last_error_code,rjje1_0.lease_expires_at,rjje1_0.next_attempt_at,rjje1_0.record_day_id,rjje1_0.status,rjje1_0.updated_at,rjje1_0.user_id,rjje1_0.user_message_id,rjje1_0.version from conversation.response_jobs rjje1_0 where rjje1_0.id=$1",
+      "calls" : 14741.0,
+      "rows" : 14741.0,
+      "total_exec_time" : 923.4703560000028,
+      "mean_exec_time" : 0.06264638464147634,
+      "shared_blks_hit" : 68322.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "select mje1_0.id,mje1_0.client_message_id,mje1_0.content,mje1_0.created_at,mje1_0.generation_id,mje1_0.model,mje1_0.occurred_at,mje1_0.prompt_version,mje1_0.record_day_id,mje1_0.role,mje1_0.source_sequence,mje1_0.stream_sequence,mje1_0.timezone,mje1_0.user_id from conversation.messages mje1_0 where mje1_0.user_id=$1 and mje1_0.client_message_id=$2",
+      "calls" : 15000.0,
+      "rows" : 0.0,
+      "total_exec_time" : 790.9914949999958,
+      "mean_exec_time" : 0.05273276633333305,
+      "shared_blks_hit" : 45002.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT * FROM identity.subscriptions WHERE user_id=$1 AND starts_at<=$2\n            AND (ends_at IS NULL OR ends_at>$3) AND revoked_at IS NULL",
+      "calls" : 15000.0,
+      "rows" : 1511.0,
+      "total_exec_time" : 571.1065130000059,
+      "mean_exec_time" : 0.038073767533333726,
+      "shared_blks_hit" : 30000.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "UPDATE conversation.response_jobs SET status = $37, attempt_count = attempt_count + $38, lease_expires_at = $1, version = version + $39, updated_at = $2 WHERE id IN (SELECT DISTINCT ON (record_day_id) id FROM conversation.response_jobs WHERE record_day_id IN ($3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34) AND status IN ($40,$41) ORDER BY record_day_id,input_source_revision) AND ((status = $42 AND next_attempt_at <= $35) OR (status = $43 AND lease_expires_at <= $36)) RETURNING *",
+      "calls" : 124.0,
+      "rows" : 3968.0,
+      "total_exec_time" : 558.4824919999992,
+      "mean_exec_time" : 4.5038910645161225,
+      "shared_blks_hit" : 197600.0,
+      "shared_blks_read" : 0.0
+    } ],
+    "databaseCgroupCpuBefore" : "usage_usec 151076418\nuser_usec 110154026\nsystem_usec 40922392\nnr_periods 1440\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+    "databaseCgroupCpuAfter" : "usage_usec 249678821\nuser_usec 167392044\nsystem_usec 82286776\nnr_periods 2040\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+    "rolesAfter" : [ {
+      "pid" : 16576,
+      "role" : "api",
+      "heapUsedBytes" : 214162944,
+      "heapMaxBytes" : 536870912,
+      "processCpuNs" : 251328125000,
+      "gcCount" : 89,
+      "gcMs" : 516,
+      "dbActive" : 0,
+      "dbTotal" : 16,
+      "dbPending" : 0,
+      "configuredClaimBatchSize" : 0,
+      "providerActive" : 0,
+      "providerPeak" : 0,
+      "providerCalls" : 0,
+      "providerFailures" : 0,
+      "sampleCount" : 0,
+      "sampleSeen" : 0,
+      "telemetryDropped" : 0.0,
+      "consoleDropped" : 0.0,
+      "dbAcquire" : [ {
+        "count" : 21722,
+        "totalSeconds" : 7047.6959634,
+        "maxSeconds" : 4.2403618
+      } ]
+    }, {
+      "pid" : 18568,
+      "role" : "conversation-worker",
+      "heapUsedBytes" : 90135008,
+      "heapMaxBytes" : 536870912,
+      "processCpuNs" : 190531250000,
+      "gcCount" : 217,
+      "gcMs" : 855,
+      "dbActive" : 1,
+      "dbTotal" : 12,
+      "dbPending" : 0,
+      "configuredClaimBatchSize" : 32,
+      "providerActive" : 0,
+      "providerPeak" : 320,
+      "providerCalls" : 21722,
+      "providerFailures" : 0,
+      "sampleCount" : 21722,
+      "sampleSeen" : 21722,
+      "telemetryDropped" : 0.0,
+      "consoleDropped" : 0.0,
+      "dbAcquire" : [ {
+        "count" : 66380,
+        "totalSeconds" : 1039.3821048,
+        "maxSeconds" : 1.4277651
+      } ]
+    } ],
+    "apiGoalPassed" : false,
+    "responseWaitingGoalPassed" : true
+  }, {
+    "name" : "conversation-scaled",
+    "durationSeconds" : 60,
+    "startedAt" : "2026-10-18T02:51:20.038239100Z",
+    "injection" : {
+      "offered" : 15000,
+      "dispatched" : 15000,
+      "generatorRejected" : 0,
+      "elapsedSeconds" : 60.0644457,
+      "dispatchedRps" : 249.73176436055914
+    },
+    "apiLatency" : {
+      "samples" : 15000,
+      "p50Ms" : 28.7032,
+      "p95Ms" : 373.8056,
+      "p99Ms" : 570.5722,
+      "maxMs" : 1075.524
+    },
+    "endToEndLatency" : {
+      "samples" : 15000,
+      "p50Ms" : 37.0387,
+      "p95Ms" : 379.6769,
+      "p99Ms" : 577.786,
+      "maxMs" : 1086.3902
+    },
+    "generatorLag" : {
+      "samples" : 15000,
+      "p50Ms" : 7.2371,
+      "p95Ms" : 13.9427,
+      "p99Ms" : 14.7816,
+      "maxMs" : 22.021
+    },
+    "httpStatuses" : {
+      "200" : 15000
+    },
+    "errorRate" : 0.0,
+    "responseWaiting" : {
+      "samples" : 15000,
+      "p50Ms" : 68.6009,
+      "p95Ms" : 158.3351,
+      "p99Ms" : 457.8615,
+      "maxMs" : 2919.8938
+    },
+    "responseStates" : {
+      "COMPLETED" : 15000
+    },
+    "responsesDrained" : true,
+    "integrity" : {
+      "acceptedRequests" : 15000,
+      "acceptedUniqueMessages" : 15000,
+      "storedAcceptedMessages" : 15000,
+      "ownerClientAndRecordVerified" : true,
+      "acceptedWithoutResponseJob" : 0
+    },
+    "maxResponseBacklog" : 425,
+    "journalBurst" : 0,
+    "journalsCompletedAfterDrains" : 0,
+    "journalAdditionalDrainSeconds" : 0.0696828,
+    "journalCompletion" : {
+      "requested" : 0
+    },
+    "journalPolicyDuringLoad" : null,
+    "cleanupDeleted" : 0,
+    "metricSamples" : 57,
+    "resourcePeaks" : {
+      "api-16576" : {
+        "heapUsedBytes" : 2.88774528E8,
+        "dbActive" : 16.0,
+        "dbTotal" : 16.0,
+        "dbPending" : 121.0,
+        "providerActive" : 0.0,
+        "telemetryDropped" : 0.0,
+        "consoleDropped" : 0.0
+      },
+      "conversation-worker-18568" : {
+        "heapUsedBytes" : 1.44363016E8,
+        "dbActive" : 12.0,
+        "dbTotal" : 12.0,
+        "dbPending" : 110.0,
+        "providerActive" : 198.0,
+        "telemetryDropped" : 0.0,
+        "consoleDropped" : 0.0
+      },
+      "conversation-worker-15636" : {
+        "heapUsedBytes" : 1.22992144E8,
+        "dbActive" : 12.0,
+        "dbTotal" : 12.0,
+        "dbPending" : 28.0,
+        "providerActive" : 252.0,
+        "telemetryDropped" : 0.0,
+        "consoleDropped" : 0.0
+      }
+    },
+    "maxLockWaiters" : 3,
+    "databaseStatementsBefore" : {
+      "calls" : 401899,
+      "rows" : 3057894,
+      "total_exec_ms" : 170966.3910890001,
+      "shared_hits" : 68463932,
+      "shared_reads" : 938451,
+      "temp_writes" : 0
+    },
+    "databaseStatementsAfter" : {
+      "calls" : 680341,
+      "rows" : 3554966,
+      "total_exec_ms" : 211391.37495299973,
+      "shared_hits" : 71515689,
+      "shared_reads" : 940464,
+      "temp_writes" : 0
+    },
+    "databaseActivityBefore" : {
+      "xact_commit" : 89120,
+      "xact_rollback" : 1,
+      "blks_read" : 1301474,
+      "blks_hit" : 68881041,
+      "blk_read_time" : 4926.546,
+      "blk_write_time" : 12351.034,
+      "temp_bytes" : 0,
+      "deadlocks" : 0,
+      "wal_bytes" : 5963689297,
+      "wal_buffers_full" : 247940,
+      "wal_write" : 271130,
+      "wal_sync" : 22417,
+      "wal_write_time" : 2854.513,
+      "wal_sync_time" : 55807.829
+    },
+    "databaseActivityAfter" : {
+      "xact_commit" : 150626,
+      "xact_rollback" : 1,
+      "blks_read" : 1314499,
+      "blks_hit" : 71950714,
+      "blk_read_time" : 5139.072,
+      "blk_write_time" : 12665.853,
+      "temp_bytes" : 0,
+      "deadlocks" : 0,
+      "wal_bytes" : 6063538723,
+      "wal_buffers_full" : 247940,
+      "wal_write" : 283589,
+      "wal_sync" : 34863,
+      "wal_write_time" : 3594.117,
+      "wal_sync_time" : 91816.267
+    },
+    "topDatabaseStatements" : [ {
+      "query" : "insert into conversation.messages (client_message_id,content,created_at,generation_id,model,occurred_at,prompt_version,record_day_id,role,source_sequence,stream_sequence,timezone,user_id,id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+      "calls" : 29741.0,
+      "rows" : 29741.0,
+      "total_exec_time" : 5512.4997479998765,
+      "mean_exec_time" : 0.18535018150028165,
+      "shared_blks_hit" : 602688.0,
+      "shared_blks_read" : 2013.0
+    }, {
+      "query" : "select mje1_0.id,mje1_0.client_message_id,mje1_0.content,mje1_0.created_at,mje1_0.generation_id,mje1_0.model,mje1_0.occurred_at,mje1_0.prompt_version,mje1_0.record_day_id,mje1_0.role,mje1_0.source_sequence,mje1_0.stream_sequence,mje1_0.timezone,mje1_0.user_id from conversation.messages mje1_0 where mje1_0.user_id=$1 and mje1_0.record_day_id=$2 and mje1_0.source_sequence<=$3 order by mje1_0.source_sequence desc,mje1_0.role fetch first $4 rows only",
+      "calls" : 14995.0,
+      "rows" : 269621.0,
+      "total_exec_time" : 5178.499502999998,
+      "mean_exec_time" : 0.3453484163387795,
+      "shared_blks_hit" : 362503.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "UPDATE conversation.record_days SET stream_sequence=stream_sequence+$3\n            WHERE user_id=$1 AND id=$2 RETURNING stream_sequence",
+      "calls" : 29741.0,
+      "rows" : 29741.0,
+      "total_exec_time" : 4693.183163000062,
+      "mean_exec_time" : 0.1578017942570883,
+      "shared_blks_hit" : 151457.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "insert into conversation.response_jobs (attempt_count,created_at,failure_reason,input_source_revision,last_error_code,lease_expires_at,next_attempt_at,record_day_id,status,updated_at,user_id,user_message_id,version,id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+      "calls" : 15000.0,
+      "rows" : 15000.0,
+      "total_exec_time" : 4468.770870999957,
+      "mean_exec_time" : 0.29791805806666377,
+      "shared_blks_hit" : 311373.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT * FROM conversation.record_days WHERE user_id = $1 AND id = $2 FOR UPDATE",
+      "calls" : 28908.0,
+      "rows" : 28908.0,
+      "total_exec_time" : 3799.9192959998345,
+      "mean_exec_time" : 0.13144870956136137,
+      "shared_blks_hit" : 116168.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "update conversation.response_jobs set attempt_count=$1,created_at=$2,failure_reason=$3,input_source_revision=$4,last_error_code=$5,lease_expires_at=$6,next_attempt_at=$7,record_day_id=$8,status=$9,updated_at=$10,user_id=$11,user_message_id=$12,version=$13 where id=$14 and version=$15",
+      "calls" : 14741.0,
+      "rows" : 14741.0,
+      "total_exec_time" : 3373.2010499999687,
+      "mean_exec_time" : 0.22883122244080922,
+      "shared_blks_hit" : 375237.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "INSERT INTO conversation.conversation_usage(user_id,usage_date,message_count,request_window,request_count)\nVALUES ($1, $2, $6, $3, $7)\nON CONFLICT (user_id) DO UPDATE SET\n    usage_date=EXCLUDED.usage_date,\n    message_count=CASE WHEN conversation_usage.usage_date=EXCLUDED.usage_date THEN conversation_usage.message_count+$8 ELSE $9 END,\n    request_window=EXCLUDED.request_window,\n    request_count=CASE WHEN conversation_usage.request_window=EXCLUDED.request_window THEN conversation_usage.request_count+$10 ELSE $11 END\nWHERE (conversation_usage.usage_date<>EXCLUDED.usage_date OR conversation_usage.message_count<$4)\n    AND (conversation_usage.request_window<>EXCLUDED.request_window OR conversation_usage.request_count<$5)\nRETURNING message_count",
+      "calls" : 15000.0,
+      "rows" : 15000.0,
+      "total_exec_time" : 2678.802187000001,
+      "mean_exec_time" : 0.17858681246666674,
+      "shared_blks_hit" : 76220.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "UPDATE conversation.record_days SET timezone=$1,close_at=$2,last_user_occurred_at=$3,source_revision=$4,\n                closed_at=$5,close_reason=$6,frozen_source_revision=$7 WHERE user_id=$8 AND id=$9",
+      "calls" : 14166.0,
+      "rows" : 14166.0,
+      "total_exec_time" : 1895.1331980000173,
+      "mean_exec_time" : 0.13378040364252558,
+      "shared_blks_hit" : 73349.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "select mje1_0.id,mje1_0.client_message_id,mje1_0.content,mje1_0.created_at,mje1_0.generation_id,mje1_0.model,mje1_0.occurred_at,mje1_0.prompt_version,mje1_0.record_day_id,mje1_0.role,mje1_0.source_sequence,mje1_0.stream_sequence,mje1_0.timezone,mje1_0.user_id from conversation.messages mje1_0 where mje1_0.user_id=$1 and mje1_0.id=$2",
+      "calls" : 14995.0,
+      "rows" : 14995.0,
+      "total_exec_time" : 1431.3887000000052,
+      "mean_exec_time" : 0.09545773257752618,
+      "shared_blks_hit" : 65203.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT * FROM conversation.user_record_states WHERE user_id = $1 FOR UPDATE",
+      "calls" : 15000.0,
+      "rows" : 14166.0,
+      "total_exec_time" : 1398.0163170000037,
+      "mean_exec_time" : 0.09320108780000025,
+      "shared_blks_hit" : 63940.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "select rjje1_0.id,rjje1_0.attempt_count,rjje1_0.created_at,rjje1_0.failure_reason,rjje1_0.input_source_revision,rjje1_0.last_error_code,rjje1_0.lease_expires_at,rjje1_0.next_attempt_at,rjje1_0.record_day_id,rjje1_0.status,rjje1_0.updated_at,rjje1_0.user_id,rjje1_0.user_message_id,rjje1_0.version from conversation.response_jobs rjje1_0 where rjje1_0.id=$1",
+      "calls" : 14741.0,
+      "rows" : 14741.0,
+      "total_exec_time" : 1197.9542449999942,
+      "mean_exec_time" : 0.0812668234855162,
+      "shared_blks_hit" : 71310.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "select mje1_0.id,mje1_0.client_message_id,mje1_0.content,mje1_0.created_at,mje1_0.generation_id,mje1_0.model,mje1_0.occurred_at,mje1_0.prompt_version,mje1_0.record_day_id,mje1_0.role,mje1_0.source_sequence,mje1_0.stream_sequence,mje1_0.timezone,mje1_0.user_id from conversation.messages mje1_0 where mje1_0.user_id=$1 and mje1_0.client_message_id=$2",
+      "calls" : 15000.0,
+      "rows" : 0.0,
+      "total_exec_time" : 932.0955869999843,
+      "mean_exec_time" : 0.06213970579999895,
+      "shared_blks_hit" : 45007.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT * FROM identity.subscriptions WHERE user_id=$1 AND starts_at<=$2\n            AND (ends_at IS NULL OR ends_at>$3) AND revoked_at IS NULL",
+      "calls" : 15000.0,
+      "rows" : 1511.0,
+      "total_exec_time" : 892.1737389999956,
+      "mean_exec_time" : 0.05947824926666637,
+      "shared_blks_hit" : 45000.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT r.id FROM conversation.response_jobs j\n            JOIN conversation.record_days r ON r.id=j.record_day_id\n            WHERE j.status IN ($3,$4)\n                AND (CASE WHEN j.status=$5 THEN j.next_attempt_at ELSE j.lease_expires_at END)<=$1\n                AND NOT EXISTS (SELECT $6 FROM conversation.response_jobs earlier\n                    WHERE earlier.record_day_id=j.record_day_id\n                    AND earlier.input_source_revision<j.input_source_revision\n                    AND earlier.status IN ($7,$8))\n            ORDER BY (CASE WHEN j.status=$9 THEN j.next_attempt_at ELSE j.lease_expires_at END),j.created_at\n            LIMIT $2 FOR UPDATE OF r SKIP LOCKED",
+      "calls" : 1911.0,
+      "rows" : 15153.0,
+      "total_exec_time" : 793.8228740000341,
+      "mean_exec_time" : 0.41539658503403143,
+      "shared_blks_hit" : 203069.0,
+      "shared_blks_read" : 0.0
+    }, {
+      "query" : "SELECT (SELECT count(*) FROM conversation.response_jobs WHERE status IN ($1,$2)) response_backlog,\n    (SELECT count(*) FROM journal.generation_jobs WHERE status IN ($3,$4)) journal_backlog,\n    (SELECT count(*) FROM pg_stat_activity WHERE wait_event_type=$5) lock_waiters,\n    (SELECT coalesce(extract($6 FROM now()-min(created_at)),$7) FROM conversation.response_jobs WHERE status IN ($8,$9)) oldest_response_seconds,\n    (SELECT coalesce(extract($10 FROM now()-min(created_at)),$11) FROM journal.generation_jobs WHERE status IN ($12,$13)) oldest_journal_seconds",
+      "calls" : 57.0,
+      "rows" : 57.0,
+      "total_exec_time" : 372.11044000000004,
+      "mean_exec_time" : 6.528253333333334,
+      "shared_blks_hit" : 85024.0,
+      "shared_blks_read" : 0.0
+    } ],
+    "databaseCgroupCpuBefore" : "usage_usec 250454665\nuser_usec 167854417\nsystem_usec 82600247\nnr_periods 2190\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+    "databaseCgroupCpuAfter" : "usage_usec 363294841\nuser_usec 231079651\nsystem_usec 132215189\nnr_periods 2791\nnr_throttled 4\nthrottled_usec 754788\nnr_bursts 0\nburst_usec 0",
+    "rolesAfter" : [ {
+      "pid" : 16576,
+      "role" : "api",
+      "heapUsedBytes" : 170024200,
+      "heapMaxBytes" : 536870912,
+      "processCpuNs" : 330406250000,
+      "gcCount" : 114,
+      "gcMs" : 609,
+      "dbActive" : 0,
+      "dbTotal" : 16,
+      "dbPending" : 0,
+      "configuredClaimBatchSize" : 0,
+      "providerActive" : 0,
+      "providerPeak" : 0,
+      "providerCalls" : 0,
+      "providerFailures" : 0,
+      "sampleCount" : 0,
+      "sampleSeen" : 0,
+      "telemetryDropped" : 0.0,
+      "consoleDropped" : 0.0,
+      "dbAcquire" : [ {
+        "count" : 36722,
+        "totalSeconds" : 7562.9319765,
+        "maxSeconds" : 4.2403618
+      } ]
+    }, {
+      "pid" : 18568,
+      "role" : "conversation-worker",
+      "heapUsedBytes" : 125751888,
+      "heapMaxBytes" : 536870912,
+      "processCpuNs" : 240562500000,
+      "gcCount" : 287,
+      "gcMs" : 1114,
+      "dbActive" : 0,
+      "dbTotal" : 12,
+      "dbPending" : 0,
+      "configuredClaimBatchSize" : 32,
+      "providerActive" : 0,
+      "providerPeak" : 320,
+      "providerCalls" : 31283,
+      "providerFailures" : 0,
+      "sampleCount" : 31283,
+      "sampleSeen" : 31283,
+      "telemetryDropped" : 0.0,
+      "consoleDropped" : 0.0,
+      "dbAcquire" : [ {
+        "count" : 96277,
+        "totalSeconds" : 1210.2594299,
+        "maxSeconds" : 1.4277651
+      } ]
+    }, {
+      "pid" : 15636,
+      "role" : "conversation-worker",
+      "heapUsedBytes" : 71595640,
+      "heapMaxBytes" : 536870912,
+      "processCpuNs" : 142406250000,
+      "gcCount" : 87,
+      "gcMs" : 539,
+      "dbActive" : 0,
+      "dbTotal" : 12,
+      "dbPending" : 0,
+      "configuredClaimBatchSize" : 32,
+      "providerActive" : 0,
+      "providerPeak" : 252,
+      "providerCalls" : 5439,
+      "providerFailures" : 0,
+      "sampleCount" : 5439,
+      "sampleSeen" : 5439,
+      "telemetryDropped" : 0.0,
+      "consoleDropped" : 0.0,
+      "dbAcquire" : [ {
+        "count" : 17296,
+        "totalSeconds" : 105.6080905,
+        "maxSeconds" : 0.0029836
+      } ]
+    } ],
+    "apiGoalPassed" : false,
+    "responseWaitingGoalPassed" : true
+  } ],
+  "failureType" : "IllegalStateException"
+}

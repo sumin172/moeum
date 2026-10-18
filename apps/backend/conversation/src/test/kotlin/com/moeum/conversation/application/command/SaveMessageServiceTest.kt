@@ -40,6 +40,22 @@ class SaveMessageServiceTest {
         SaveMessageCommand(clientMessageId, content, Instant.parse(occurredAt), "Asia/Seoul")
 
     @Test
+    fun `잠근 활성 기록이 마감되면 명시적 과거 입력에도 닫힌 상태를 사용한다`() {
+        val clock=FixedTimeProvider(now)
+        val service=SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20),
+            ConversationLimitProperties(maxMessageLength=10),clock)
+        val first=accepted(service.save(userId,command(now.toString())))
+        clock.fixedNow=first.record.closeAt.plusSeconds(1)
+        val late=accepted(service.save(userId,command(first.record.closeAt.minusSeconds(1).toString()).copy(recordDayId=first.record.id)))
+        assertThat(late.record.id).isEqualTo(first.record.id)
+        assertThat(late.record.closedAt).isEqualTo(first.record.closeAt)
+        assertThat(late.record.sourceRevision).isEqualTo(2)
+        assertThat(late.responseJob).isNull()
+        assertThat(responseJobRepository.jobs).hasSize(1)
+        assertThat(recordDayRepository.states.getValue(userId).activeRecordDayId).isNull()
+    }
+
+    @Test
     fun `발화 시각과 기본 마감 기준의 표시 날짜를 구분한다`() {
         // KST 2026-08-02 01:30 — 달력으로는 8/2지만 하루 경계(02:00) 전이라 8/1 하루에 속한다
         val result = accepted(service.save(userId, command("2026-08-01T16:30:00Z")))

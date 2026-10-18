@@ -15,17 +15,19 @@ import java.time.Instant
 
 private const val TABLE = "conversation.response_jobs"
 
-private const val CLAIM_NEXT_SQL =
+private const val CLAIM_BATCH_SQL =
     "UPDATE $TABLE ${JobClaimSql.CLAIM_SET} " +
-        "WHERE id = (SELECT id FROM $TABLE WHERE record_day_id=:recordId " +
-        "AND status IN ('PENDING','PROCESSING') ORDER BY input_source_revision LIMIT 1) " +
-        "AND (${JobClaimSql.CLAIMABLE}) RETURNING *"
+        "WHERE id IN (SELECT DISTINCT ON (record_day_id) id FROM $TABLE " +
+        "WHERE record_day_id IN (:recordIds) AND status IN ('PENDING','PROCESSING') " +
+        "ORDER BY record_day_id,input_source_revision) AND (${JobClaimSql.CLAIMABLE}) RETURNING *"
 
 @Component
 class ResponseJobRepositoryImpl(
     private val jpaRepository: ResponseJobJpaRepository,
     private val entityManager: EntityManager,
 ) : ResponseJobRepository {
+
+    override fun insert(job: ResponseJob) { entityManager.persist(job.toEntity()) }
 
     override fun save(job: ResponseJob): ResponseJob =
         jpaRepository.save(job.toEntity()).toDomain()
@@ -58,24 +60,26 @@ class ResponseJobRepositoryImpl(
         if (ids.isEmpty()) emptyList() else jpaRepository.findAllByUserIdAndIdIn(userId.value,ids.map { it.value }).map { it.toDomain() }
 
     @Transactional
-    override fun claimNext(now: Instant, leaseExpiresAt: Instant): ResponseJob? {
-        // 기록 잠금이 선점·사용자 재시도·결과 저장을 직렬화한다. LLM 실행 동안은 유지하지 않는다.
-        val recordId = entityManager.createNativeQuery("""
-            SELECT r.id FROM conversation.record_days r
-            WHERE r.id IN (
-                SELECT j.record_day_id FROM conversation.response_jobs j
-                WHERE ((j.status='PENDING' AND j.next_attempt_at<=:now)
-                    OR (j.status='PROCESSING' AND j.lease_expires_at<=:now))
+    override fun claimBatch(now: Instant, leaseExpiresAt: Instant, limit: Int): List<ResponseJob> {
+        require(limit in 1..64)
+        val recordIds=entityManager.createNativeQuery("""
+            SELECT r.id FROM conversation.response_jobs j
+            JOIN conversation.record_days r ON r.id=j.record_day_id
+            WHERE j.status IN ('PENDING','PROCESSING')
+                AND (CASE WHEN j.status='PENDING' THEN j.next_attempt_at ELSE j.lease_expires_at END)<=:now
                 AND NOT EXISTS (SELECT 1 FROM conversation.response_jobs earlier
                     WHERE earlier.record_day_id=j.record_day_id
                     AND earlier.input_source_revision<j.input_source_revision
                     AND earlier.status IN ('PENDING','PROCESSING'))
-            )
-            ORDER BY r.start_at LIMIT 1 FOR UPDATE SKIP LOCKED
-        """).setParameter("now",now).resultList.firstOrNull() ?: return null
-        return entityManager.createNativeQuery(CLAIM_NEXT_SQL, ResponseJobJpaEntity::class.java)
-            .setParameter("recordId",recordId).setParameter("now",now).setParameter("leaseExpiresAt",leaseExpiresAt)
-            .resultList.firstOrNull()?.let { (it as ResponseJobJpaEntity).toDomain() }
+            ORDER BY (CASE WHEN j.status='PENDING' THEN j.next_attempt_at ELSE j.lease_expires_at END),j.created_at
+            LIMIT :limit FOR UPDATE OF r SKIP LOCKED
+        """).setParameter("now",now).setParameter("limit",limit).resultList
+        if(recordIds.isEmpty())return emptyList()
+        // 기록 잠금 획득 후 새로운 READ COMMITTED 스냅샷에서 실제 선두를 다시 검사한다.
+        // 후보 조회 중 과거 작업이 재시작됐더라도 후속 작업을 먼저 실행하지 않는다.
+        return entityManager.createNativeQuery(CLAIM_BATCH_SQL, ResponseJobJpaEntity::class.java)
+            .setParameter("recordIds",recordIds).setParameter("now",now).setParameter("leaseExpiresAt",leaseExpiresAt)
+            .resultList.map { (it as ResponseJobJpaEntity).toDomain() }
     }
 }
 

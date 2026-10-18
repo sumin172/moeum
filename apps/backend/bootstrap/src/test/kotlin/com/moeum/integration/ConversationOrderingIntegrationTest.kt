@@ -23,6 +23,7 @@ import org.springframework.context.annotation.Import
 import org.springframework.http.*
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.test.context.ActiveProfiles
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
@@ -60,6 +61,35 @@ class ConversationOrderingIntegrationTest {
     private fun headers(jwt: String) = HttpHeaders().apply { setBearerAuth(jwt);contentType=MediaType.APPLICATION_JSON }
     private fun answer() = ConversationResponse(UUID.randomUUID(),"응답","fake","test")
 
+    @Test fun `배치는 예약 상한 이내에서 기록별 선두만 선점하고 다음 워커와 중복하지 않는다`() {
+        val users = (1..5).map { UserId.generate() }
+        users.forEach { user -> repeat(2) { accepted(user) } }
+        val first = jobs.claimBatch(now, now.plusSeconds(120), 3)
+        val second = jobs.claimBatch(now, now.plusSeconds(120), 3)
+        assertThat(first).hasSize(3)
+        assertThat(second).hasSize(2)
+        assertThat((first + second).map { it.recordDayId }.distinct()).hasSize(5)
+        assertThat((first + second).map { it.inputSourceRevision }).containsOnly(1L)
+        assertThat(jobs.claimBatch(now, now.plusSeconds(120), 3)).isEmpty()
+    }
+
+    @Test fun `최초 메시지가 동시에 도착해도 사용자 상태와 열린 기록은 하나로 생성된다`() {
+        val user=UserId.generate()
+        val gate=CountDownLatch(1)
+        Executors.newFixedThreadPool(8).use { pool ->
+            val futures=(1..8).map { pool.submit<SaveMessageResult.Accepted> { gate.await();accepted(user) } }
+            gate.countDown()
+            val saved=futures.map { it.get(15,TimeUnit.SECONDS) }
+            assertThat(saved.map { it.record.id }.distinct()).hasSize(1)
+            assertThat(saved.map { it.message.sourceSequence }.sorted()).containsExactlyElementsOf((1L..8L).toList())
+            assertThat(saved.map { it.message.streamSequence }.sorted()).containsExactlyElementsOf((1L..8L).toList())
+            assertThat(jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.user_record_states WHERE user_id=?",
+                user.value)).isEqualTo(1)
+            assertThat(query.list(user,null,10)).hasSize(1)
+            assertThat(quota.current(user).used).isEqualTo(8)
+        }
+    }
+
     @Test fun `남은 한도 하나에 동시 요청해도 하나만 저장되고 재전송은 추가 차감하지 않는다`() {
         val user = UserId.generate()
         repeat(19) { accepted(user) }
@@ -95,17 +125,17 @@ class ConversationOrderingIntegrationTest {
         val user = UserId.generate()
         val first = accepted(user,command("첫 번째"))
         val second = accepted(user,command("두 번째"))
-        val claimed = jobs.claimNext(now,now.plusSeconds(120))!!
+        val claimed = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         assertThat(claimed.id).isEqualTo(first.responseJob!!.id)
         val other = accepted(UserId.generate(),command("다른 기록"))
-        val parallel = jobs.claimNext(now,now.plusSeconds(120))!!
+        val parallel = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         assertThat(parallel.id).isEqualTo(other.responseJob!!.id)
-        assertThat(jobs.claimNext(now,now.plusSeconds(120))).isNull()
+        assertThat(jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()).isNull()
         jobs.save(claimed.copy(state=claimed.state.copy(status=JobStatus.PENDING,nextAttemptAt=now.plusSeconds(60),leaseExpiresAt=null)))
-        assertThat(jobs.claimNext(now,now.plusSeconds(120))).isNull()
+        assertThat(jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()).isNull()
         val pending = jobs.findByUserIdAndUserMessageId(user,first.message.id)!!
         jobs.save(pending.failedPermanently("TEST",now))
-        val next = jobs.claimNext(now,now.plusSeconds(120))!!
+        val next = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         assertThat(next.id).isEqualTo(second.responseJob!!.id)
         assertThatThrownBy { retry.retry(user,first.message.id) }.isInstanceOf(ResponseSupersededException::class.java)
         generated.save(next,second.message,answer())
@@ -124,7 +154,7 @@ class ConversationOrderingIntegrationTest {
         repeat(3) { accepted(UserId.generate()) }
         val gate = CountDownLatch(1)
         Executors.newFixedThreadPool(12).use { pool ->
-            val futures = (1..12).map { pool.submit<ResponseJob?> { gate.await();jobs.claimNext(now,now.plusSeconds(120)) } }
+            val futures = (1..12).map { pool.submit<ResponseJob?> { gate.await();jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull() } }
             gate.countDown()
             val claims = futures.mapNotNull { it.get(15,TimeUnit.SECONDS) }
             assertThat(claims).hasSize(4)
@@ -136,9 +166,9 @@ class ConversationOrderingIntegrationTest {
     @Test fun `리스 회수 후 오래된 응답 저장은 본문과 스트림 순번까지 롤백된다`() {
         val user = UserId.generate()
         val first = accepted(user)
-        val old = jobs.claimNext(now,now.plusSeconds(120))!!
+        val old = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         jdbc.update("UPDATE conversation.response_jobs SET lease_expires_at=? WHERE id=?",java.sql.Timestamp.from(now.minusSeconds(1)),old.id.value)
-        val current = jobs.claimNext(now,now.plusSeconds(120))!!
+        val current = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         assertThat(current.id).isEqualTo(old.id)
         assertThatThrownBy { generated.save(old,first.message,answer()) }.isInstanceOf(org.springframework.dao.OptimisticLockingFailureException::class.java)
         assertThat(query.get(user,first.record.id,0,100).messages).hasSize(1)
@@ -152,7 +182,7 @@ class ConversationOrderingIntegrationTest {
         val first = accepted(user,command("첫 번째"))
         val second = accepted(user,command("두 번째"))
         val third = accepted(user,command("세 번째"))
-        val job = jobs.claimNext(now,now.plusSeconds(120))!!
+        val job = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         assertThat(messages.findContext(user,first.record.id,job.inputSourceRevision,100).map { it.content }).containsExactly("첫 번째")
         generated.save(job,first.message,answer())
         assertThat(messages.findContext(user,first.record.id,second.responseJob!!.inputSourceRevision,100).map { it.content })
@@ -195,7 +225,7 @@ class ConversationOrderingIntegrationTest {
     @Test fun `저장 잠금의 커밋 순번으로 동시 원본과 응답을 증분 조회한다`() {
         val user = UserId.generate()
         val first = accepted(user)
-        val claimed = jobs.claimNext(now,now.plusSeconds(120))!!
+        val claimed = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         val gate = CountDownLatch(1)
         Executors.newFixedThreadPool(2).use { pool ->
             val a = pool.submit { gate.await();accepted(user,command("동시 원본")) }
