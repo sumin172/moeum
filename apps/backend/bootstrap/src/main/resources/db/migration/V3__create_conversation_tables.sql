@@ -73,7 +73,6 @@ CREATE INDEX idx_response_due ON conversation.response_jobs
 CREATE UNIQUE INDEX uq_response_stream_source ON conversation.response_jobs(record_day_id,input_source_revision);
 CREATE INDEX idx_response_stream_active ON conversation.response_jobs(record_day_id,input_source_revision)
     WHERE status IN ('PENDING','PROCESSING');
-CREATE INDEX idx_response_stream_completed ON conversation.response_jobs(record_day_id,input_source_revision) WHERE status='COMPLETED';
 
 -- 현재 UTC 기간 사용량과 서버 접수 속도. 사용자당 한 행만 유지한다.
 CREATE TABLE conversation.conversation_usage (

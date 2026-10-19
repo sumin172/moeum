@@ -50,6 +50,7 @@ class JournalFlowIntegrationTest : AbstractIntegrationTest() {
         restTemplate.exchange<JournalDayResponse>("/api/journals/$day",HttpMethod.GET,HttpEntity<Void>(authHeaders(jwt))).body!!
     private fun awaitGeneration(jwt: String, day: UUID, status: String): JournalDayResponse {
         repeat(100) {
+            deliveryWorker.runBatch()
             generationExecutor.executeNext()
             val current = journalDay(jwt,day)
             if (current.generation?.status == status) return current

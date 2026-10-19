@@ -86,12 +86,12 @@ moeum.jobs.retention.completed-age / batch-size / interval / initial-delay로 �
 
 - COMPLETED이고 보존 기간이 지났다.
 - 기록이 마감됐다.
-- 같은 기록의 모든 응답 작업이 COMPLETED다.
 - 기록과 작업 행을 함께 잠글 수 있다.
 
-FAILED 작업의 후속 완료를 지우면 과거 재시도 차단 근거가 사라지므로,
-실패 작업이 하나라도 있는 기록은 완료 작업까지 보존한다.
-PENDING/PROCESSING도 보존하며 열린 기록에서는 추가 대화의 순서 판단에 필요한 작업을 지우지 않는다.
+후속 완료 여부는 보관된 ASSISTANT 메시지의 source_sequence로, 실행 중 여부는 PROCESSING 작업으로 판단한다.
+따라서 FAILED나 PENDING 작업이 같은 기록에 있어도 오래된 COMPLETED 작업은 정리할 수 있다.
+FAILED/PENDING/PROCESSING 작업 자체는 정리하지 않으며 열린 기록의 완료 작업도 아직 정리하지 않는다.
+향후 ASSISTANT 메시지 보관 기간을 줄인다면 실패 작업의 재시도 가능 기간과 함께 변경해야 한다.
 원본 메시지와 AI 메시지는 정리 대상이 아니다.
 
 일기 작업 정리 조건은 COMPLETED와 보존 기간 경과다. 결과 INSERT와 작업 완료는 같은 트랜잭션이며, 일기 존재 여부는 결과 테이블의 기록 유일키로 판단한다.
