@@ -1,6 +1,6 @@
 # 대화 접수·응답·조회 계약
 
-R3의 서버 구현 계약이다. 하루 귀속·마감·입력 동결은 [하루 기록](RECORD_DAY.md),
+R3의 서버 구현 계약이다. 하루 귀속·마감·일기 입력은 [하루 기록](RECORD_DAY.md),
 프로세스와 공급자 자원 예산은 [실행 역할](WORKER_ROLES.md)을 따른다.
 
 ## 책임과 순번
@@ -12,7 +12,7 @@ Conversation은 접수 사용량, 메시지, 응답 작업과 기록별 순서�
 대화 스트림의 단위는 recordDayId다. 서로 다른 기록은 독립적으로 처리한다.
 사용자 원본 추가 시 sourceRevision이 증가하며 USER 메시지의 sourceSequence는 그 값이다.
 ASSISTANT의 sourceSequence는 답한 USER의 원본 순번이다.
-일기 생성 입력은 USER만 읽으므로 ASSISTANT가 원본 버전을 증가시키지 않는다.
+ASSISTANT는 원본 버전을 증가시키지 않는다. 일기 생성은 마감된 기록의 마지막 USER 메시지 순번까지 AI 문맥을 읽는다.
 
 streamSequence는 USER·ASSISTANT를 합친 메시지 증분 순번이다.
 메시지 추가 시 RecordDay의 카운터를 UPDATE하고 잠금을 커밋까지 유지한다.
@@ -23,15 +23,16 @@ UUID 생성 시각이나 occurredAt으로 커밋 순서를 추정하지 않는�
 
 ## 접수와 한도
 
-POST /api/conversations/messages는 입력 검증과 사용자 상태 잠금 뒤 중복·귀속·동결 여부를 판단한다.
-기존 clientMessageId는 기존 결과를 반환하며, 동결 후 새 원본은 DISCARDED_INPUT_FROZEN으로 종결한다.
-이 두 경로는 사용량을 차감하지 않는다.
+POST /api/conversations/messages는 입력 검증과 사용자 상태 잠금 뒤 중복·현재 기록의 마감을 판단한다.
+기존 clientMessageId는 처음 저장한 결과를 반환하며 사용량을 다시 차감하지 않는다.
+새 메시지는 발화 시각이 오래됐어도 서버 접수 시각의 열린 기록에 저장한다. 이미 마감됐으면 다음 기록을 만든다.
+성공 응답은 실제 귀속된 recordDayId와 저장한 message를 반환한다.
 
 접수 가능한 새 원본에는 현재 구독 한도와 서버 접수 속도를 원자적으로 검사한다.
 한도 소진은 HTTP 429 QUOTA_EXCEEDED이며 현재 quota를 포함한다.
 속도 초과는 HTTP 429 MESSAGE_RATE_EXCEEDED다.
 거절 또는 저장 오류는 트랜잭션 전체를 롤백하여 메시지·원본 변경·마감 변경·작업·사용량을 남기지 않는다.
-닫힌 과거 기록에 동결 전 접수한 원본도 한도를 소비하지만 새 AI 응답 작업은 만들지 않는다.
+새 기록에 접수된 사용자 메시지는 한도를 소비하고 AI 응답 작업을 만든다. 장소 변경으로 즉시 마감되는 기록은 AI 응답 작업을 만들지 않는다.
 
 사용량은 사용자당 한 행으로 보관한다.
 서버 UTC 날짜와 분 단위 접수 창을 기록하고 기간이 바뀌면 같은 행을 갱신한다.
@@ -87,15 +88,15 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 
 ## 개발 기본값과 제한
 
-| 설정 | 기본안 |
-|---|---|
-| moeum.identity.conversation.free-daily-limit | 20 |
-| moeum.identity.conversation.premium-daily-limit | 100 |
-| 사용 기간 | 서버 UTC 00:00 초기화 |
-| moeum.conversation.limits.accepted-messages-per-minute | 60 |
-| moeum.conversation.limits.context-message-limit | 100 |
-| moeum.conversation.limits.context-char-budget | 20,000 |
-| moeum.conversation.limits.max-message-length | 4,000 |
+| 설정                                                   | 기본안                |
+|--------------------------------------------------------|-----------------------|
+| moeum.identity.conversation.free-daily-limit           | 20                    |
+| moeum.identity.conversation.premium-daily-limit        | 100                   |
+| 사용 기간                                              | 서버 UTC 00:00 초기화 |
+| moeum.conversation.limits.accepted-messages-per-minute | 60                    |
+| moeum.conversation.limits.context-message-limit        | 100                   |
+| moeum.conversation.limits.context-char-budget          | 20,000                |
+| moeum.conversation.limits.max-message-length           | 4,000                 |
 
 횟수와 기간은 사용자 확정값이 아닌 조정 가능한 개발 가정이다.
 접수 속도 제한은 승인된 새 원본을 제한한다. 인증 실패·잘못된 입력·중복 재전송·조회 요청 전체의
@@ -108,7 +109,7 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 ## 완료 작업 보존
 
 완료 상태를 확인한 클라이언트는 해당 작업을 미완료 polling 목록에서 제거한다.
-입력이 동결되고 미완료·실패 작업이 없는 기록의 오래된 완료 작업은 정리될 수 있다.
+기록이 마감되고 미완료·실패 작업이 없는 기록의 오래된 완료 작업은 정리될 수 있다.
 정리된 작업 ID 상태 조회·재시도는 404이며 메시지와 AI 응답은 계속 조회할 수 있다.
 기존 메시지의 중복 전송은 quota나 작업을 새로 만들지 않고 원본을 반환하되 responseJob은 null일 수 있다.
 세부 조건과 기본 기간은 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.

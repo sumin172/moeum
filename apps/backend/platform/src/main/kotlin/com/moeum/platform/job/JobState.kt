@@ -21,24 +21,23 @@ data class JobState(
     val nextAttemptAt: Instant,
     // PROCESSING일 때 이 시각이 지나면 다른 워커가 다시 가져갈 수 있다.
     val leaseExpiresAt: Instant?,
-    val lastErrorCode: String?,
     // claim마다 증가한다. 리스를 뺏긴 워커의 늦은 결과 저장은 낙관적 락 충돌로 거부된다(fencing).
     val version: Long,
 ) {
-    fun completed(): JobState = copy(status = JobStatus.COMPLETED, leaseExpiresAt = null, lastErrorCode = null)
+    fun completed(): JobState = copy(status = JobStatus.COMPLETED, leaseExpiresAt = null)
 
-    fun failed(errorCode: String, policy: JobPolicy, now: Instant): JobState {
-        val nextAttemptAt = policy.nextAttemptAt(attemptCount, now) ?: return failedPermanently(errorCode)
-        return copy(status = JobStatus.PENDING, nextAttemptAt = nextAttemptAt, leaseExpiresAt = null, lastErrorCode = errorCode)
+    fun failed(policy: JobPolicy, now: Instant): JobState {
+        val nextAttemptAt = policy.nextAttemptAt(attemptCount, now) ?: return failedPermanently()
+        return copy(status = JobStatus.PENDING, nextAttemptAt = nextAttemptAt, leaseExpiresAt = null)
     }
 
-    fun failedPermanently(errorCode: String): JobState =
-        copy(status = JobStatus.FAILED, leaseExpiresAt = null, lastErrorCode = errorCode)
+    fun failedPermanently(): JobState =
+        copy(status = JobStatus.FAILED, leaseExpiresAt = null)
 
     // 최종 실패한 작업을 사용자가 다시 요청한 경우 — 자동 재시도 횟수를 새로 센다.
     fun restarted(now: Instant): JobState {
         check(status == JobStatus.FAILED) { "최종 실패한 작업만 다시 시작할 수 있습니다: status=$status" }
-        return copy(status = JobStatus.PENDING, attemptCount = 0, nextAttemptAt = now, leaseExpiresAt = null, lastErrorCode = null)
+        return copy(status = JobStatus.PENDING, attemptCount = 0, nextAttemptAt = now, leaseExpiresAt = null)
     }
 
     companion object {
@@ -48,7 +47,6 @@ data class JobState(
                 attemptCount = 0,
                 nextAttemptAt = nextAttemptAt,
                 leaseExpiresAt = null,
-                lastErrorCode = null,
                 version = 0,
             )
     }

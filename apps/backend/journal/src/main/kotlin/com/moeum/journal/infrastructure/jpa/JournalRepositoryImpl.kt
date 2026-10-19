@@ -9,7 +9,6 @@ import com.moeum.kernel.UserId
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import java.time.LocalDate
-import java.sql.Timestamp
 
 @Component
 class JournalRepositoryImpl(
@@ -24,13 +23,11 @@ class JournalRepositoryImpl(
 
     override fun insertGenerated(journal: Journal): Journal {
         val inserted = jdbc.update("""
-            INSERT INTO journal.journals(id,user_id,record_day_id,display_date,title,body,version,
-                source_revision,generation_id,model,prompt_version,generated_at)
-            VALUES (?,?,?,?,?,?,0,?,?,?,?,?)
+            INSERT INTO journal.journals(id,user_id,record_day_id,display_date,title,body,version)
+            VALUES (?,?,?,?,?,?,0)
             ON CONFLICT (user_id,record_day_id) DO NOTHING
         """.trimIndent(), journal.id.value,journal.userId.value,journal.recordDayId.value,journal.displayDate,
-            journal.title,journal.body,journal.sourceRevision,journal.generationId,journal.model,journal.promptVersion,
-            Timestamp.from(journal.generatedAt))
+            journal.title,journal.body)
         return if (inserted == 1) journal else
             findByUserIdAndRecordDayId(journal.userId,journal.recordDayId) ?: error("충돌한 일기가 없습니다")
     }
@@ -42,9 +39,7 @@ class JournalRepositoryImpl(
 
 private fun JournalJpaEntity.toDomain() = Journal(
     JournalId(id),UserId(userId),RecordDayId(recordDayId),displayDate,title,body,version,
-    sourceRevision,generationId,model,promptVersion,generatedAt,
 )
 private fun Journal.toEntity() = JournalJpaEntity(
     id.value,userId.value,recordDayId.value,displayDate,title,body,version,
-    sourceRevision,generationId,model,promptVersion,generatedAt,
 )

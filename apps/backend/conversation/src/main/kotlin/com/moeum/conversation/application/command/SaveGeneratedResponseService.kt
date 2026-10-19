@@ -30,12 +30,8 @@ class SaveGeneratedResponseService(
                 userId = userMessage.userId,
                 content = response.content,
                 occurredAt = now,
-                timezone = userMessage.timezone,
                 recordDayId = userMessage.recordDayId,
                 sourceSequence = job.inputSourceRevision,
-                generationId = response.generationId,
-                model = response.model,
-                promptVersion = response.promptVersion,
             ),
         )
     }

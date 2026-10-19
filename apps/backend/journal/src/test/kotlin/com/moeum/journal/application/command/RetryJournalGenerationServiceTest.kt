@@ -3,7 +3,6 @@ package com.moeum.journal.application.command
 import com.moeum.journal.domain.JournalGenerationNotRetryableException
 import com.moeum.journal.domain.JournalNotFoundException
 import com.moeum.journal.domain.model.GenerationJob
-import com.moeum.journal.domain.model.JournalId
 import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.journal.support.MutableTimeProvider
 import com.moeum.kernel.RecordDayId
@@ -13,7 +12,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.time.LocalDate
 
 class RetryJournalGenerationServiceTest {
 
@@ -24,11 +22,11 @@ class RetryJournalGenerationServiceTest {
     private val service = RetryJournalGenerationService(jobs, MutableTimeProvider(now), com.moeum.journal.support.InMemoryJournalRepository())
 
     private fun job(transform: (GenerationJob) -> GenerationJob) =
-        jobs.save(transform(GenerationJob.pending(userId, day, LocalDate.of(2026,8,2), now.minusSeconds(3600), now.minusSeconds(7200))))
+        jobs.save(transform(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, day, now.minusSeconds(3600), now.minusSeconds(7200))))
 
     @Test
     fun `재시도를 소진해 실패한 생성을 다시 시작한다`() {
-        job { it.failedPermanently("LlmException", now) }
+        job { it.failedPermanently(now) }
 
         val restarted = service.retry(userId, day)
 
@@ -39,7 +37,7 @@ class RetryJournalGenerationServiceTest {
 
     @Test
     fun `이미 생성된 일기는 거부하고, 생성할 일기가 없는 하루도 거부한다`() {
-        job { it.completed(JournalId.generate(), now) }
+        job { it.completed(now) }
 
         assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
         assertThatThrownBy { service.retry(userId, RecordDayId.generate()) }.isInstanceOf(JournalNotFoundException::class.java)

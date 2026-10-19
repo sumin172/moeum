@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*
 import java.time.LocalDate
 import java.time.LocalTime
 import java.util.UUID
-data class SaveMessageResponse(val status: String, val recordDayId: UUID, val message: MessageResponse?)
+data class SaveMessageResponse(val recordDayId: UUID, val message: MessageResponse)
 data class ResponseJobStatusResponse(val id: UUID, val userMessageId: UUID, val status: String, val failureReason: String?, val retryable: Boolean)
 data class CloseTimeRequest(val closeTime: LocalTime)
 @ConditionalOnRole(ExecutionRole.API)
@@ -23,10 +23,8 @@ class ConversationController(private val saveMessageService: SaveMessageService,
 ) {
     @PostMapping("/messages")
     fun saveMessage(@AuthenticationPrincipal userId: UserId, @RequestBody request: SaveMessageRequest): SaveMessageResponse =
-        when(val result = saveMessageService.save(userId, SaveMessageCommand(request.clientMessageId, request.content, request.occurredAt, request.timezone, request.recordDayId?.let(::RecordDayId)))) {
-            is SaveMessageResult.Accepted -> SaveMessageResponse("ACCEPTED", result.record.id.value, MessageResponse.from(result.message, result.responseJob))
-            is SaveMessageResult.Discarded -> SaveMessageResponse("DISCARDED_INPUT_FROZEN", result.recordDayId.value, null)
-        }
+        saveMessageService.save(userId, SaveMessageCommand(request.clientMessageId, request.content, request.occurredAt, request.timezone))
+            .let { SaveMessageResponse(it.record.id.value, MessageResponse.from(it.message, it.responseJob)) }
     @PostMapping("/messages/{messageId}/response-attempts")
     @ResponseStatus(HttpStatus.ACCEPTED)
     fun retryResponse(@AuthenticationPrincipal userId: UserId, @PathVariable messageId: UUID): MessageResponse {

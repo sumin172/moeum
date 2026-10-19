@@ -3,7 +3,6 @@ package com.moeum.integration
 import com.moeum.identity.interfaces.dto.AuthTokenResponse
 import com.moeum.identity.interfaces.dto.RefreshTokenRequest
 import com.moeum.integration.support.AbstractIntegrationTest
-import com.moeum.platform.web.ErrorResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -14,13 +13,12 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.JdbcTemplate
-import java.util.*
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
 /**
- * 로그인 → refresh → 로그아웃, 재사용 감지, 동시 refresh, 탈퇴 사용자 차단을 실제 DB·HTTP로 검증한다.
+ * 로그인 → refresh → 로그아웃, 재사용 감지, 동시 refresh를 실제 DB·HTTP로 검증한다.
  */
 class AuthSessionIntegrationTest : AbstractIntegrationTest() {
 
@@ -97,20 +95,4 @@ class AuthSessionIntegrationTest : AbstractIntegrationTest() {
         assertThat(refresh(tokens.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
     }
 
-    @Test
-    fun `탈퇴한 사용자는 refresh와 로그인 모두 거부된다`() {
-        val idToken = "deleted-${UUID.randomUUID()}"
-        val tokens = login(idToken = idToken)
-        jdbcTemplate.update("UPDATE identity.users SET deleted_at = now() WHERE google_id = ?", "test-google-$idToken")
-
-        val refreshResponse = refresh(tokens.refreshToken)
-        assertThat(refreshResponse.statusCode).isEqualTo(HttpStatus.FORBIDDEN)
-        assertThat(errorCodeOf(refreshResponse)).isEqualTo("IDENTITY_USER_DELETED")
-
-        val loginResponse = restTemplate.postForEntity<ErrorResponse>(
-            "/api/auth/google",
-            com.moeum.identity.interfaces.dto.GoogleLoginRequest(idToken = idToken, deviceId = UUID.randomUUID()),
-        )
-        assertThat(loginResponse.statusCode).isEqualTo(HttpStatus.FORBIDDEN)
-    }
 }

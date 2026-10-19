@@ -71,7 +71,7 @@ class ResponseJobExecutor(
                 .addKeyValue("errorCode", SafeFailure.code(e))
                 .addKeyValue("location", SafeFailure.location(e))
                 .log("Worker job failed")
-            recordFailure(job) { markResponseFailedService.markFailed(job, e) }
+            recordFailure(job) { markResponseFailedService.markFailed(job) }
         }
     }
 

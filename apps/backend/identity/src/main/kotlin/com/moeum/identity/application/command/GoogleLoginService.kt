@@ -4,7 +4,6 @@ import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
 
 import com.moeum.identity.domain.GoogleIdTokenVerifierPort
-import com.moeum.identity.domain.UserDeletedException
 import com.moeum.identity.domain.UserRepository
 import com.moeum.identity.domain.model.User
 import com.moeum.kernel.TimeProvider
@@ -33,10 +32,6 @@ class GoogleLoginService(
                     now = timeProvider.now(),
                 ),
             )
-        if (user.isDeleted) {
-            throw UserDeletedException("탈퇴한 사용자입니다: userId=${user.id.value}")
-        }
-
         return authSessionService.start(user.id, deviceId)
     }
 }

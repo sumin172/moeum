@@ -2,11 +2,10 @@ package com.moeum.integration
 
 import com.moeum.MoeumApplication
 import com.moeum.journal.domain.GenerationJobRepository
-import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
-import com.moeum.platform.llm.LlmMessage
 import com.moeum.platform.llm.LlmClient
+import com.moeum.platform.llm.LlmMessage
 import com.moeum.platform.llm.LlmRequest
 import com.moeum.platform.llm.LlmRoute
 import com.moeum.platform.llm.provider.LlmProvider
@@ -15,10 +14,13 @@ import com.moeum.platform.security.jwt.JwtProvider
 import com.zaxxer.hikari.HikariDataSource
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.getBean
+import org.springframework.beans.factory.getBeansWithAnnotation
 import org.springframework.boot.WebApplicationType
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.scheduling.config.TaskManagementConfigUtils
 import org.springframework.web.bind.annotation.RestController
 import org.testcontainers.postgresql.PostgreSQLContainer
@@ -29,7 +31,6 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -65,9 +66,9 @@ class WorkerRoleIsolationIntegrationTest {
 
             try {
                 val api = start("api")
-                val jdbc = api.getBean(JdbcTemplate::class.java)
+                val jdbc = api.getBean<JdbcTemplate>()
                 val userId = UserId.generate()
-                val jwt = api.getBean(JwtProvider::class.java).issue(userId).token
+                val jwt = api.getBean<JwtProvider>().issue(userId).token
                 val port = api.environment.getRequiredProperty("local.server.port")
                 val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
                 fun send(): HttpResponse<String> = client.send(
@@ -79,14 +80,14 @@ class WorkerRoleIsolationIntegrationTest {
                             """{"clientMessageId":"${java.util.UUID.randomUUID()}","content":"오늘 산책했다","occurredAt":"${Instant.now()}","timezone":"Asia/Seoul"}""",
                         )).build(), HttpResponse.BodyHandlers.ofString(),
                 )
-                fun completedResponses(): Int = jdbc.queryForObject(
+                fun completedResponses(): Int = jdbc.queryForObject<Int>(
                     "SELECT count(*) FROM conversation.response_jobs WHERE user_id = ? AND status = 'COMPLETED'",
-                    Int::class.java, userId.value,
+                    userId.value,
                 )!!
 
                 assertThat(api.getBeansOfType(LlmClient::class.java)).isEmpty()
                 assertThat(api.containsBean(TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME)).isFalse()
-                assertThat(api.getBean(HikariDataSource::class.java).maximumPoolSize).isEqualTo(10)
+                assertThat(api.getBean<HikariDataSource>().maximumPoolSize).isEqualTo(10)
                 assertThat(send().statusCode()).isEqualTo(200)
                 assertThat(provider.conversationCalls.get()).isZero()
                 assertThat(completedResponses()).isZero()
@@ -95,11 +96,11 @@ class WorkerRoleIsolationIntegrationTest {
                 assertWorker(conversation, "responseJobExecutor", "generationExecutor", 4)
                 await { completedResponses() == 1 }
 
-                val recordId = jdbc.queryForObject("SELECT id FROM conversation.record_days WHERE user_id = ?",java.util.UUID::class.java,userId.value)!!
+                val recordId = jdbc.queryForObject<java.util.UUID>("SELECT id FROM conversation.record_days WHERE user_id = ?",
+                    userId.value)!!
                 jdbc.update("UPDATE conversation.record_days SET closed_at = now(),close_at = now() WHERE id = ?",recordId)
-                jdbc.update("UPDATE conversation.user_record_states SET active_record_day_id = NULL WHERE user_id = ?",userId.value)
-                val job = api.getBean(GenerationJobRepository::class.java).save(
-                    GenerationJob.pending(userId, RecordDayId(recordId), LocalDate.now(), Instant.now().minusSeconds(1), Instant.now()),
+                val job = api.getBean<GenerationJobRepository>().save(
+                    com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, RecordDayId(recordId), Instant.now().minusSeconds(1), Instant.now()),
                 )
                 val journal = start("journal-worker")
                 assertWorker(journal, "generationExecutor", "responseJobExecutor", 2)
@@ -107,8 +108,8 @@ class WorkerRoleIsolationIntegrationTest {
 
                 assertThat(send().statusCode()).isEqualTo(200)
                 await { completedResponses() == 2 }
-                assertThat(jdbc.queryForObject(
-                    "SELECT status FROM journal.generation_jobs WHERE id = ?", String::class.java, job.id.value,
+                assertThat(jdbc.queryForObject<String>(
+                    "SELECT status FROM journal.generation_jobs WHERE id = ?", job.id.value,
                 )).isEqualTo("PROCESSING")
 
                 journal.close()
@@ -124,15 +125,15 @@ class WorkerRoleIsolationIntegrationTest {
                 provider.blockJournal.set(false)
                 start("journal-worker")
                 await {
-                    jdbc.queryForObject("SELECT status FROM journal.generation_jobs WHERE id = ?", String::class.java, job.id.value) == "COMPLETED"
+                    jdbc.queryForObject<String>("SELECT status FROM journal.generation_jobs WHERE id = ?", job.id.value) == "COMPLETED"
                 }
                 assertThat(provider.journalInputs).hasSize(2)
                 assertThat(provider.journalInputs[1]).isEqualTo(provider.journalInputs[0])
-                assertThat(jdbc.queryForObject(
-                    "SELECT attempt_count FROM journal.generation_jobs WHERE id = ?", Int::class.java, job.id.value,
+                assertThat(jdbc.queryForObject<Int>(
+                    "SELECT attempt_count FROM journal.generation_jobs WHERE id = ?", job.id.value,
                 )).isEqualTo(2)
-                assertThat(jdbc.queryForObject(
-                    "SELECT count(*) FROM journal.journals WHERE user_id = ?", Int::class.java, userId.value,
+                assertThat(jdbc.queryForObject<Int>(
+                    "SELECT count(*) FROM journal.journals WHERE user_id = ?", userId.value,
                 )).isEqualTo(1)
             } finally {
                 provider.releaseJournal.countDown()
@@ -142,11 +143,11 @@ class WorkerRoleIsolationIntegrationTest {
     }
 
     private fun assertWorker(context: ConfigurableApplicationContext, executor: String, excluded: String, pool: Int) {
-        assertThat(context.getBeansWithAnnotation(RestController::class.java)).isEmpty()
+        assertThat(context.getBeansWithAnnotation<RestController>()).isEmpty()
         assertThat(context.getBeansOfType(JwtProvider::class.java)).isEmpty()
         assertThat(context.containsBean(executor)).isTrue()
         assertThat(context.containsBean(excluded)).isFalse()
-        assertThat(context.getBean(HikariDataSource::class.java).maximumPoolSize).isEqualTo(pool)
+        assertThat(context.getBean<HikariDataSource>().maximumPoolSize).isEqualTo(pool)
     }
 
     private fun await(condition: () -> Boolean) {

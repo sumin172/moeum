@@ -103,7 +103,7 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
 
     fun verifyJournalPolicy(port:Int,premiumId:UUID,freeId:UUID):Map<String,Any>? {
         fun journal(id:UUID)=jdbc.queryForList("""
-            SELECT j.user_id,j.version,j.source_revision,j.generation_id,j.generated_at,r.start_at
+            SELECT j.user_id,j.version,r.start_at
             FROM journal.journals j JOIN conversation.record_days r ON r.id=j.record_day_id
             WHERE j.record_day_id=?
         """.trimIndent(),id).singleOrNull()
@@ -122,17 +122,17 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
         val late=exchange(port,owner,"POST","/api/conversations/messages",mapOf(
             "clientMessageId" to UUID.randomUUID().toString(),"content" to "synthetic late source",
             "occurredAt" to ((original["start_at"] as java.sql.Timestamp).toInstant().plusSeconds(300)).toString(),
-            "timezone" to "UTC","recordDayId" to premiumId.toString()))
-        check(late.first==200 && late.second["status"].asString()=="DISCARDED_INPUT_FROZEN")
-        check(exchange(port,owner,"GET","/api/conversations/quota",null).second["used"].asInt()==beforeQuota)
+            "timezone" to "UTC"))
+        check(late.first==200 && late.second["message"]["content"].asString()=="synthetic late source")
+        check(UUID.fromString(late.second["recordDayId"].asString())!=premiumId)
+        check(exchange(port,owner,"GET","/api/conversations/quota",null).second["used"].asInt()==beforeQuota+1)
         val after=journal(premiumId)!!
         check((after["version"] as Number).toLong()==(original["version"] as Number).toLong()+1)
-        listOf("source_revision","generation_id","generated_at").forEach { check(after[it]==original[it]) }
         check(jdbc.queryForObject<String>("SELECT body FROM journal.journals WHERE record_day_id=?", premiumId)=="capacity user edit")
         check(jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.messages WHERE record_day_id=?", premiumId)==sourceCount)
         check(jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs WHERE record_day_id=?", premiumId)==jobCount)
         return mapOf("freeEditHttp" to 403,"premiumEditHttp" to 200,"staleEditHttp" to 409,
-            "lateStatus" to "DISCARDED_INPUT_FROZEN","sourceAndQuotaUnchanged" to true,"generationMetadataPreserved" to true)
+            "lateAccepted" to true,"nextRecordCreated" to true)
     }
 
     private fun exchange(port:Int,user:UUID,method:String,path:String,body:Any?):Pair<Int,JsonNode> {

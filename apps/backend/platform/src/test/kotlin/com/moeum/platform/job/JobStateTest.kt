@@ -23,17 +23,16 @@ class JobStateTest {
 
     @Test
     fun `실패하면 재시도가 남은 동안 backoff 뒤로 다시 예약되고, 소진되면 최종 실패한다`() {
-        val first = JobState.pending(now).claimed().failed("E1", policy, now)
+        val first = JobState.pending(now).claimed().failed(policy, now)
         assertThat(first.status).isEqualTo(JobStatus.PENDING)
         assertThat(first.nextAttemptAt).isEqualTo(now.plusSeconds(10))
-        assertThat(first.lastErrorCode).isEqualTo("E1")
 
-        val second = first.claimed().failed("E2", policy, now)
+        val second = first.claimed().failed(policy, now)
         assertThat(second.status).isEqualTo(JobStatus.PENDING)
         assertThat(second.nextAttemptAt).isEqualTo(now.plusSeconds(60))
 
         // backoff 목록보다 시도가 많아도 마지막 값을 쓰지만, 여기서는 3번째가 마지막 시도라 최종 실패
-        val third = second.claimed().failed("E3", policy, now)
+        val third = second.claimed().failed(policy, now)
         assertThat(third.status).isEqualTo(JobStatus.FAILED)
         assertThat(third.attemptCount).isEqualTo(3)
         assertThat(third.leaseExpiresAt).isNull()
@@ -56,13 +55,12 @@ class JobStateTest {
 
     @Test
     fun `최종 실패한 작업만 사용자가 다시 시작할 수 있고, 자동 재시도 횟수를 새로 센다`() {
-        val failed = JobState.pending(now).claimed().failedPermanently("E")
+        val failed = JobState.pending(now).claimed().failedPermanently()
         val restarted = failed.restarted(now.plusSeconds(100))
 
         assertThat(restarted.status).isEqualTo(JobStatus.PENDING)
         assertThat(restarted.attemptCount).isZero()
         assertThat(restarted.nextAttemptAt).isEqualTo(now.plusSeconds(100))
-        assertThat(restarted.lastErrorCode).isNull()
 
         assertThatThrownBy { JobState.pending(now).restarted(now) }.isInstanceOf(IllegalStateException::class.java)
     }

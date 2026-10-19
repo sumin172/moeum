@@ -8,7 +8,6 @@ import com.moeum.identity.application.command.GoogleLoginService
 import com.moeum.identity.application.command.RefreshOutcome
 import com.moeum.identity.domain.InvalidRefreshTokenException
 import com.moeum.identity.domain.RefreshTokenAlreadyRotatedException
-import com.moeum.identity.domain.UserDeletedException
 import com.moeum.identity.interfaces.dto.AuthTokenResponse
 import com.moeum.identity.interfaces.dto.GoogleLoginRequest
 import com.moeum.identity.interfaces.dto.RefreshTokenRequest
@@ -44,7 +43,6 @@ class AuthController(
             is RefreshOutcome.Refreshed -> AuthTokenResponse.from(outcome.tokens)
             RefreshOutcome.Invalid -> throw InvalidRefreshTokenException("유효하지 않은 refresh token입니다")
             RefreshOutcome.AlreadyRotated -> throw RefreshTokenAlreadyRotatedException("이미 교체된 refresh token입니다")
-            RefreshOutcome.UserDeleted -> throw UserDeletedException("탈퇴한 사용자입니다")
         }
     }
 

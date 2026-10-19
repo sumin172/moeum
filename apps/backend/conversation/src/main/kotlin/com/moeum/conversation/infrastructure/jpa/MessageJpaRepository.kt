@@ -27,7 +27,7 @@ interface MessageJpaRepository : JpaRepository<MessageJpaEntity, UUID> {
         userId: UUID, recordDayId: UUID, sourceRevision: Long, pageable: Pageable,
     ): List<MessageJpaEntity>
 
-    fun findByUserIdAndRecordDayIdAndRoleAndSourceSequenceLessThanEqualOrderByOccurredAtAscSourceSequenceAsc(
-        userId: UUID, recordDayId: UUID, role: com.moeum.conversation.domain.model.MessageRole, sourceRevision: Long,
+    fun findByUserIdAndRecordDayIdAndSourceSequenceLessThanEqualAndStreamSequenceLessThanEqualOrderByStreamSequenceAsc(
+        userId: UUID, recordDayId: UUID, sourceRevision: Long, streamSequence: Long,
     ): List<MessageJpaEntity>
 }

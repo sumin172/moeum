@@ -1,20 +1,18 @@
 package com.moeum.conversation.infrastructure.jdbc
 
 import com.moeum.conversation.domain.RecordDayRepository
-import com.moeum.conversation.domain.model.CloseReason
 import com.moeum.conversation.domain.model.RecordDay
 import com.moeum.conversation.domain.model.UserRecordState
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
-import org.springframework.jdbc.core.queryForObject
 import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
-import java.util.UUID
+import java.util.*
 
 @Repository
 class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayRepository {
@@ -32,27 +30,21 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayReposit
         jdbc.query("SELECT * FROM conversation.user_record_states WHERE user_id = ?", stateMapper, userId.value).firstOrNull()
 
     override fun saveState(state: UserRecordState) {
-        jdbc.update("UPDATE conversation.user_record_states SET close_time = ?, active_record_day_id = ? WHERE user_id = ?",
-            state.closeTime, state.activeRecordDayId?.value, state.userId.value)
+        jdbc.update("UPDATE conversation.user_record_states SET close_time = ? WHERE user_id = ?",
+            state.closeTime, state.userId.value)
     }
 
     override fun find(userId: UserId, id: RecordDayId, lock: Boolean): RecordDay? =
         jdbc.query("SELECT * FROM conversation.record_days WHERE user_id = ? AND id = ?" + if (lock) " FOR UPDATE" else "",
             dayMapper, userId.value, id.value).firstOrNull()
 
-    override fun findContaining(userId: UserId, occurredAt: Instant): List<RecordDay> =
-        jdbc.query("SELECT * FROM conversation.record_days WHERE user_id = ? AND start_at <= ? AND COALESCE(closed_at, close_at) > ? LIMIT 2",
-            dayMapper, userId.value, ts(occurredAt), ts(occurredAt))
+    override fun findOpen(userId: UserId, lock: Boolean): RecordDay? =
+        jdbc.query("SELECT * FROM conversation.record_days WHERE user_id = ? AND closed_at IS NULL" + if (lock) " FOR UPDATE" else "",
+            dayMapper, userId.value).firstOrNull()
 
-    override fun latestClosedBoundary(userId: UserId, occurredAt: Instant): Instant? =
-        jdbc.query("SELECT closed_at FROM conversation.record_days WHERE user_id = ? AND closed_at <= ? ORDER BY closed_at DESC LIMIT 1",
-            { rs, _ -> rs.getTimestamp(1).toInstant() }, userId.value, ts(occurredAt)).firstOrNull()
-
-    override fun overlaps(userId: UserId, startAt: Instant, endAt: Instant): Boolean =
-        jdbc.queryForObject<Boolean>(
-            "SELECT EXISTS(SELECT 1 FROM conversation.record_days WHERE user_id = ? AND start_at < ? AND COALESCE(closed_at, close_at) > ?)",
-            userId.value, ts(endAt), ts(startAt),
-        )!!
+    override fun latestClosedBoundary(userId: UserId): Instant? =
+        jdbc.query("SELECT closed_at FROM conversation.record_days WHERE user_id = ? AND closed_at IS NOT NULL ORDER BY start_at DESC LIMIT 1",
+            { rs, _ -> rs.getTimestamp(1).toInstant() }, userId.value).firstOrNull()
 
     override fun list(userId: UserId, displayDate: LocalDate?, limit: Int): List<RecordDay> =
         if (displayDate == null) jdbc.query("SELECT * FROM conversation.record_days WHERE user_id = ? ORDER BY start_at DESC, id DESC LIMIT ?", dayMapper, userId.value, limit)
@@ -61,21 +53,21 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayReposit
     override fun insert(day: RecordDay) {
         jdbc.update(
             """INSERT INTO conversation.record_days
-                (id,user_id,display_date,start_at,close_date,close_time,timezone,close_at,last_user_occurred_at,
-                 source_revision,closed_at,close_reason,frozen_source_revision,delivery_version,delivery_lease_expires_at,delivery_acknowledged)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (id,user_id,display_date,start_at,close_date,close_time,timezone,close_at,
+                 source_revision,closed_at,delivery_version,delivery_lease_expires_at,delivery_acknowledged)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             day.id.value, day.userId.value, day.displayDate, ts(day.startAt), day.closeDate, day.closeTime,
-            day.timezone, ts(day.closeAt), ts(day.lastUserOccurredAt), day.sourceRevision, day.closedAt?.let(::ts),
-            day.closeReason.name, day.frozenSourceRevision, day.deliveryVersion, day.deliveryLeaseExpiresAt?.let(::ts), day.deliveryAcknowledged,
+            day.timezone, ts(day.closeAt), day.sourceRevision, day.closedAt?.let(::ts),
+            day.deliveryVersion, day.deliveryLeaseExpiresAt?.let(::ts), day.deliveryAcknowledged,
         )
     }
 
     override fun update(day: RecordDay) {
         jdbc.update(
-            """UPDATE conversation.record_days SET timezone=?,close_at=?,last_user_occurred_at=?,source_revision=?,
-                closed_at=?,close_reason=?,frozen_source_revision=? WHERE user_id=? AND id=?""",
-            day.timezone, ts(day.closeAt), ts(day.lastUserOccurredAt), day.sourceRevision, day.closedAt?.let(::ts),
-            day.closeReason.name, day.frozenSourceRevision, day.userId.value, day.id.value,
+            """UPDATE conversation.record_days SET timezone=?,close_at=?,source_revision=?,
+                closed_at=? WHERE user_id=? AND id=?""",
+            day.timezone, ts(day.closeAt), day.sourceRevision, day.closedAt?.let(::ts),
+            day.userId.value, day.id.value,
         )
     }
 
@@ -88,10 +80,10 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayReposit
             ts(now),
         )
         for ((userId, id) in candidates) {
-            val locked = jdbc.query("SELECT * FROM conversation.user_record_states WHERE user_id=? FOR UPDATE SKIP LOCKED", stateMapper, userId.value).firstOrNull() ?: continue
+            jdbc.query("SELECT user_id FROM conversation.user_record_states WHERE user_id=? FOR UPDATE SKIP LOCKED",
+                { rs, _ -> rs.getObject(1, UUID::class.java) }, userId.value).firstOrNull() ?: continue
             val day = jdbc.query("SELECT * FROM conversation.record_days WHERE user_id=? AND id=? AND closed_at IS NULL AND close_at<=? FOR UPDATE SKIP LOCKED",
                 dayMapper, userId.value, id.value, ts(now)).firstOrNull() ?: continue
-            check(locked.activeRecordDayId == day.id)
             return day
         }
         return null
@@ -115,17 +107,15 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayReposit
 private fun ts(value: Instant) = java.sql.Timestamp.from(value)
 private fun ResultSet.instant(name: String): Instant? = getTimestamp(name)?.toInstant()
 private val stateMapper = RowMapper { rs: ResultSet, _: Int ->
-    UserRecordState(UserId(rs.getObject("user_id", UUID::class.java)), rs.getObject("close_time", LocalTime::class.java),
-        rs.getObject("active_record_day_id", UUID::class.java)?.let(::RecordDayId))
+    UserRecordState(UserId(rs.getObject("user_id", UUID::class.java)), rs.getObject("close_time", LocalTime::class.java))
 }
 private val dayMapper = RowMapper { rs: ResultSet, _: Int ->
     RecordDay(
         id=RecordDayId(rs.getObject("id", UUID::class.java)), userId=UserId(rs.getObject("user_id", UUID::class.java)),
         displayDate=rs.getObject("display_date", LocalDate::class.java), startAt=rs.instant("start_at")!!,
         closeDate=rs.getObject("close_date", LocalDate::class.java), closeTime=rs.getObject("close_time", LocalTime::class.java),
-        timezone=rs.getString("timezone"), closeAt=rs.instant("close_at")!!, lastUserOccurredAt=rs.instant("last_user_occurred_at")!!,
-        sourceRevision=rs.getLong("source_revision"), closedAt=rs.instant("closed_at"), closeReason=CloseReason.valueOf(rs.getString("close_reason")),
-        frozenSourceRevision=rs.getObject("frozen_source_revision")?.let { (it as Number).toLong() },
+        timezone=rs.getString("timezone"), closeAt=rs.instant("close_at")!!,
+        sourceRevision=rs.getLong("source_revision"), closedAt=rs.instant("closed_at"),
         deliveryVersion=rs.getLong("delivery_version"), deliveryLeaseExpiresAt=rs.instant("delivery_lease_expires_at"),
         deliveryAcknowledged=rs.getBoolean("delivery_acknowledged"),
     )

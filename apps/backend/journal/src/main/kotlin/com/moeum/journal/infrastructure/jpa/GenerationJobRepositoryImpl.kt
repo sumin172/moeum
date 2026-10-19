@@ -4,7 +4,6 @@ import com.moeum.kernel.RecordDayId
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.domain.model.GenerationJobId
-import com.moeum.journal.domain.model.JournalId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobClaimSql
 import com.moeum.platform.job.JobState
@@ -52,16 +51,13 @@ class GenerationJobRepositoryImpl(
 private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
     GenerationJob(
         id = GenerationJobId(id),
-        journalId = journalId?.let { JournalId(it) },
         userId = UserId(userId),
         recordDayId = RecordDayId(recordDayId),
-        displayDate = displayDate,
         state = JobState(
             status = status,
             attemptCount = attemptCount,
             nextAttemptAt = nextAttemptAt,
             leaseExpiresAt = leaseExpiresAt,
-            lastErrorCode = lastErrorCode,
             version = version,
         ),
         createdAt = createdAt,
@@ -71,15 +67,12 @@ private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
 private fun GenerationJob.toEntity(): GenerationJobJpaEntity =
     GenerationJobJpaEntity(
         id = id.value,
-        journalId = journalId?.value,
         userId = userId.value,
         recordDayId = recordDayId.value,
-        displayDate = displayDate,
         status = state.status,
         attemptCount = state.attemptCount,
         nextAttemptAt = state.nextAttemptAt,
         leaseExpiresAt = state.leaseExpiresAt,
-        lastErrorCode = state.lastErrorCode,
         version = state.version,
         createdAt = createdAt,
         updatedAt = updatedAt,

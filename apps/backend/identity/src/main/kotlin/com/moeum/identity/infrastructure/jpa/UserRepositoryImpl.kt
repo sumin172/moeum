@@ -26,7 +26,6 @@ private fun UserJpaEntity.toDomain(): User =
         googleId = googleId,
         email = email,
         createdAt = createdAt,
-        deletedAt = deletedAt,
     )
 
 private fun User.toEntity(): UserJpaEntity =
@@ -35,5 +34,4 @@ private fun User.toEntity(): UserJpaEntity =
         googleId = googleId,
         email = email,
         createdAt = createdAt,
-        deletedAt = deletedAt,
     )

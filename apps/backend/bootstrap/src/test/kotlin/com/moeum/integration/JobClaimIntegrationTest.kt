@@ -2,7 +2,6 @@ package com.moeum.integration
 
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.journal.domain.GenerationJobRepository
-import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.domain.model.GenerationJobId
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
@@ -13,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.OptimisticLockingFailureException
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
@@ -33,7 +31,7 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
     private fun createJobs(count: Int): Set<GenerationJobId> =
         (1..count).map {
             generationJobRepository.save(
-                GenerationJob.pending(UserId.generate(), RecordDayId.generate(), LocalDate.of(2027, 1, 1), dayEnd = farFuture, now = Instant.now()),
+                com.moeum.journal.domain.model.TestGenerationJobs.pending(UserId.generate(), RecordDayId.generate(), dayEnd = farFuture, now = Instant.now()),
             ).id
         }.toSet()
 
@@ -64,7 +62,7 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
         createJobs(1)
         val firstAt = farFuture.plus(Duration.ofDays(1))
         val first = generateSequence { generationJobRepository.claimNext(firstAt, firstAt.plus(Duration.ofMinutes(5))) }
-            .first { it.displayDate == LocalDate.of(2027, 1, 1) && it.state.attemptCount == 1 }
+            .first { it.state.attemptCount == 1 }
 
         // 리스(5분)가 지난 뒤 다른 워커가 같은 작업을 다시 잡는다
         val secondAt = firstAt.plus(Duration.ofMinutes(6))
@@ -73,9 +71,9 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
         assertThat(second.state.attemptCount).isEqualTo(2)
         assertThat(second.state.version).isGreaterThan(first.state.version)
 
-        assertThatThrownBy { generationJobRepository.save(first.failedPermanently("LATE", secondAt)) }
+        assertThatThrownBy { generationJobRepository.save(first.failedPermanently(secondAt)) }
             .isInstanceOf(OptimisticLockingFailureException::class.java)
         // 현재 리스를 가진 워커의 저장은 성공한다
-        generationJobRepository.save(second.failedPermanently("DONE", secondAt))
+        generationJobRepository.save(second.failedPermanently(secondAt))
     }
 }

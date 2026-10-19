@@ -18,6 +18,4 @@ class UserJpaEntity(
     val email: String,
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant,
-    @Column(name = "deleted_at")
-    val deletedAt: Instant? = null,
 )

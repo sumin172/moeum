@@ -24,20 +24,12 @@ class MessageJpaEntity(
     val content: String,
     @Column(name = "occurred_at", nullable = false)
     val occurredAt: Instant,
-    @Column(nullable = false)
-    val timezone: String,
     @Column(name = "record_day_id", nullable = false)
     val recordDayId: UUID,
     @Column(name = "source_sequence", nullable = false)
     val sourceSequence: Long,
     @Column(name = "client_message_id")
     val clientMessageId: UUID?,
-    @Column(name = "generation_id")
-    val generationId: UUID? = null,
-    @Column
-    val model: String? = null,
-    @Column(name = "prompt_version")
-    val promptVersion: String? = null,
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant,
     @Column(name = "stream_sequence", nullable = false)

@@ -39,7 +39,6 @@ private fun AuthSessionJpaEntity.toDomain(): AuthSession =
         rotatedAt = rotatedAt,
         expiresAt = expiresAt,
         revokedAt = revokedAt,
-        revokeReason = revokeReason,
         createdAt = createdAt,
         version = version,
     )
@@ -54,7 +53,6 @@ private fun AuthSession.toEntity(): AuthSessionJpaEntity =
         rotatedAt = rotatedAt,
         expiresAt = expiresAt,
         revokedAt = revokedAt,
-        revokeReason = revokeReason,
         createdAt = createdAt,
         version = version,
     )
