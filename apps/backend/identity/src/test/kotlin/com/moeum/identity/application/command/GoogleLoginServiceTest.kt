@@ -1,7 +1,6 @@
 package com.moeum.identity.application.command
 
 import com.moeum.identity.domain.GoogleIdTokenVerifierPort
-import com.moeum.identity.domain.UserDeletedException
 import com.moeum.identity.domain.model.GoogleProfile
 import com.moeum.identity.domain.model.User
 import com.moeum.identity.infrastructure.config.AuthSessionProperties
@@ -11,7 +10,6 @@ import com.moeum.identity.support.InMemoryUserRepository
 import com.moeum.identity.support.MutableTimeProvider
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -71,14 +69,4 @@ class GoogleLoginServiceTest {
         assertThat(first.refreshToken).startsWith("${sessions.first().id.value}.")
     }
 
-    @Test
-    fun `탈퇴한 사용자는 로그인할 수 없다`() {
-        userRepository.save(
-            User.create(UserId.generate(), "google-4", "d@example.com", timeProvider.now).copy(deletedAt = timeProvider.now),
-        )
-
-        assertThatThrownBy { service(GoogleProfile("google-4", "d@example.com")).login("id-token", deviceId) }
-            .isInstanceOf(UserDeletedException::class.java)
-        assertThat(sessionRepository.sessions).isEmpty()
-    }
 }

@@ -12,7 +12,6 @@ fun userMessage(
     content: String,
     occurredAt: Instant,
     recordDayId: RecordDayId,
-    timezone: String = "Asia/Seoul",
     createdAt: Instant = occurredAt,
     sourceSequence: Long = 1,
 ): Message =
@@ -21,7 +20,6 @@ fun userMessage(
         userId = userId,
         content = content,
         occurredAt = occurredAt,
-        timezone = timezone,
         recordDayId = recordDayId,
         sourceSequence = sourceSequence,
         clientMessageId = UUID.randomUUID(),

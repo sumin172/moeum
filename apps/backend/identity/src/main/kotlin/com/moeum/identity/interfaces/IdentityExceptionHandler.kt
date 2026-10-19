@@ -6,7 +6,6 @@ import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.identity.domain.InvalidGoogleTokenException
 import com.moeum.identity.domain.InvalidRefreshTokenException
 import com.moeum.identity.domain.RefreshTokenAlreadyRotatedException
-import com.moeum.identity.domain.UserDeletedException
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.observability.SafeFailure
 import org.slf4j.LoggerFactory
@@ -37,12 +36,6 @@ class IdentityExceptionHandler {
     fun handleAlreadyRotated(e: RefreshTokenAlreadyRotatedException): ResponseEntity<ErrorResponse> {
         log.info("동시 refresh: {}", SafeFailure.code(e))
         return error(HttpStatus.CONFLICT, IdentityErrorCode.REFRESH_TOKEN_ROTATED)
-    }
-
-    @ExceptionHandler(UserDeletedException::class)
-    fun handleUserDeleted(e: UserDeletedException): ResponseEntity<ErrorResponse> {
-        log.warn("탈퇴 사용자 인증 시도: {}", SafeFailure.code(e))
-        return error(HttpStatus.FORBIDDEN, IdentityErrorCode.USER_DELETED)
     }
 
     private fun error(status: HttpStatus, code: IdentityErrorCode): ResponseEntity<ErrorResponse> =

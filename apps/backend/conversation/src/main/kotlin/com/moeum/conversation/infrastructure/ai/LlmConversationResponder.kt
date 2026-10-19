@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component
 // moeum.llm.routes.conversation-response로 provider·모델·토큰 상한이 정해진다.
 const val CONVERSATION_RESPONSE_PURPOSE = "conversation-response"
 
-// 프롬프트를 바꾸면 버전을 올린다(생성 메타데이터·관측 로그에 남아 품질 비교의 기준이 된다).
+// 프롬프트를 바꾸면 요청의 버전을 올린다.
 // v2: 응답 토큰 상한(150)에 맞춰 짧게 답하도록 지시 추가
 private const val PROMPT_VERSION = "v2"
 
@@ -53,12 +53,7 @@ class LlmConversationResponder(
                 promptVersion = PROMPT_VERSION,
             ),
         )
-        return ConversationResponse(
-            generationId = result.generationId,
-            content = result.text,
-            model = result.model,
-            promptVersion = result.promptVersion,
-        )
+        return ConversationResponse(content = result.text)
     }
 }
 

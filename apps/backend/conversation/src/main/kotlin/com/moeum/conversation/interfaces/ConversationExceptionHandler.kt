@@ -6,7 +6,6 @@ import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.conversation.domain.AiQuotaExceededException
 import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.RecordDayNotFoundException
-import com.moeum.conversation.domain.RecordAssignmentConflictException
 import com.moeum.conversation.domain.MessageNotFoundException
 import com.moeum.conversation.domain.ResponseAlreadyCompletedException
 import com.moeum.platform.web.ErrorResponse
@@ -51,9 +50,6 @@ class ConversationExceptionHandler {
     @ExceptionHandler(RecordDayNotFoundException::class)
     fun handleRecordMissing(): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse(code = "RECORD_NOT_FOUND", message = "기록이 없습니다"))
-    @ExceptionHandler(RecordAssignmentConflictException::class)
-    fun handleRecordConflict(): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse(code = "RECORD_ASSIGNMENT_CONFLICT", message = "발화의 기록 구간이 일치하지 않습니다"))
     @ExceptionHandler(com.moeum.conversation.domain.ResponseSupersededException::class)
     fun superseded(): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse(code="RESPONSE_SUPERSEDED",message="후속 응답이 시작됐습니다. 새 메시지로 이어서 대화해주세요"))

@@ -19,6 +19,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Timestamp
@@ -43,11 +44,21 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
     private val time = object : TimeProvider { override fun now() = now }
     private val props = CompletedJobRetentionProperties(batchSize=2)
     private fun user() = UserId.generate().also(users::add)
-    private fun input(user: UserId) = save.save(user, SaveMessageCommand(UUID.randomUUID(), "원본",
-        now.minus(Duration.ofDays(1)), "Asia/Seoul")) as SaveMessageResult.Accepted
+    private fun input(user: UserId, close: Boolean = true): SaveMessageResult.Accepted {
+        val saved = save.save(user, SaveMessageCommand(UUID.randomUUID(), "원본",
+            now.minus(Duration.ofDays(1)), "Asia/Seoul"))
+        if (close) {
+            val boundary = Timestamp.from(Instant.now())
+            jdbc.update("UPDATE conversation.record_days SET close_at=?,closed_at=?,delivery_acknowledged=true WHERE id=?",
+                boundary, boundary, saved.record.id.value)
+        }
+        return saved
+    }
     private fun response(saved: SaveMessageResult.Accepted, complete: Boolean = true): ResponseJob {
-        val pending = ResponseJob.pending(saved.message, now.plus(Duration.ofDays(10)))
-        return responses.save(if (complete) pending.completed(old) else pending)
+        val pending = saved.responseJob!!
+        if (complete) jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=?,version=version+1 WHERE id=?",
+            Timestamp.from(old), pending.id.value)
+        return responses.findByUserIdAndUserMessageId(pending.userId, pending.userMessageId)!!
     }
     private fun responseCleaner() = CompletedResponseJobCleaner(jdbc, time, props)
     private fun generationCleaner() = CompletedGenerationJobCleaner(jdbc, time, props)
@@ -60,44 +71,46 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
         }
     }
 
-    @Test fun `동결 완료 작업만 작은 배치로 지우고 원본 중복 접수와 결과 조회는 보존한다`() {
+    @Test fun `마감된 기록의 완료 작업만 작은 배치로 지우고 원본 중복 접수는 보존한다`() {
         val saved = (1..3).map { input(user()) }
         val ids = saved.map { response(it).id.value }
-        saved.forEach { records.freezeInput(it.message.userId, it.record.id) }
         assertThat(responseCleaner().cleanBatch()).isEqualTo(2)
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM conversation.response_jobs WHERE id IN (?,?,?)",
-            Int::class.java, *ids.toTypedArray())).isEqualTo(1)
+        assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE id IN (?,?,?)",
+            *ids.toTypedArray())).isEqualTo(1)
         assertThat(responseCleaner().cleanBatch()).isEqualTo(1)
         saved.forEach {
-            assertThat(jdbc.queryForObject("SELECT content FROM conversation.messages WHERE id=?", String::class.java, it.message.id.value)).isEqualTo("원본")
+            assertThat(jdbc.queryForObject<String>("SELECT content FROM conversation.messages WHERE id=?", it.message.id.value)).isEqualTo("원본")
             val duplicate = save.save(it.message.userId, SaveMessageCommand(it.message.clientMessageId!!, it.message.content,
-                it.message.occurredAt, it.message.timezone)) as SaveMessageResult.Accepted
+                it.message.occurredAt, "Asia/Seoul"))
             assertThat(duplicate.message.id).isEqualTo(it.message.id)
             assertThat(duplicate.responseJob).isNull()
         }
     }
 
-    @Test fun `미동결 최근 완료 활성 실패 작업과 실패 작업의 후속 완료를 보존한다`() {
-        val unfrozen = input(user())
-        val unfrozenJob = response(unfrozen)
+    @Test fun `열린 기록 최근 완료 활성 실패 작업과 실패 작업의 후속 완료를 보존한다`() {
+        val open = input(user(), close = false)
+        val openJob = response(open)
         val recent = input(user())
-        val recentJob = responses.save(ResponseJob.pending(recent.message, now).completed(now))
-        records.freezeInput(recent.message.userId, recent.record.id)
+        jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=? WHERE id=?",
+            Timestamp.from(now), recent.responseJob!!.id.value)
+        val recentJob = responses.findByUserIdAndUserMessageId(recent.message.userId, recent.message.id)!!
         val pending = input(user())
         val pendingJob = response(pending, complete=false)
-        records.freezeInput(pending.message.userId, pending.record.id)
         val processing = input(user())
         val processingJob = response(processing, complete=false)
         jdbc.update("UPDATE conversation.response_jobs SET status='PROCESSING',lease_expires_at=? WHERE id=?",
             Timestamp.from(now.plus(Duration.ofDays(10))), processingJob.id.value)
-        records.freezeInput(processing.message.userId, processing.record.id)
-        val failedFirst = input(user())
-        val failedJob = responses.save(ResponseJob.pending(failedFirst.message, now).failedPermanently("TEST", old))
-        val later = input(failedFirst.message.userId)
+        val failedFirst = input(user(), close=false)
+        val later = input(failedFirst.message.userId, close=false)
+        val boundary = Timestamp.from(Instant.now())
+        jdbc.update("UPDATE conversation.record_days SET close_at=?,closed_at=?,delivery_acknowledged=true WHERE id=?",
+            boundary, boundary, failedFirst.record.id.value)
+        jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',updated_at=? WHERE id=?",
+            Timestamp.from(old), failedFirst.responseJob!!.id.value)
+        val failedJob = responses.findByUserIdAndUserMessageId(failedFirst.message.userId, failedFirst.message.id)!!
         val laterJob = response(later)
-        records.freezeInput(later.message.userId, later.record.id)
         assertThat(responseCleaner().cleanBatch()).isZero()
-        listOf(unfrozenJob, recentJob, pendingJob, processingJob, failedJob, laterJob).forEach {
+        listOf(openJob, recentJob, pendingJob, processingJob, failedJob, laterJob).forEach {
             assertThat(responses.findByUserIdAndUserMessageId(it.userId, it.userMessageId)).isNotNull()
         }
         assertThat(responses.hasLaterStarted(failedJob)).isTrue()
@@ -106,13 +119,12 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
     @Test fun `정리 작업은 잠긴 기록을 건너뛰고 잠금 해제 이후 정리한다`() {
         val saved = input(user())
         response(saved)
-        records.freezeInput(saved.message.userId, saved.record.id)
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         Executors.newSingleThreadExecutor().use { pool ->
             val lock = pool.submit {
                 TransactionTemplate(transactions).executeWithoutResult {
-                    jdbc.queryForObject("SELECT id FROM conversation.record_days WHERE id=? FOR UPDATE", UUID::class.java, saved.record.id.value)
+                    jdbc.queryForObject<UUID>("SELECT id FROM conversation.record_days WHERE id=? FOR UPDATE", saved.record.id.value)
                     entered.countDown()
                     release.await(5, TimeUnit.SECONDS)
                 }
@@ -129,22 +141,21 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
         val user = user()
         val day = RecordDayId.generate()
         val date = LocalDate.now()
-        val original = journals.insertGenerated(Journal(JournalId.generate(), user, day, date, "제목", "본문", 0,
-            7, UUID.randomUUID(), "model", "prompt-v1", old))
+        val original = journals.insertGenerated(Journal(JournalId.generate(), user, day, date, "제목", "본문", 0))
         val edited = journals.updateEdited(original.copy(body="사용자 수정본"))
-        val pending = GenerationJob.pending(user, day, date, now.plus(Duration.ofDays(10)), old)
-        generations.save(pending.completed(original.id, old))
-        val failed = GenerationJob.pending(user, RecordDayId.generate(), date, now.plus(Duration.ofDays(10)), old)
-            .failedPermanently("TEST", old)
+        val pending = TestGenerationJobs.pending(user, day, now.plus(Duration.ofDays(10)), old)
+        generations.save(pending.completed(old))
+        val failed = TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), old)
+            .failedPermanently(old)
         generations.save(failed)
-        val processing = generations.save(GenerationJob.pending(user, RecordDayId.generate(), date, now.plus(Duration.ofDays(10)), old))
+        val processing = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), old))
         jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING',lease_expires_at=? WHERE id=?",
             Timestamp.from(now.plus(Duration.ofDays(10))), processing.id.value)
-        val recent = generations.save(GenerationJob.pending(user, RecordDayId.generate(), date, now.plus(Duration.ofDays(10)), now))
+        val recent = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), now))
         assertThat(generationCleaner().cleanBatch()).isEqualTo(1)
         assertThat(journals.findByUserIdAndRecordDayId(user, day)).isEqualTo(edited)
         assertThat(generations.findByUserIdAndRecordDayId(user, day)).isNull()
-        assertThat(registration.register(RecordDelivery(day, user, date, old, 1))).isFalse()
+        assertThat(registration.register(RecordDelivery(day, user, old, 1))).isFalse()
         assertThatThrownBy { retry.retry(user, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
         listOf(failed, processing, recent).forEach { assertThat(generations.findByUserIdAndRecordDayId(user, it.recordDayId)).isNotNull() }
     }

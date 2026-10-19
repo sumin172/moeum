@@ -25,11 +25,11 @@ LLM 관측 큐와 별도로 모든 애플리케이션 로그의 콘솔 출력에
 외부 Sentry·클라우드 로그 계정이나 배포 에이전트를 연결했다는 뜻은 아니다.
 원격 수집기 도착·장기 보존은 배포에서 별도로 검증한다.
 
-| 이벤트 | 주요 필드 |
-|---|---|
-| llm.call | purpose, provider, 설정 model, promptVersion, generationId, latencyMs, succeeded, errorCode, finishReason, 입력/출력/캐시 토큰 수 |
-| job.completed | 작업 문맥과 generationId |
-| job.failed | 작업 문맥, generationId가 발급된 경우 해당 ID, errorCode, 코드 위치 |
+| 이벤트        | 주요 필드                                                                                                                         |
+|---------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| llm.call      | purpose, provider, 설정 model, promptVersion, generationId, latencyMs, succeeded, errorCode, finishReason, 입력/출력/캐시 토큰 수 |
+| job.completed | 작업 문맥과 generationId                                                                                                          |
+| job.failed    | 작업 문맥, generationId가 발급된 경우 해당 ID, errorCode, 코드 위치                                                               |
 
 provider·purpose·model은 설정된 라우팅으로 제한한다. 공급자가 반환한 finishReason은 허용 목록 외에 OTHER로 정규화한다.
 공급자 예외는 HTTP 상태·TIMEOUT·IO_ERROR 등으로 분류하고 메시지와 cause를 업무 예외에 복사하지 않는다.
@@ -45,15 +45,15 @@ Micrometer registry를 Actuator로 구성한다.
 HTTP Actuator 노출은 제외한다. 원격 JMX 접속이나 공개 관리 포트는 자동으로 열지 않는다.
 운영 수집 에이전트는 해당 JVM의 JMX metrics 엔드포인트를 읽거나 stdout 이벤트를 집계할 수 있다.
 
-| 메트릭 | 의미 |
-|---|---|
-| moeum.llm.duration | 수집한 호출의 수와 지연 |
-| moeum.llm.input.tokens / output.tokens / cached.input.tokens | 수집한 호출의 토큰 수 |
-| moeum.telemetry.buffer.size | 전송 대기 중 이벤트 수 |
-| moeum.telemetry.dropped | buffer_full / sink_failure / closed로 나눈 진단 유실 |
-| moeum.telemetry.metric.failures | 메트릭 집계 실패 |
-| moeum.logging.dropped | 콘솔 큐 포화로 버린 로그 수 |
-| moeum.logging.buffer.size | 콘솔 출력 대기 로그 수 |
+| 메트릭                                                       | 의미                                                 |
+|--------------------------------------------------------------|------------------------------------------------------|
+| moeum.llm.duration                                           | 수집한 호출의 수와 지연                              |
+| moeum.llm.input.tokens / output.tokens / cached.input.tokens | 수집한 호출의 토큰 수                                |
+| moeum.telemetry.buffer.size                                  | 전송 대기 중 이벤트 수                               |
+| moeum.telemetry.dropped                                      | buffer_full / sink_failure / closed로 나눈 진단 유실 |
+| moeum.telemetry.metric.failures                              | 메트릭 집계 실패                                     |
+| moeum.logging.dropped                                        | 콘솔 큐 포화로 버린 로그 수                          |
+| moeum.logging.buffer.size                                    | 콘솔 출력 대기 로그 수                               |
 
 호출 메트릭 label은 purpose/provider/outcome만 사용한다.
 사용자·작업·생성 ID, 오류 메시지, 실제 모델 응답 문자열은 label에 넣지 않는다.
@@ -85,19 +85,19 @@ moeum.jobs.retention.completed-age / batch-size / interval / initial-delay로 �
 대화 정리 조건:
 
 - COMPLETED이고 보존 기간이 지났다.
-- 기록의 생성 입력이 동결됐다.
+- 기록이 마감됐다.
 - 같은 기록의 모든 응답 작업이 COMPLETED다.
 - 기록과 작업 행을 함께 잠글 수 있다.
 
 FAILED 작업의 후속 완료를 지우면 과거 재시도 차단 근거가 사라지므로,
 실패 작업이 하나라도 있는 기록은 완료 작업까지 보존한다.
-PENDING/PROCESSING도 보존하며 입력 동결 전에는 추가 대화의 순서 판단에 필요한 작업을 지우지 않는다.
+PENDING/PROCESSING도 보존하며 열린 기록에서는 추가 대화의 순서 판단에 필요한 작업을 지우지 않는다.
 원본 메시지와 AI 메시지는 정리 대상이 아니다.
 
-일기 정리 조건은 COMPLETED·보존 기간 경과·보관된 journalId 존재다.
+일기 작업 정리 조건은 COMPLETED와 보존 기간 경과다. 결과 INSERT와 작업 완료는 같은 트랜잭션이며, 일기 존재 여부는 결과 테이블의 기록 유일키로 판단한다.
 완료 일기 작업이 없어져도 journals의 기록 유일키와 보관 결과를 보고 재전달 등록을 거절한다.
 기존 일기에 대한 생성 재시도는 여전히 409다.
-현재 결과의 sourceRevision/generationId/model/promptVersion/generatedAt과 사용자 수정본은 보존한다.
+현재 일기 결과와 사용자 수정본은 보존한다. 생성 시도 ID·모델·프롬프트 버전은 결과 테이블에 저장하지 않는다.
 일기 작업에는 결과와 중복인 공급자·모델·프롬프트·토큰·생성 메타데이터를 저장하지 않는다.
 
 ## 클라이언트 계약

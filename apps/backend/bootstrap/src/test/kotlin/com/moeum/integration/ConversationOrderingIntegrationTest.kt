@@ -57,9 +57,9 @@ class ConversationOrderingIntegrationTest {
     private val now get() = Instant.now()
     @AfterEach fun finishTestJobs() { jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',lease_expires_at=NULL WHERE status IN ('PENDING','PROCESSING')") }
     private fun command(content: String="기억") = SaveMessageCommand(UUID.randomUUID(),content,now,"Asia/Seoul")
-    private fun accepted(user: UserId, cmd: SaveMessageCommand=command()) = save.save(user,cmd) as SaveMessageResult.Accepted
+    private fun accepted(user: UserId, cmd: SaveMessageCommand=command()) = save.save(user,cmd)
     private fun headers(jwt: String) = HttpHeaders().apply { setBearerAuth(jwt);contentType=MediaType.APPLICATION_JSON }
-    private fun answer() = ConversationResponse(UUID.randomUUID(),"응답","fake","test")
+    private fun answer() = ConversationResponse("응답")
 
     @Test fun `배치는 예약 상한 이내에서 기록별 선두만 선점하고 다음 워커와 중복하지 않는다`() {
         val users = (1..5).map { UserId.generate() }
@@ -103,7 +103,7 @@ class ConversationOrderingIntegrationTest {
             val winners = futures.mapNotNull { it.get(15,TimeUnit.SECONDS) }
             assertThat(winners).hasSize(1)
             val first = winners.single()
-            val duplicate = SaveMessageCommand(first.message.clientMessageId!!,first.message.content,first.message.occurredAt,first.message.timezone)
+            val duplicate = SaveMessageCommand(first.message.clientMessageId!!,first.message.content,first.message.occurredAt,"Asia/Seoul")
             assertThat(accepted(user,duplicate).message.id).isEqualTo(first.message.id)
         }
         val jwt = jwtProvider.issue(user).token
@@ -134,7 +134,7 @@ class ConversationOrderingIntegrationTest {
         jobs.save(claimed.copy(state=claimed.state.copy(status=JobStatus.PENDING,nextAttemptAt=now.plusSeconds(60),leaseExpiresAt=null)))
         assertThat(jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()).isNull()
         val pending = jobs.findByUserIdAndUserMessageId(user,first.message.id)!!
-        jobs.save(pending.failedPermanently("TEST",now))
+        jobs.save(pending.failedPermanently(now))
         val next = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
         assertThat(next.id).isEqualTo(second.responseJob!!.id)
         assertThatThrownBy { retry.retry(user,first.message.id) }.isInstanceOf(ResponseSupersededException::class.java)
@@ -209,7 +209,7 @@ class ConversationOrderingIntegrationTest {
         val user = UserId.generate()
         val jwt = jwtProvider.issue(user).token
         val first = accepted(user)
-        jobs.save(first.responseJob!!.failedPermanently("TEST",now))
+        jobs.save(first.responseJob!!.failedPermanently(now))
         val url = "/api/conversations/response-jobs?ids="+first.responseJob!!.id.value
         val response = rest.exchange<List<ResponseJobStatusResponse>>(url,HttpMethod.GET,HttpEntity<Void>(headers(jwt)))
         assertThat(response.statusCode).isEqualTo(HttpStatus.OK)

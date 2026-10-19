@@ -1,6 +1,5 @@
 package com.moeum.identity.application.command
 
-import com.moeum.identity.domain.model.AuthSessionRevokeReason
 import com.moeum.identity.domain.model.User
 import com.moeum.identity.infrastructure.config.AuthSessionProperties
 import com.moeum.identity.support.FakeJwtProvider
@@ -46,7 +45,7 @@ class AuthSessionServiceTest {
 
         assertThat(service.refresh(first.refreshToken)).isEqualTo(RefreshOutcome.Invalid)
 
-        assertThat(session().revokeReason).isEqualTo(AuthSessionRevokeReason.REFRESH_TOKEN_REUSED)
+        assertThat(session().revokedAt).isNotNull()
         // 정상 사용자가 가진 최신 토큰도 더는 쓸 수 없다 — 다시 로그인해야 한다
         assertThat(service.refresh(refreshed.tokens.refreshToken)).isEqualTo(RefreshOutcome.Invalid)
     }
@@ -75,16 +74,6 @@ class AuthSessionServiceTest {
     }
 
     @Test
-    fun `탈퇴한 사용자는 refresh를 거부하고 세션을 폐기한다`() {
-        val first = login()
-        userRepository.save(user.copy(deletedAt = timeProvider.now))
-
-        assertThat(service.refresh(first.refreshToken)).isEqualTo(RefreshOutcome.UserDeleted)
-
-        assertThat(session().revokeReason).isEqualTo(AuthSessionRevokeReason.USER_DELETED)
-    }
-
-    @Test
     fun `로그아웃하면 세션이 폐기되고, 다시 로그아웃해도 성공한다`() {
         val first = login()
 
@@ -92,7 +81,7 @@ class AuthSessionServiceTest {
         service.logout(first.refreshToken)
         service.logout("garbage")
 
-        assertThat(session().revokeReason).isEqualTo(AuthSessionRevokeReason.LOGOUT)
+        assertThat(session().revokedAt).isNotNull()
         assertThat(service.refresh(first.refreshToken)).isEqualTo(RefreshOutcome.Invalid)
     }
 }

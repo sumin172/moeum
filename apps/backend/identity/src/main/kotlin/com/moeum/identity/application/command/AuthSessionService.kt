@@ -7,7 +7,6 @@ import com.moeum.identity.domain.AuthSessionRepository
 import com.moeum.identity.domain.UserRepository
 import com.moeum.identity.domain.model.AuthSession
 import com.moeum.identity.domain.model.AuthSessionId
-import com.moeum.identity.domain.model.AuthSessionRevokeReason
 import com.moeum.identity.domain.model.RefreshToken
 import com.moeum.identity.infrastructure.config.AuthSessionProperties
 import com.moeum.kernel.TimeProvider
@@ -32,7 +31,6 @@ sealed interface RefreshOutcome {
     data class Refreshed(val tokens: AuthTokens) : RefreshOutcome
     data object Invalid : RefreshOutcome
     data object AlreadyRotated : RefreshOutcome
-    data object UserDeleted : RefreshOutcome
 }
 
 @ConditionalOnRole(ExecutionRole.API)
@@ -51,7 +49,7 @@ class AuthSessionService(
     fun start(userId: UserId, deviceId: UUID): AuthTokens {
         val now = timeProvider.now()
         authSessionRepository.findActiveByUserIdAndDeviceId(userId, deviceId)?.let {
-            authSessionRepository.save(it.revoked(AuthSessionRevokeReason.RELOGIN_ON_SAME_DEVICE, now))
+            authSessionRepository.save(it.revoked(now))
         }
         val sessionId = AuthSessionId.generate()
         val refreshToken = RefreshToken.issue(sessionId)
@@ -75,14 +73,14 @@ class AuthSessionService(
             }
             // 이미 교체된 예전 토큰이 다시 쓰였다 — 토큰이 탈취됐을 수 있으므로 세션 전체를 끊는다.
             log.warn("refresh token 재사용 감지, 세션 폐기: sessionId={}, userId={}", session.id.value, session.userId.value)
-            authSessionRepository.save(session.revoked(AuthSessionRevokeReason.REFRESH_TOKEN_REUSED, now))
+            authSessionRepository.save(session.revoked(now))
             return RefreshOutcome.Invalid
         }
 
         val user = userRepository.findById(session.userId)
-        if (user == null || user.isDeleted) {
-            authSessionRepository.save(session.revoked(AuthSessionRevokeReason.USER_DELETED, now))
-            return RefreshOutcome.UserDeleted
+        if (user == null) {
+            authSessionRepository.save(session.revoked(now))
+            return RefreshOutcome.Invalid
         }
 
         val newToken = RefreshToken.issue(session.id)
@@ -95,14 +93,8 @@ class AuthSessionService(
     fun logout(refreshTokenValue: String) {
         val token = RefreshToken.parse(refreshTokenValue) ?: return
         val session = authSessionRepository.findById(token.sessionId) ?: return
-        val hash = token.hash()
         val now = timeProvider.now()
-        val reason = if (session.matchesCurrent(hash) || session.isRecentlyRotated(hash, now, properties.rotationGrace)) {
-            AuthSessionRevokeReason.LOGOUT
-        } else {
-            AuthSessionRevokeReason.REFRESH_TOKEN_REUSED
-        }
-        authSessionRepository.save(session.revoked(reason, now))
+        authSessionRepository.save(session.revoked(now))
     }
 
     private fun issueTokens(userId: UserId, refreshToken: RefreshToken, session: AuthSession): AuthTokens {

@@ -9,9 +9,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 
-enum class CloseReason { SCHEDULED, TIMEZONE_PAST, MAX_DURATION }
-
-/** 메시지를 컬렉션으로 보유하지 않는다. 원본 귀속, 예약, 입력 확정과 전달 상태만 소유한다. */
+/** 메시지를 컬렉션으로 보유하지 않는다. 열린 기록의 귀속·마감 예약과 전달 상태만 소유한다. */
 data class RecordDay(
     val id: RecordDayId,
     val userId: UserId,
@@ -21,63 +19,43 @@ data class RecordDay(
     val closeTime: LocalTime,
     val timezone: String,
     val closeAt: Instant,
-    val lastUserOccurredAt: Instant,
     val sourceRevision: Long = 0,
     val closedAt: Instant? = null,
-    val closeReason: CloseReason = CloseReason.SCHEDULED,
-    val frozenSourceRevision: Long? = null,
     val deliveryVersion: Long = 0,
     val deliveryLeaseExpiresAt: Instant? = null,
     val deliveryAcknowledged: Boolean = false,
 ) {
-    fun contains(occurredAt: Instant): Boolean = occurredAt >= startAt && occurredAt < (closedAt ?: closeAt)
-
     fun closeIfDue(now: Instant): RecordDay =
         if (closedAt == null && now >= closeAt) copy(closedAt = closeAt) else this
 
-    fun append(occurredAt: Instant, zone: ZoneId, now: Instant): RecordDay {
-        check(frozenSourceRevision == null) { "이미 입력이 확정된 기록입니다" }
+    fun append(zone: ZoneId, now: Instant): RecordDay {
+        check(closedAt == null) { "마감된 기록에는 메시지를 추가할 수 없습니다" }
         val nextRevision = sourceRevision + 1
-        if (closedAt != null || occurredAt < lastUserOccurredAt) return copy(sourceRevision = nextRevision)
         val scheduled = resolveClose(closeDate, closeTime, zone)
         val maximum = startAt.plus(MAX_RECORD_DURATION)
-        val reason = when {
-            scheduled <= now -> CloseReason.TIMEZONE_PAST
-            scheduled > maximum -> CloseReason.MAX_DURATION
-            else -> CloseReason.SCHEDULED
-        }
-        val nextClose = when (reason) {
-            CloseReason.TIMEZONE_PAST -> now
-            CloseReason.MAX_DURATION -> maximum
-            CloseReason.SCHEDULED -> scheduled
-        }
+        val nextClose = if (scheduled <= now) now else minOf(scheduled, maximum)
         return copy(
-            timezone = zone.id, lastUserOccurredAt = occurredAt, sourceRevision = nextRevision,
-            closeAt = nextClose, closeReason = reason,
+            timezone = zone.id, sourceRevision = nextRevision,
+            closeAt = nextClose,
         ).closeIfDue(now)
-    }
-
-    fun freeze(): RecordDay {
-        check(closedAt != null) { "열린 기록의 입력은 확정할 수 없습니다" }
-        return if (frozenSourceRevision == null) copy(frozenSourceRevision = sourceRevision) else this
     }
 
     companion object {
         val DEFAULT_CLOSE_TIME: LocalTime = LocalTime.of(2, 0)
         val MAX_RECORD_DURATION: Duration = Duration.ofHours(36)
 
-        fun create(userId: UserId, occurredAt: Instant, zone: ZoneId, closeTime: LocalTime, startFloor: Instant? = null): RecordDay {
-            var closeDate = occurredAt.atZone(zone).toLocalDate()
-            if (resolveClose(closeDate, closeTime, zone) <= occurredAt) closeDate = closeDate.plusDays(1)
+        fun create(userId: UserId, acceptedAt: Instant, zone: ZoneId, closeTime: LocalTime, startFloor: Instant? = null): RecordDay {
+            var closeDate = acceptedAt.atZone(zone).toLocalDate()
+            if (resolveClose(closeDate, closeTime, zone) <= acceptedAt) closeDate = closeDate.plusDays(1)
             val previousClose = resolveClose(closeDate.minusDays(1), closeTime, zone)
             val startAt = maxOf(previousClose, startFloor ?: previousClose)
-            require(occurredAt >= startAt) { "기존 기록 구간과 겹칩니다" }
+            require(acceptedAt >= startAt) { "기존 기록 구간과 겹칩니다" }
             val closeAt = minOf(resolveClose(closeDate, closeTime, zone), startAt.plus(MAX_RECORD_DURATION))
             return RecordDay(
                 id = RecordDayId.generate(), userId = userId,
                 displayDate = if (closeTime < LocalTime.NOON) closeDate.minusDays(1) else closeDate,
                 startAt = startAt, closeDate = closeDate, closeTime = closeTime, timezone = zone.id,
-                closeAt = closeAt, lastUserOccurredAt = occurredAt,
+                closeAt = closeAt,
             )
         }
 
@@ -94,5 +72,4 @@ data class RecordDay(
 data class UserRecordState(
     val userId: UserId,
     val closeTime: LocalTime = RecordDay.DEFAULT_CLOSE_TIME,
-    val activeRecordDayId: RecordDayId? = null,
 )

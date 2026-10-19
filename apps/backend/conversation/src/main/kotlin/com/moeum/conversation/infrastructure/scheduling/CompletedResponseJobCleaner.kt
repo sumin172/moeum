@@ -26,7 +26,7 @@ class CompletedResponseJobCleaner(
             SELECT j.id FROM conversation.response_jobs j
             JOIN conversation.record_days r ON r.id=j.record_day_id
             WHERE j.status='COMPLETED' AND j.updated_at<?
-                AND r.frozen_source_revision IS NOT NULL
+                AND r.closed_at IS NOT NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM conversation.response_jobs other
                     WHERE other.record_day_id=j.record_day_id AND other.status<>'COMPLETED')
@@ -36,7 +36,7 @@ class CompletedResponseJobCleaner(
         DELETE FROM conversation.response_jobs WHERE id IN (SELECT id FROM candidates)
     """.trimIndent(), Timestamp.from(time.now().minus(properties.completedAge)), properties.batchSize)
 
-    @Scheduled(scheduler = "conversationRetentionScheduler", fixedDelayString = "\${moeum.jobs.retention.interval:PT1M}", initialDelayString = "\${moeum.jobs.retention.initial-delay:PT1M}")
+    @Scheduled(scheduler = "conversationRetentionScheduler", fixedDelayString = $$"${moeum.jobs.retention.interval:PT1M}", initialDelayString = $$"${moeum.jobs.retention.initial-delay:PT1M}")
     fun scheduledCleanup() {
         runCatching { cleanBatch() }
             .onSuccess { if (it > 0) log.info("완료 응답 작업 정리: deleted={}", it) }

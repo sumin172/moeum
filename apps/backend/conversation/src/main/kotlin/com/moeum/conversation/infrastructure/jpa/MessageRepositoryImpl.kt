@@ -5,10 +5,13 @@ import com.moeum.kernel.RecordDayId
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
+import com.moeum.conversation.domain.model.MessageRole
 import com.moeum.kernel.UserId
 import jakarta.persistence.EntityManager
 import org.springframework.data.domain.PageRequest
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.stereotype.Component
+import java.time.Instant
 import java.util.UUID
 
 // 표시 시각과 별개인 streamSequence로 커밋 가시성을 추적한다.
@@ -43,19 +46,27 @@ class MessageRepositoryImpl(
         ).asReversed().map { it.toDomain() }
 
 
-    override fun findSource(userId: UserId, recordDayId: RecordDayId, sourceRevision: Long): List<Message> =
-        jpaRepository.findByUserIdAndRecordDayIdAndRoleAndSourceSequenceLessThanEqualOrderByOccurredAtAscSourceSequenceAsc(
-            userId.value, recordDayId.value, com.moeum.conversation.domain.model.MessageRole.USER, sourceRevision,
-        ).map { it.toDomain() }
+    override fun findJournalInput(userId: UserId, recordDayId: RecordDayId, sourceRevision: Long, closedAt: Instant): List<Message> {
+        // 마지막 USER 뒤의 AI 응답은 이 기록의 사용자 발화를 해석하는 문맥이 아니다.
+        // 닫힌 기록에는 새 USER가 들어오지 않으므로 재시도 때도 변하지 않는다.
+        val lastUserStream = jdbc.queryForObject<Long>("""
+            SELECT stream_sequence FROM conversation.messages
+            WHERE user_id=? AND record_day_id=? AND role='USER' AND source_sequence=?
+        """.trimIndent(), userId.value, recordDayId.value, sourceRevision)
+            ?: error("동결된 마지막 사용자 메시지가 없습니다")
+        return jpaRepository.findByUserIdAndRecordDayIdAndSourceSequenceLessThanEqualAndStreamSequenceLessThanEqualOrderByStreamSequenceAsc(
+            userId.value, recordDayId.value, sourceRevision, lastUserStream,
+        ).map { it.toDomain() }.filter { it.role == MessageRole.USER || it.occurredAt < closedAt }
+    }
 
     // 직접 할당한 UUID라 Spring Data save()는 merge로 처리되어 INSERT 전에 SELECT가 한 번 더 나간다.
     // 추가만 하는 데이터이므로 persist로 바로 INSERT한다(호출부 트랜잭션 안에서 실행된다).
     override fun append(message: Message): Message {
         // UPDATE의 행 잠금은 커밋까지 유지된다. USER·ASSISTANT 모두 같은 기록 순번을 사용한다.
-        val sequence = jdbc.queryForObject("""
+        val sequence = jdbc.queryForObject<Long>("""
             UPDATE conversation.record_days SET stream_sequence=stream_sequence+1
             WHERE user_id=? AND id=? RETURNING stream_sequence
-            """, Long::class.java, message.userId.value, message.recordDayId.value) ?: error("기록이 없습니다")
+            """, message.userId.value, message.recordDayId.value) ?: error("기록이 없습니다")
         val saved = message.copy(streamSequence=sequence)
         entityManager.persist(saved.toEntity())
         return saved
@@ -69,13 +80,9 @@ private fun MessageJpaEntity.toDomain(): Message =
         role = role,
         content = content,
         occurredAt = occurredAt,
-        timezone = timezone,
         sourceSequence = sourceSequence,
         recordDayId = RecordDayId(recordDayId),
         clientMessageId = clientMessageId,
-        generationId = generationId,
-        model = model,
-        promptVersion = promptVersion,
         createdAt = createdAt,
         streamSequence = streamSequence,
     )
@@ -87,13 +94,9 @@ private fun Message.toEntity(): MessageJpaEntity =
         role = role,
         content = content,
         occurredAt = occurredAt,
-        timezone = timezone,
         sourceSequence = sourceSequence,
         recordDayId = recordDayId.value,
         clientMessageId = clientMessageId,
-        generationId = generationId,
-        model = model,
-        promptVersion = promptVersion,
         createdAt = createdAt,
         streamSequence = streamSequence,
     )

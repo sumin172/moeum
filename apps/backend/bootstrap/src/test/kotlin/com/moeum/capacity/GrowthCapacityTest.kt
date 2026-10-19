@@ -393,8 +393,9 @@ class GrowthCapacityTest {
         val durations=jdbc.dataSource!!.connection.use { connection ->
             val array=connection.createArrayOf("uuid",ids.toTypedArray())
             try { connection.prepareStatement("""
-                SELECT j.generated_at,r.closed_at FROM journal.journals j
+                SELECT g.updated_at,r.closed_at FROM journal.journals j
                 JOIN conversation.record_days r ON r.id=j.record_day_id
+                JOIN journal.generation_jobs g ON g.record_day_id=j.record_day_id AND g.status='COMPLETED'
                 WHERE j.record_day_id=ANY(?)
             """.trimIndent()).use {
                 it.setArray(1,array)

@@ -4,9 +4,9 @@ import com.moeum.conversation.domain.model.RecordDay
 import java.time.*
 import java.util.UUID
 data class RecordSummaryResponse(val recordDayId: UUID, val displayDate: LocalDate, val startAt: Instant,
-    val closeAt: Instant, val closedAt: Instant?, val inputFrozen: Boolean) {
+    val closeAt: Instant, val closedAt: Instant?) {
     companion object {
-        fun from(record: RecordDay) = RecordSummaryResponse(record.id.value,record.displayDate,record.startAt,record.closeAt,record.closedAt,record.frozenSourceRevision != null)
+        fun from(record: RecordDay) = RecordSummaryResponse(record.id.value,record.displayDate,record.startAt,record.closeAt,record.closedAt)
     }
 }
 data class RecordConversationResponse(val record: RecordSummaryResponse, val messages: List<MessageResponse>, val nextCursor: Long?) {

@@ -11,7 +11,7 @@ class RecordDayTest {
     @Test fun `마감 직전과 정각은 서로 다른 기록이다`() {
         val before = create("2026-08-01T16:59:59Z")
         val boundary = Instant.parse("2026-08-01T17:00:00Z")
-        assertThat(before.contains(boundary)).isFalse()
+        assertThat(before.closeAt).isEqualTo(boundary)
         assertThat(create(boundary.toString()).displayDate).isEqualTo(LocalDate.of(2026,8,2))
         assertThat(before.closeIfDue(boundary.plusSeconds(60)).closedAt).isEqualTo(boundary)
     }
@@ -19,7 +19,7 @@ class RecordDayTest {
         val first = create("2026-08-01T12:00:00Z",LocalTime.of(23,0))
         assertThat(first.closeAt).isEqualTo(Instant.parse("2026-08-01T14:00:00Z"))
         val at = Instant.parse("2026-08-01T12:05:00Z")
-        val moved = first.append(at,ZoneId.of("Asia/Bangkok"),at)
+        val moved = first.append(ZoneId.of("Asia/Bangkok"),at)
         assertThat(moved.closeAt).isEqualTo(Instant.parse("2026-08-01T16:00:00Z"))
         assertThat(moved.closeDate).isEqualTo(first.closeDate)
         assertThat(moved.displayDate).isEqualTo(first.displayDate)
@@ -31,7 +31,7 @@ class RecordDayTest {
         assertThat(next.id).isNotEqualTo(first.id)
         assertThat(next.displayDate).isEqualTo(first.displayDate)
         assertThat(next.startAt).isEqualTo(closed.closedAt)
-        assertThat(next.contains(first.closeAt)).isTrue()
+        assertThat(next.startAt).isEqualTo(first.closeAt)
     }
     @Test fun `새벽 표시 날짜와 정오 이후 표시 날짜를 구분한다`() {
         assertThat(create("2026-08-01T15:00:00Z").displayDate).isEqualTo(LocalDate.of(2026,8,1))
@@ -42,36 +42,34 @@ class RecordDayTest {
         assertThat(RecordDay.resolveClose(LocalDate.of(2026,3,8), LocalTime.of(2,30),ny)).isEqualTo(Instant.parse("2026-03-08T07:00:00Z"))
         assertThat(RecordDay.resolveClose(LocalDate.of(2026,11,1), LocalTime.of(1,30),ny)).isEqualTo(Instant.parse("2026-11-01T06:30:00Z"))
     }
-    @Test fun `늦은 오프라인 발화는 마지막 위치를 되돌리지 않는다`() {
-        val record = create("2026-08-01T12:00:00Z").append(Instant.parse("2026-08-01T12:00:00Z"),seoul,Instant.parse("2026-08-01T12:00:00Z"))
-        val next = record.append(Instant.parse("2026-08-01T11:00:00Z"),ZoneId.of("UTC"),Instant.parse("2026-08-01T12:00:00Z"))
-        assertThat(next.timezone).isEqualTo(seoul.id)
+    @Test fun `늦게 전송된 발화도 접수 순서로 마지막 위치를 갱신한다`() {
+        val at = Instant.parse("2026-08-01T12:00:00Z")
+        val record = create(at.toString()).append(seoul,at)
+        val next = record.append(ZoneId.of("UTC"),at.plusSeconds(1))
+        assertThat(next.timezone).isEqualTo("UTC")
         assertThat(next.sourceRevision).isEqualTo(2)
     }
     @Test fun `동시 발화 시각은 저장 원본 버전 순으로 위치를 갱신한다`() {
         val at = Instant.parse("2026-08-01T12:00:00Z")
-        val next = create(at.toString()).append(at,ZoneId.of("UTC"),at)
+        val next = create(at.toString()).append(ZoneId.of("UTC"),at)
         assertThat(next.timezone).isEqualTo("UTC")
         assertThat(next.closeDate).isEqualTo(LocalDate.of(2026,8,2))
         assertThat(next.displayDate).isEqualTo(LocalDate.of(2026,8,1))
     }
     @Test fun `위치 이동 후 이미 지난 예약은 현재 시각에 마감한다`() {
         val at = Instant.parse("2026-08-01T16:00:00Z")
-        val next = create(at.toString()).append(at,ZoneId.of("Pacific/Auckland"),at)
+        val next = create(at.toString()).append(ZoneId.of("Pacific/Auckland"),at)
         assertThat(next.closedAt).isEqualTo(at)
-        assertThat(next.closeReason).isEqualTo(CloseReason.TIMEZONE_PAST)
+        assertThat(next.closeAt).isEqualTo(at)
     }
     @Test fun `서쪽 이동으로 연장해도 36시간을 넘지 않는다`() {
         val at = Instant.parse("2026-08-01T12:00:00Z")
-        val next = create(at.toString()).append(at,ZoneId.of("Pacific/Honolulu"),at)
+        val next = create(at.toString()).append(ZoneId.of("Pacific/Honolulu"),at)
         assertThat(next.closeAt).isEqualTo(next.startAt.plus(Duration.ofHours(36)))
-        assertThat(next.closeReason).isEqualTo(CloseReason.MAX_DURATION)
     }
-    @Test fun `동결은 닫힌 기록에만 가능하며 재시도 버전은 같다`() {
+    @Test fun `닫힌 기록에는 사용자 메시지를 추가하지 않는다`() {
         val day = create("2026-08-01T12:00:00Z").copy(sourceRevision = 3)
-        assertThatThrownBy { day.freeze() }.isInstanceOf(IllegalStateException::class.java)
-        val frozen = day.closeIfDue(day.closeAt).freeze()
-        assertThat(frozen.freeze().frozenSourceRevision).isEqualTo(3)
-        assertThatThrownBy { frozen.append(day.lastUserOccurredAt,seoul,day.closeAt) }.isInstanceOf(IllegalStateException::class.java)
+        val closed = day.closeIfDue(day.closeAt)
+        assertThatThrownBy { closed.append(seoul,day.closeAt) }.isInstanceOf(IllegalStateException::class.java)
     }
 }

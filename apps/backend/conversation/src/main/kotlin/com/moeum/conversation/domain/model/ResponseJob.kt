@@ -7,7 +7,7 @@ import com.moeum.platform.job.JobState
 import com.moeum.platform.job.JobStatus
 import java.time.Instant
 
-// 사용자에게 보여주는 실패 분류. 기술적인 원인(예외 종류)은 JobState.lastErrorCode에 남는다.
+// 사용자에게 보여주는 실패 분류는 작업 상태에서 계산한다.
 enum class ResponseFailureReason { GENERATION_FAILED }
 
 // 유저 메시지 하나에 대한 AI 응답 생성 작업. 메시지와 같은 트랜잭션에서 만들어지므로, 비동기 실행이 유실돼도
@@ -18,27 +18,28 @@ data class ResponseJob(
     val userId: UserId,
     val recordDayId: RecordDayId,
     val state: JobState,
-    val failureReason: ResponseFailureReason? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
     val inputSourceRevision: Long,
 ) {
     // 최종 생성 실패만 재시도 대상이다. 후속 작업과의 순서는 요청 시 다시 검증한다.
     val retryable: Boolean
-        get() = state.status == JobStatus.FAILED && failureReason == ResponseFailureReason.GENERATION_FAILED
+        get() = state.status == JobStatus.FAILED
 
-    fun completed(now: Instant): ResponseJob = copy(state = state.completed(), failureReason = null, updatedAt = now)
+    val failureReason: ResponseFailureReason?
+        get() = if (state.status == JobStatus.FAILED) ResponseFailureReason.GENERATION_FAILED else null
 
-    fun failed(errorCode: String, policy: JobPolicy, now: Instant): ResponseJob {
-        val next = state.failed(errorCode, policy, now)
-        val reason = if (next.status == JobStatus.FAILED) ResponseFailureReason.GENERATION_FAILED else null
-        return copy(state = next, failureReason = reason, updatedAt = now)
+    fun completed(now: Instant): ResponseJob = copy(state = state.completed(), updatedAt = now)
+
+    fun failed(policy: JobPolicy, now: Instant): ResponseJob {
+        val next = state.failed(policy, now)
+        return copy(state = next, updatedAt = now)
     }
 
-    fun failedPermanently(errorCode: String, now: Instant): ResponseJob =
-        copy(state = state.failedPermanently(errorCode), failureReason = ResponseFailureReason.GENERATION_FAILED, updatedAt = now)
+    fun failedPermanently(now: Instant): ResponseJob =
+        copy(state = state.failedPermanently(), updatedAt = now)
 
-    fun restarted(now: Instant): ResponseJob = copy(state = state.restarted(now), failureReason = null, updatedAt = now)
+    fun restarted(now: Instant): ResponseJob = copy(state = state.restarted(now), updatedAt = now)
 
     companion object {
         fun pending(userMessage: Message, now: Instant): ResponseJob =

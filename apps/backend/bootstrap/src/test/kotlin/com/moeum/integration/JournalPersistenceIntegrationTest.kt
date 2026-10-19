@@ -1,20 +1,18 @@
 package com.moeum.integration
 
 import com.moeum.integration.support.AbstractIntegrationTest
+import com.moeum.integration.support.insertPremiumSubscription
+import com.moeum.journal.application.command.EditJournalService
 import com.moeum.journal.application.command.SaveGeneratedJournalService
-import com.moeum.journal.domain.JournalRepository
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.GenerationJobRepository
+import com.moeum.journal.domain.JournalRepository
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
-import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
-import com.moeum.journal.application.command.EditJournalService
 import com.moeum.platform.security.jwt.JwtProvider
-import com.moeum.integration.support.insertPremiumSubscription
-import java.util.concurrent.*
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
@@ -22,7 +20,9 @@ import org.springframework.jdbc.core.queryForObject
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** 최초 결과와 작업 완료의 원자성·TEXT 본문 저장을 실제 PostgreSQL로 검증한다. */
 class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
@@ -41,18 +41,18 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var jwtProvider: JwtProvider
 
     private fun generation(body: String = "본문") =
-        GeneratedJournal(UUID.randomUUID(),"제목",body,"m", "v")
+        GeneratedJournal("제목", body)
     private fun claimed(user: UserId): GenerationJob {
         val future = Instant.now().plus(Duration.ofDays(600))
-        val pending = generationJobRepository.save(GenerationJob.pending(user,RecordDayId.generate(),LocalDate.of(2027,2,1),future,Instant.now()))
+        val pending = generationJobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(user,RecordDayId.generate(),future,Instant.now()))
         return generateSequence { generationJobRepository.claimNext(future.plusSeconds(1),future.plusSeconds(300)) }.first { it.id==pending.id }
     }
 
-    @Test fun `두 기기의 동시 수정은 한 건만 저장하고 생성 원본 정보는 보존한다`() {
+    @Test fun `두 기기의 동시 수정은 한 건만 저장한다`() {
         val user = jwtProvider.parse(issueJwt()).userId
         insertPremiumSubscription(jdbcTemplate,user)
         val job = claimed(user)
-        val original = saveGeneratedJournalService.save(job,generation(),1)
+        val original = saveGeneratedJournalService.save(job,LocalDate.of(2027,2,1),generation())
         val gate = CountDownLatch(1)
         Executors.newFixedThreadPool(2).use { pool ->
             val results = listOf("기기 A","기기 B").map { body -> pool.submit<Boolean> {
@@ -67,8 +67,6 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         val stored = journalRepository.findByUserIdAndRecordDayId(user,job.recordDayId)!!
         assertThat(stored.version).isEqualTo(1)
         assertThat(stored.body).isIn("기기 A","기기 B")
-        assertThat(stored.generationId).isEqualTo(original.generationId)
-        assertThat(stored.sourceRevision).isEqualTo(original.sourceRevision)
         assertThat(edit.edit(user,job.recordDayId,stored.title,stored.body,stored.version)).isEqualTo(stored)
     }
 
@@ -81,7 +79,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         Executors.newSingleThreadExecutor().use { pool ->
             val late = pool.submit<Boolean> {
                 started.countDown();release.await()
-                try { saveGeneratedJournalService.save(old,generation("늦은 AI"),1);false }
+                try { saveGeneratedJournalService.save(old,LocalDate.of(2027,2,1),generation("늦은 AI"));false }
                 catch (_: org.springframework.dao.OptimisticLockingFailureException) { true }
             }
             try {
@@ -91,14 +89,13 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
                     val at = Instant.now().plus(Duration.ofDays(601))
                     generationJobRepository.claimNext(at,at.plusSeconds(300))
                 }.first { it.id==old.id }
-                val fresh = saveGeneratedJournalService.save(replacement,generation("정상 AI"),1)
+                val fresh = saveGeneratedJournalService.save(replacement,LocalDate.of(2027,2,1),generation("정상 AI"))
                 edit.edit(user,old.recordDayId,"사용자 제목","사용자 수정본",fresh.version)
                 release.countDown()
                 assertThat(late.get(15,TimeUnit.SECONDS)).isTrue()
                 val stored = journalRepository.findByUserIdAndRecordDayId(user,old.recordDayId)!!
                 assertThat(stored.body).isEqualTo("사용자 수정본")
                 assertThat(stored.version).isEqualTo(1)
-                assertThat(stored.generationId).isEqualTo(fresh.generationId)
                 assertThat(jdbcTemplate.queryForObject<Int>("SELECT count(*) FROM journal.journals WHERE user_id=?",
                     user.value)).isEqualTo(1)
             } finally { release.countDown() }
@@ -109,26 +106,14 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         val user = jwtProvider.parse(issueJwt()).userId
         insertPremiumSubscription(jdbcTemplate,user)
         val initial = claimed(user)
-        val original = saveGeneratedJournalService.save(initial,generation(),1)
+        val original = saveGeneratedJournalService.save(initial,LocalDate.of(2027,2,1),generation())
         val edited = edit.edit(user,initial.recordDayId,"수정 제목","수정 본문",original.version)
         // 결과가 남아 있는 복구 상태를 주입한다. 서비스에 AI 재작성 API를 추가하지 않는다.
         jdbcTemplate.update("UPDATE journal.generation_jobs SET status='PROCESSING',version=version+1 WHERE id=?",initial.id.value)
         val repair = generationJobRepository.findByUserIdAndRecordDayId(user,initial.recordDayId)!!
-        val result = saveGeneratedJournalService.save(repair,generation("교체하면 안 되는 결과"),1)
+        val result = saveGeneratedJournalService.save(repair,LocalDate.of(2027,2,1),generation("교체하면 안 되는 결과"))
         assertThat(result).isEqualTo(edited)
         assertThat(journalRepository.findByUserIdAndRecordDayId(user,initial.recordDayId)).isEqualTo(edited)
-    }
-
-    @Test fun `동결 원본 버전과 다른 결과는 거절하고 현재 결과와 작업을 보존한다`() {
-        val user = UserId.generate()
-        val initial = claimed(user)
-        val original = saveGeneratedJournalService.save(initial,generation(),1)
-        jdbcTemplate.update("UPDATE journal.generation_jobs SET status='PROCESSING',version=version+1 WHERE id=?",initial.id.value)
-        val repair = generationJobRepository.findByUserIdAndRecordDayId(user,initial.recordDayId)!!
-        assertThatThrownBy { saveGeneratedJournalService.save(repair,generation("다른 원본"),2) }.isInstanceOf(IllegalStateException::class.java)
-        assertThat(journalRepository.findByUserIdAndRecordDayId(user,initial.recordDayId)).isEqualTo(original)
-        assertThat(generationJobRepository.findByUserIdAndRecordDayId(user,initial.recordDayId)!!.state).isEqualTo(repair.state)
-        generationJobRepository.save(repair.failedPermanently("TEST_FINISHED",Instant.now()))
     }
 
     @Test fun `표시 날짜가 같아도 다른 기록은 별도 일기로 저장 조회된다`() {
@@ -136,11 +121,10 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         val date = LocalDate.of(2027,2,1)
         val ids = listOf(RecordDayId.generate(),RecordDayId.generate())
         val future = Instant.now().plus(Duration.ofDays(500))
-        val created = ids.map { generationJobRepository.save(GenerationJob.pending(user,it,date,future,Instant.now())).id }
+        val created = ids.map { generationJobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(user,it,future,Instant.now())).id }
         created.forEachIndexed { index,id ->
             val job = generateSequence { generationJobRepository.claimNext(future.plusSeconds(1),future.plusSeconds(300)) }.first { it.id == id }
-            saveGeneratedJournalService.save(job,GeneratedJournal(UUID.randomUUID(),
-                "제목$index", "본문$index","m", "v"),1)
+            saveGeneratedJournalService.save(job,date,GeneratedJournal("제목$index", "본문$index"))
         }
         assertThat(journalRepository.findByDate(user,date)).hasSize(2)
         assertThat(journalRepository.findByUserIdAndRecordDayId(user,ids[0])!!.body).isEqualTo("본문0")
@@ -152,15 +136,15 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         val userId = UserId.generate()
         // 실시간 스케줄러가 건드리지 않도록 먼 미래가 하루 끝인 작업을 만들고, 그 시각으로 선점한다
         val farFuture = Instant.now().plus(Duration.ofDays(400))
-        generationJobRepository.save(GenerationJob.pending(userId, RecordDayId.generate(), LocalDate.of(2027, 2, 1), farFuture, Instant.now()))
+        generationJobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, RecordDayId.generate(), farFuture, Instant.now()))
         val claimAt = farFuture.plusSeconds(1)
         val job = generateSequence { generationJobRepository.claimNext(claimAt, claimAt.plus(Duration.ofMinutes(5))) }
             .first { it.userId == userId }
 
         val journal = saveGeneratedJournalService.save(
             job,
-            GeneratedJournal(UUID.randomUUID(), "제목", "본문", "m", "v"),
-            sourceRevision = 1,
+            LocalDate.of(2027, 2, 1),
+            GeneratedJournal("제목", "본문"),
         )
 
         val jobStatus = jdbcTemplate.queryForObject<String>(

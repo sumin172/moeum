@@ -2,6 +2,7 @@
 package com.moeum.integration
 
 import com.moeum.conversation.application.command.ConversationQuotaService
+import com.moeum.conversation.application.publicapi.RecordDayOperations
 import com.moeum.conversation.interfaces.SaveMessageResponse
 import com.moeum.conversation.interfaces.dto.SaveMessageRequest
 import com.moeum.integration.support.AbstractIntegrationTest
@@ -24,17 +25,27 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-/** 마감 전달·즉시 보관·서버 권한·수정 충돌·입력 동결·무료 복구를 실제 API/DB로 검증한다. */
+/** 마감 전달·즉시 보관·서버 권한·수정 충돌·닫힌 입력의 무료 복구를 실제 API/DB로 검증한다. */
 class JournalFlowIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var deliveryWorker: RecordDeliveryWorker
     @Autowired lateinit var generationExecutor: GenerationExecutor
     @Autowired lateinit var jwtProvider: JwtProvider
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var quota: ConversationQuotaService
+    @Autowired lateinit var records: RecordDayOperations
 
-    private fun sendMessage(jwt: String, content: String): SaveMessageResponse =
-        restTemplate.exchange<SaveMessageResponse>("/api/conversations/messages",HttpMethod.POST,
-            HttpEntity(SaveMessageRequest(UUID.randomUUID(),content,Instant.now().minus(Duration.ofDays(1)),"Asia/Seoul"),authHeaders(jwt))).body!!
+    private fun sendMessage(jwt: String, content: String): SaveMessageResponse {
+        val saved = restTemplate.exchange<SaveMessageResponse>("/api/conversations/messages",HttpMethod.POST,
+            HttpEntity(SaveMessageRequest(UUID.randomUUID(),content,Instant.now(),"Asia/Seoul"),authHeaders(jwt))).body!!
+        jdbc.update("UPDATE conversation.record_days SET close_at=? WHERE id=?",
+            java.sql.Timestamp.from(Instant.now().plusMillis(2)), saved.recordDayId)
+        Thread.sleep(5)
+        repeat(100) {
+            records.closeNext()
+            if (jdbc.queryForObject<Boolean>("SELECT closed_at IS NOT NULL FROM conversation.record_days WHERE id=?", saved.recordDayId) == true) return saved
+        }
+        error("기록이 마감되지 않았습니다: ${saved.recordDayId}")
+    }
     private fun journalDay(jwt: String, day: UUID) =
         restTemplate.exchange<JournalDayResponse>("/api/journals/$day",HttpMethod.GET,HttpEntity<Void>(authHeaders(jwt))).body!!
     private fun awaitGeneration(jwt: String, day: UUID, status: String): JournalDayResponse {
@@ -69,20 +80,21 @@ class JournalFlowIntegrationTest : AbstractIntegrationTest() {
             HttpEntity(EditJournalRequest("낡은 제목","낡은 본문",journal.version),authHeaders(jwt)))
         assertThat(stale.statusCode).isEqualTo(HttpStatus.CONFLICT)
         val late = restTemplate.exchange<SaveMessageResponse>("/api/conversations/messages",HttpMethod.POST,
-            HttpEntity(SaveMessageRequest(UUID.randomUUID(),"늦은 원본",Instant.now().minus(Duration.ofDays(1)),"Asia/Seoul",day),authHeaders(jwt))).body!!
-        assertThat(late.status).isEqualTo("DISCARDED_INPUT_FROZEN")
+            HttpEntity(SaveMessageRequest(UUID.randomUUID(),"다음 기록의 대화",Instant.now().minus(Duration.ofDays(1)),"Asia/Seoul"),authHeaders(jwt))).body!!
+        assertThat(late.message.content).isEqualTo("다음 기록의 대화")
+        assertThat(late.recordDayId).isNotEqualTo(day)
         assertThat(journalDay(jwt,day).journal!!.body).isEqualTo("바람이 좋았다")
-        assertThat(quota.current(user).used).isEqualTo(1)
+        assertThat(quota.current(user).used).isEqualTo(2)
     }
 
-    @Test fun `무료 사용자 실패 복구는 같은 확정 입력을 사용하고 대화 횟수를 추가 차감하지 않는다`() {
+    @Test fun `무료 사용자 실패 복구는 같은 마감 입력을 사용하고 대화 횟수를 추가 차감하지 않는다`() {
         val jwt = issueJwt()
         val user = jwtProvider.parse(jwt).userId
         val day = sendMessage(jwt,"서버 실패 복구").recordDayId
         fakeLlmProvider.failNextJournal(day,2)
         deliveryWorker.runBatch()
         assertThat(awaitGeneration(jwt,day,"FAILED").journal).isNull()
-        assertThat(jdbc.queryForObject<Long>("SELECT frozen_source_revision FROM conversation.record_days WHERE id=?",
+        assertThat(jdbc.queryForObject<Long>("SELECT source_revision FROM conversation.record_days WHERE id=?",
             day)).isEqualTo(1)
         val before = quota.current(user).used
         val retry = restTemplate.exchange<GenerationStatusResponse>("/api/journals/$day/generation-attempts",HttpMethod.POST,HttpEntity<Void>(authHeaders(jwt)))

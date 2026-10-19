@@ -1,16 +1,17 @@
 package com.moeum.journal.application.command
 
-import com.moeum.conversation.application.publicapi.*
+import com.moeum.conversation.application.publicapi.JournalInput
 import com.moeum.conversation.application.publicapi.MessageSnapshot
+import com.moeum.conversation.application.publicapi.RecordDayOperations
+import com.moeum.conversation.application.publicapi.RecordDelivery
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.JournalGenerator
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.journal.support.InMemoryJournalRepository
-import com.moeum.kernel.UuidV7
-import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.RecordDayId
+import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import com.moeum.platform.llm.LlmException
@@ -19,12 +20,10 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 class GenerationExecutorTest {
 
     private val userId = UserId.generate()
-    private val lastUserMessageId = UuidV7.generate()
     private val recordDayId = RecordDayId.generate()
     private val displayDate = LocalDate.of(2026, 8, 2)
     private val dayEnd = Instant.parse("2026-08-02T17:00:00Z")
@@ -39,8 +38,8 @@ class GenerationExecutorTest {
         override fun closeNext() = false
         override fun claimDelivery(): RecordDelivery? = null
         override fun acknowledge(delivery: RecordDelivery) = true
-        override fun freezeInput(userId: UserId, recordDayId: RecordDayId) =
-            FrozenRecordInput(1, listOf(MessageSnapshot(lastUserMessageId, "USER", "오늘 산책을 했다", dayEnd.minusSeconds(3600))))
+        override fun readJournalInput(userId: UserId, recordDayId: RecordDayId) =
+            JournalInput(displayDate, listOf(MessageSnapshot("USER", "오늘 산책을 했다", dayEnd.minusSeconds(3600))))
     }
 
     private class ScriptedGenerator(private val failures: Int) : JournalGenerator {
@@ -48,7 +47,7 @@ class GenerationExecutorTest {
         override fun generate(displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
             calls++
             if (calls <= failures) throw LlmException("생성 실패")
-            return GeneratedJournal(UUID.randomUUID(), "산책", "산책을 했다", "gemini", "v1")
+            return GeneratedJournal("산책", "산책을 했다")
         }
     }
 
@@ -64,7 +63,7 @@ class GenerationExecutorTest {
         timeProvider = timeProvider,
     )
 
-    private fun enqueue(): GenerationJob = jobRepository.save(GenerationJob.pending(userId, recordDayId, displayDate, dayEnd, dayEnd.minusSeconds(7200)))
+    private fun enqueue(): GenerationJob = jobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, recordDayId, dayEnd, dayEnd.minusSeconds(7200)))
 
     @Test
     fun `하루가 끝난 작업을 실행해 일기를 즉시 보관하고 작업을 완료한다`() {
@@ -74,10 +73,8 @@ class GenerationExecutorTest {
 
         val completed = jobRepository.jobs.getValue(job.id)
         assertThat(completed.state.status).isEqualTo(JobStatus.COMPLETED)
-        assertThat(completed.journalId).isEqualTo(journals.single().id)
         assertThat(journals.single().displayDate).isEqualTo(displayDate)
         // 입력 동결 시의 원본 버전을 결과에 남긴다
-        assertThat(journals.single().sourceRevision).isEqualTo(1)
         // 사용자 소유 데이터는 user_id를 직접 갖는다
         assertThat(journals.single().userId).isEqualTo(userId)
     }
@@ -103,7 +100,6 @@ class GenerationExecutorTest {
         executor.executeNext()
         val retrying = jobRepository.jobs.getValue(job.id)
         assertThat(retrying.state.status).isEqualTo(JobStatus.PENDING)
-        assertThat(retrying.state.lastErrorCode).isEqualTo("LlmException")
 
         // backoff 전에는 다시 실행하지 않는다
         executor.executeNext()

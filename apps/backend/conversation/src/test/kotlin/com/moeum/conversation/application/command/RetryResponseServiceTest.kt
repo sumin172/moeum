@@ -33,7 +33,7 @@ class RetryResponseServiceTest {
         return jobRepository.save(transform(ResponseJob.pending(message, now)))
     }
 
-    private fun failed(job: ResponseJob) = job.failedPermanently("ConversationResponseException", now)
+    private fun failed(job: ResponseJob) = job.failedPermanently(now)
 
     @Test
     fun `최종 실패한 응답을 재요청하면 즉시 실행 가능한 대기 상태로 되돌린다`() {

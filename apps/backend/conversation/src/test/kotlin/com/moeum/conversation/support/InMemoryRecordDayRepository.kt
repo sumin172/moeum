@@ -10,11 +10,9 @@ class InMemoryRecordDayRepository : RecordDayRepository {
     override fun findState(userId: UserId) = states[userId]
     override fun saveState(state: UserRecordState) { states[state.userId] = state }
     override fun find(userId: UserId, id: RecordDayId, lock: Boolean) = days[id]?.takeIf { it.userId == userId }
-    override fun findContaining(userId: UserId, occurredAt: Instant) = days.values.filter { it.userId == userId && it.contains(occurredAt) }
-    override fun latestClosedBoundary(userId: UserId, occurredAt: Instant) =
-        days.values.filter { it.userId == userId }.mapNotNull { it.closedAt }.filter { it <= occurredAt }.maxOrNull()
-    override fun overlaps(userId: UserId, startAt: Instant, endAt: Instant) =
-        days.values.any { it.userId == userId && it.startAt < endAt && (it.closedAt ?: it.closeAt) > startAt }
+    override fun findOpen(userId: UserId, lock: Boolean) = days.values.firstOrNull { it.userId == userId && it.closedAt == null }
+    override fun latestClosedBoundary(userId: UserId) =
+        days.values.filter { it.userId == userId }.mapNotNull { it.closedAt }.maxOrNull()
     override fun list(userId: UserId, displayDate: LocalDate?, limit: Int) =
         days.values.filter { it.userId == userId && (displayDate == null || it.displayDate == displayDate) }.sortedByDescending { it.startAt }.take(limit)
     override fun insert(day: RecordDay) { days[day.id] = day }

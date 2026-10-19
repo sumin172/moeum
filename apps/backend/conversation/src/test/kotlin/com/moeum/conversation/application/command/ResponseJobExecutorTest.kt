@@ -3,13 +3,8 @@ package com.moeum.conversation.application.command
 import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.ConversationResponse
 import com.moeum.conversation.domain.ResponseJobRepository
-import com.moeum.conversation.domain.model.Message
-import com.moeum.conversation.domain.model.MessageRole
-import com.moeum.conversation.domain.model.RecordDay
+import com.moeum.conversation.domain.model.*
 import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
-import java.time.ZoneId
-import com.moeum.conversation.domain.model.ResponseFailureReason
-import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.support.*
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
@@ -19,18 +14,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
-import java.util.UUID
+import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.collections.ArrayDeque
-import kotlin.collections.List
-import kotlin.collections.filter
-import kotlin.collections.getValue
-import kotlin.collections.listOf
-import kotlin.collections.map
-import kotlin.collections.mutableListOf
-import kotlin.collections.plusAssign
-import kotlin.collections.set
-import kotlin.collections.single
 
 class ResponseJobExecutorTest {
 
@@ -53,12 +38,7 @@ class ResponseJobExecutorTest {
     private fun answer(
         content: String = "많이 힘드셨겠어요."
     ): () -> ConversationResponse = {
-        ConversationResponse(
-            UUID.randomUUID(),
-            content,
-            "gemini-flash-latest",
-            "v1",
-        )
+        ConversationResponse(content)
     }
 
     private val failure = { throw LlmException("LLM 호출 실패") }
@@ -159,7 +139,6 @@ class ResponseJobExecutorTest {
         assertThat(state.attemptCount).isEqualTo(1)
         // 첫 backoff 10초 + 지터 최대 20%
         assertThat(state.nextAttemptAt).isBetween(start.plusSeconds(10), start.plusSeconds(12))
-        assertThat(state.lastErrorCode).isEqualTo("LlmException")
         assertThat(assistantMessages()).isEmpty()
     }
 
@@ -226,6 +205,5 @@ class ResponseJobExecutorTest {
 
         assertThat(responder.requests).isEmpty()
         assertThat(jobOf(job).state.status).isEqualTo(JobStatus.FAILED)
-        assertThat(jobOf(job).state.lastErrorCode).isEqualTo("ATTEMPTS_EXHAUSTED")
     }
 }

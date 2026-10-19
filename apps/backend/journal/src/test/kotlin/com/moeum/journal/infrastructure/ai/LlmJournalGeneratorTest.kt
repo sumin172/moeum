@@ -26,8 +26,8 @@ class LlmJournalGeneratorTest {
     private val jsonMapper = JsonMapper.builder().build()
     private val diaryDate = LocalDate.of(2026, 8, 2)
     private val messages = listOf(
-        MessageSnapshot(UUID.randomUUID(), "USER", "오늘 한강에서 산책했어", Instant.parse("2026-08-02T10:00:00Z")),
-        MessageSnapshot(UUID.randomUUID(), "ASSISTANT", "좋았겠어요!", Instant.parse("2026-08-02T10:00:05Z")),
+        MessageSnapshot("USER", "오늘 한강에서 산책했어", Instant.parse("2026-08-02T10:00:00Z")),
+        MessageSnapshot("ASSISTANT", "좋았겠어요!", Instant.parse("2026-08-02T10:00:05Z")),
     )
 
     @Test
@@ -50,5 +50,71 @@ class LlmJournalGeneratorTest {
 
         assertThatThrownBy { generator.generate(diaryDate, messages) }
             .isInstanceOf(JournalGenerationException::class.java)
+    }
+
+    @Test
+    fun `짧은 답변 부정 정정과 AI 질문을 역할과 순서 그대로 전달한다`() {
+        val dialogue = listOf(
+            "USER" to "오늘 회사에서 일이 있었어",
+            "ASSISTANT" to "팀장님에게 칭찬받았어?",
+            "USER" to "응, 처음이야",
+            "ASSISTANT" to "발표를 잘해서였어?",
+            "USER" to "아니, 발표가 아니라 보고서 때문이야",
+            "USER" to "정정할게. 팀장님이 아니라 동료였어",
+        )
+        val client = ScriptedLlmClient("""{"title":"인정","body":"보고서로 동료에게 인정받았다."}""")
+        LlmJournalGenerator(client, jsonMapper).generate(diaryDate, dialogue.mapIndexed { i, (role, content) ->
+            MessageSnapshot(role, content, Instant.parse("2026-08-02T10:00:00Z").plusSeconds(i.toLong()))
+        })
+        val request = client.request!!
+        assertThat(request.promptVersion).isEqualTo("v3")
+        assertThat(request.systemPrompt).contains("USER 발화만", "ASSISTANT 발화는", "추측이나 제안 자체를 사실로 쓰지", "정정")
+        val transcript = request.messages.single().content
+        val positions = dialogue.map { (role, content) -> transcript.indexOf("$role: $content") }
+        assertThat(positions).allMatch { it >= 0 }.isSorted()
+    }
+
+    @Test
+    fun `공백 누락 과도한 길이의 생성 결과를 거부하고 응답 원문을 예외에 넣지 않는다`() {
+        val invalid = listOf(
+            mapOf("title" to " ", "body" to "민감한 원문"),
+            mapOf("title" to "제목", "body" to "\n\t"),
+            mapOf("title" to "제목"),
+            mapOf("title" to null, "body" to "민감한 원문"),
+            mapOf("title" to "가".repeat(MAX_GENERATED_TITLE_LENGTH + 1), "body" to "민감한 원문"),
+            mapOf("title" to "제목", "body" to "가".repeat(MAX_GENERATED_BODY_LENGTH + 1)),
+        )
+        invalid.forEach { payload ->
+            val generator = LlmJournalGenerator(ScriptedLlmClient(jsonMapper.writeValueAsString(payload)), jsonMapper)
+            assertThatThrownBy { generator.generate(diaryDate, messages) }
+                .isInstanceOf(JournalGenerationException::class.java)
+                .hasMessageNotContaining("민감한 원문")
+                .hasNoCause()
+        }
+        val client = ScriptedLlmClient(jsonMapper.writeValueAsString(mapOf(
+            "title" to "가".repeat(MAX_GENERATED_TITLE_LENGTH), "body" to "나".repeat(MAX_GENERATED_BODY_LENGTH),
+        )))
+        assertThat(LlmJournalGenerator(client, jsonMapper).generate(diaryDate, messages).body)
+            .hasSize(MAX_GENERATED_BODY_LENGTH)
+    }
+
+    @Test
+    fun `36시간이 세 UTC 사용량 기간에 걸친 큰 입력도 중간을 자르지 않고 전달한다`() {
+        // 개발 기본 구독 한도 100회와 메시지 4000자. AI 1000자는 시험 가정이며 공급자 상한이 아니다.
+        // 이 시험은 입력 조립의 누락만 검증한다. 실제 토큰 한도·모델 품질·동시 메모리를 승인하지 않는다.
+        val input = (0 until 300).flatMap { i ->
+            val at = when (i / 100) {
+                0 -> Instant.parse("2026-08-01T23:00:00Z")
+                1 -> Instant.parse("2026-08-02T12:00:00Z")
+                else -> Instant.parse("2026-08-03T00:00:00Z")
+            }.plusSeconds((i % 100) * 30L)
+            listOf(MessageSnapshot("USER", "USER-$i:".padEnd(4000, '원'), at),
+                MessageSnapshot("ASSISTANT", "AI-$i:".padEnd(1000, '문'), at.plusSeconds(1)))
+        }
+        val client = ScriptedLlmClient("""{"title":"제목","body":"본문"}""")
+        LlmJournalGenerator(client, jsonMapper).generate(diaryDate, input)
+        val transcript = client.request!!.messages.single().content
+        input.forEach { assertThat(transcript).contains("${it.role}: ${it.content}") }
+        assertThat(transcript.length).isGreaterThan(1_490_000)
     }
 }

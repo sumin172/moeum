@@ -46,9 +46,9 @@ class GenerationExecutor(
         }
 
         try {
-            val input = recordDayOperations.freezeInput(job.userId, job.recordDayId)
-            val generation = journalGenerator.generate(job.displayDate, input.messages)
-            saveGeneratedJournalService.save(job, generation, input.sourceRevision)
+            val input = recordDayOperations.readJournalInput(job.userId, job.recordDayId)
+            val generation = journalGenerator.generate(input.displayDate, input.messages)
+            saveGeneratedJournalService.save(job, input.displayDate, generation)
             log.atInfo().addKeyValue("event", "job.completed").log("Worker job completed")
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 일기 생성 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
@@ -57,7 +57,7 @@ class GenerationExecutor(
                 .addKeyValue("errorCode", SafeFailure.code(e))
                 .addKeyValue("location", SafeFailure.location(e))
                 .log("Worker job failed")
-            recordFailure(job) { markGenerationFailedService.markFailed(job, e) }
+            recordFailure(job) { markGenerationFailedService.markFailed(job) }
         }
     }
 

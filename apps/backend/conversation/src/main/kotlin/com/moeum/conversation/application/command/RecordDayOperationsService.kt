@@ -1,6 +1,6 @@
 package com.moeum.conversation.application.command
 
-import com.moeum.conversation.application.publicapi.FrozenRecordInput
+import com.moeum.conversation.application.publicapi.JournalInput
 import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.conversation.application.publicapi.RecordDayOperations
 import com.moeum.conversation.application.publicapi.RecordDelivery
@@ -28,9 +28,7 @@ class RecordDayOperationsService(
         val now = time.now()
         val day = records.claimDueClosure(now) ?: return false
         records.update(day.closeIfDue(now))
-        log.info("기록 마감: recordDayId={}, reason={}, closedAt={}", day.id.value, day.closeReason, day.closeAt)
-        val state = records.findState(day.userId)!!
-        records.saveState(state.copy(activeRecordDayId = null))
+        log.info("기록 마감: recordDayId={}, closedAt={}", day.id.value, day.closeAt)
         return true
     }
 
@@ -38,26 +36,18 @@ class RecordDayOperationsService(
     override fun claimDelivery(): RecordDelivery? {
         val now = time.now()
         val day = records.claimDelivery(now, now.plus(Duration.ofMinutes(1))) ?: return null
-        return RecordDelivery(day.id, day.userId, day.displayDate, day.closedAt!!, day.deliveryVersion)
+        return RecordDelivery(day.id, day.userId, day.closedAt!!, day.deliveryVersion)
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     override fun acknowledge(delivery: RecordDelivery): Boolean =
         records.acknowledgeDelivery(delivery.userId, delivery.recordDayId, delivery.version)
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    override fun freezeInput(userId: UserId, recordDayId: RecordDayId): FrozenRecordInput {
-        records.lockState(userId)
-        val day = records.find(userId, recordDayId, lock = true)
-            ?: throw RecordDayNotFoundException("기록이 없습니다")
-        val frozen = day.freeze()
-        if (day.frozenSourceRevision == null) {
-            records.update(frozen)
-            log.info("기록 입력 동결: recordDayId={}, sourceRevision={}", day.id.value, frozen.frozenSourceRevision)
-        }
-        val sourceRevision = frozen.frozenSourceRevision!!
-        // ASSISTANT는 늦게 완료될 수 있다. 불변 USER 원본과 확정 순번만 최초/재시도 입력으로 사용한다.
-        val input = messages.findSource(userId, recordDayId, sourceRevision)
-        return FrozenRecordInput(sourceRevision, input.map { MessageSnapshot(it.id.value, it.role.name, it.content, it.occurredAt) })
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    override fun readJournalInput(userId: UserId, recordDayId: RecordDayId): JournalInput {
+        val day = records.find(userId, recordDayId) ?: throw RecordDayNotFoundException("기록이 없습니다")
+        val closedAt = checkNotNull(day.closedAt) { "열린 기록은 일기 입력이 아닙니다" }
+        val input = messages.findJournalInput(userId, recordDayId, day.sourceRevision, closedAt)
+        return JournalInput(day.displayDate, input.map { MessageSnapshot(it.role.name, it.content, it.occurredAt) })
     }
 }
