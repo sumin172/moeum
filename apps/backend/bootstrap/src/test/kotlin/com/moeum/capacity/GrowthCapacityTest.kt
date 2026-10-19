@@ -194,10 +194,10 @@ class GrowthCapacityTest {
                         (SELECT coalesce(extract(epoch FROM now()-min(created_at)),0) FROM journal.generation_jobs WHERE status IN ('PENDING','PROCESSING')) oldest_journal_seconds
                 """.trimIndent())
                 val waits=jdbc.queryForList("""
-                    SELECT application_name,coalesce(wait_event_type,'CPU-or-runnable') wait_type,
+                    SELECT application_name,state,coalesce(wait_event_type,'CPU-or-runnable') wait_type,
                         coalesce(wait_event,'none') wait_event,count(*) connections
-                    FROM pg_stat_activity WHERE datname=current_database() AND state='active' AND pid<>pg_backend_pid()
-                    GROUP BY application_name,wait_event_type,wait_event
+                    FROM pg_stat_activity WHERE datname=current_database() AND state<>'idle' AND pid<>pg_backend_pid()
+                    GROUP BY application_name,state,wait_event_type,wait_event
                 """.trimIndent())
                 val sample = mapOf("at" to Instant.now().toString(),"roles" to rows,"queues" to queues,"databaseWaits" to waits)
                 samples.add(sample)

@@ -18,8 +18,11 @@ data class JobFailure(val kind: JobFailureKind, val retryAfter: Duration? = null
                     else -> JobFailure(JobFailureKind.PERMANENT)
                 }
             }
+            if (generateSequence(error as Throwable?) { it.cause }.take(16).any { it is java.sql.SQLTransientException }) {
+                return JobFailure(JobFailureKind.TRANSIENT)
+            }
             return when (error) {
-                is java.io.IOException, is java.util.concurrent.TimeoutException, is java.sql.SQLTransientException -> JobFailure(JobFailureKind.TRANSIENT)
+                is java.io.IOException, is java.util.concurrent.TimeoutException -> JobFailure(JobFailureKind.TRANSIENT)
                 else -> JobFailure(JobFailureKind.PERMANENT)
             }
         }
