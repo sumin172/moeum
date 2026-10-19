@@ -37,6 +37,7 @@ import java.util.concurrent.*
     AbstractIntegrationTest.FakeLlmProviderConfig::class)
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties=[
     "moeum.conversation.response-job.initial-delay=PT1H",
+    "moeum.conversation.response-job.manual-retry-cooldown=0s",
     "moeum.journal.generation-job.initial-delay=PT1H","moeum.journal.delivery.initial-delay=PT1H"
 ])
 class ConversationOrderingIntegrationTest {

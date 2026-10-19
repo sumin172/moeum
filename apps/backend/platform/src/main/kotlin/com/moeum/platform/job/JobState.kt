@@ -26,18 +26,18 @@ data class JobState(
 ) {
     fun completed(): JobState = copy(status = JobStatus.COMPLETED, leaseExpiresAt = null)
 
-    fun failed(policy: JobPolicy, now: Instant): JobState {
-        val nextAttemptAt = policy.nextAttemptAt(attemptCount, now) ?: return failedPermanently()
+    fun failed(policy: JobPolicy, now: Instant, failure: JobFailure): JobState {
+        val nextAttemptAt = policy.nextAttemptAt(attemptCount, now, failure) ?: return failedPermanently()
         return copy(status = JobStatus.PENDING, nextAttemptAt = nextAttemptAt, leaseExpiresAt = null)
     }
 
     fun failedPermanently(): JobState =
         copy(status = JobStatus.FAILED, leaseExpiresAt = null)
 
-    // 최종 실패한 작업을 사용자가 다시 요청한 경우 — 자동 재시도 횟수를 새로 센다.
+    // 시도 횟수는 누적 비용 상한에 사용하므로 사용자 재요청에도 초기화하지 않는다.
     fun restarted(now: Instant): JobState {
         check(status == JobStatus.FAILED) { "최종 실패한 작업만 다시 시작할 수 있습니다: status=$status" }
-        return copy(status = JobStatus.PENDING, attemptCount = 0, nextAttemptAt = now, leaseExpiresAt = null)
+        return copy(status = JobStatus.PENDING, nextAttemptAt = now, leaseExpiresAt = null)
     }
 
     companion object {

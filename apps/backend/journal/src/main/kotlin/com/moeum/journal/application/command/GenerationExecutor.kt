@@ -10,6 +10,9 @@ import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.platform.observability.SafeFailure
 import com.moeum.platform.observability.WorkTrace
+import com.moeum.platform.job.JobFailure
+import com.moeum.platform.job.JobFailureKind
+import com.moeum.journal.infrastructure.ai.JournalGenerationException
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
@@ -53,11 +56,13 @@ class GenerationExecutor(
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 일기 생성 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
         } catch (e: Exception) {
+            val failure = if (e is JournalGenerationException) JobFailure(JobFailureKind.INVALID_OUTPUT) else JobFailure.classify(e)
             log.atError().addKeyValue("event", "job.failed")
                 .addKeyValue("errorCode", SafeFailure.code(e))
+                .addKeyValue("retryKind", failure.kind.name)
                 .addKeyValue("location", SafeFailure.location(e))
                 .log("Worker job failed")
-            recordFailure(job) { markGenerationFailedService.markFailed(job) }
+            recordFailure(job) { markGenerationFailedService.markFailed(job, failure) }
         }
     }
 

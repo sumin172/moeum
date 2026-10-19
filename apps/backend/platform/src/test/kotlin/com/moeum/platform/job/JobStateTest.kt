@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
 import kotlin.random.Random
+import com.moeum.platform.llm.LlmException
 
 class JobStateTest {
 
@@ -23,16 +24,16 @@ class JobStateTest {
 
     @Test
     fun `실패하면 재시도가 남은 동안 backoff 뒤로 다시 예약되고, 소진되면 최종 실패한다`() {
-        val first = JobState.pending(now).claimed().failed(policy, now)
+        val first = JobState.pending(now).claimed().failed(policy, now, JobFailure(JobFailureKind.TRANSIENT))
         assertThat(first.status).isEqualTo(JobStatus.PENDING)
         assertThat(first.nextAttemptAt).isEqualTo(now.plusSeconds(10))
 
-        val second = first.claimed().failed(policy, now)
+        val second = first.claimed().failed(policy, now, JobFailure(JobFailureKind.TRANSIENT))
         assertThat(second.status).isEqualTo(JobStatus.PENDING)
         assertThat(second.nextAttemptAt).isEqualTo(now.plusSeconds(60))
 
         // backoff 목록보다 시도가 많아도 마지막 값을 쓰지만, 여기서는 3번째가 마지막 시도라 최종 실패
-        val third = second.claimed().failed(policy, now)
+        val third = second.claimed().failed(policy, now, JobFailure(JobFailureKind.TRANSIENT))
         assertThat(third.status).isEqualTo(JobStatus.FAILED)
         assertThat(third.attemptCount).isEqualTo(3)
         assertThat(third.leaseExpiresAt).isNull()
@@ -50,18 +51,40 @@ class JobStateTest {
     @Test
     fun `리스 만료로 다시 잡혀 시도 횟수가 상한을 넘으면 소진된 것으로 본다`() {
         assertThat(policy.isExhausted(3)).isFalse()
-        assertThat(policy.isExhausted(4)).isTrue()
+        assertThat(policy.isExhausted(5)).isFalse()
+        assertThat(policy.isExhausted(6)).isTrue()
     }
 
     @Test
-    fun `최종 실패한 작업만 사용자가 다시 시작할 수 있고, 자동 재시도 횟수를 새로 센다`() {
+    fun `최종 실패한 작업만 다시 시작하고 누적 시도 횟수는 유지한다`() {
         val failed = JobState.pending(now).claimed().failedPermanently()
         val restarted = failed.restarted(now.plusSeconds(100))
 
         assertThat(restarted.status).isEqualTo(JobStatus.PENDING)
-        assertThat(restarted.attemptCount).isZero()
+        assertThat(restarted.attemptCount).isEqualTo(1)
         assertThat(restarted.nextAttemptAt).isEqualTo(now.plusSeconds(100))
 
         assertThatThrownBy { JobState.pending(now).restarted(now) }.isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `인증 오류는 중단하고 호출 제한은 공급자 대기 시각 이후로 예약한다`() {
+        val claimed = JobState.pending(now).claimed()
+        assertThat(claimed.failed(policy, now, JobFailure.classify(LlmException("sanitized", errorCode = "HTTP_401"))).status)
+            .isEqualTo(JobStatus.FAILED)
+
+        val limited = claimed.failed(policy, now, JobFailure.classify(
+            LlmException("sanitized", errorCode = "HTTP_429", retryAfter = Duration.ofMinutes(3))))
+        assertThat(limited.nextAttemptAt).isEqualTo(now.plus(Duration.ofMinutes(3)))
+    }
+
+    @Test
+    fun `출력 오류는 한 번만 자동 재시도하고 수동 재시도는 간격과 누적 횟수로 제한한다`() {
+        val invalid = JobFailure(JobFailureKind.INVALID_OUTPUT)
+        val first = JobState.pending(now).claimed().failed(policy, now, invalid)
+        assertThat(first.status).isEqualTo(JobStatus.PENDING)
+        assertThat(first.claimed().failed(policy, now, invalid).status).isEqualTo(JobStatus.FAILED)
+        assertThat(policy.manualRetryAt(3, now)).isEqualTo(now.plus(Duration.ofMinutes(1)))
+        assertThat(policy.manualRetryAt(5, now)).isNull()
     }
 }

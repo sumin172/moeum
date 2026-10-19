@@ -11,6 +11,7 @@ import com.moeum.conversation.infrastructure.config.ResponseJobProperties
 import com.moeum.kernel.TimeProvider
 import com.moeum.platform.observability.SafeFailure
 import com.moeum.platform.observability.WorkTrace
+import com.moeum.platform.job.JobFailure
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
@@ -67,11 +68,13 @@ class ResponseJobExecutor(
         } catch (_: OptimisticLockingFailureException) {
             log.warn("리스를 잃은 응답 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
         } catch (e: Exception) {
+            val failure = JobFailure.classify(e)
             log.atError().addKeyValue("event", "job.failed")
                 .addKeyValue("errorCode", SafeFailure.code(e))
+                .addKeyValue("retryKind", failure.kind.name)
                 .addKeyValue("location", SafeFailure.location(e))
                 .log("Worker job failed")
-            recordFailure(job) { markResponseFailedService.markFailed(job) }
+            recordFailure(job) { markResponseFailedService.markFailed(job, failure) }
         }
     }
 

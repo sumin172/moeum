@@ -69,6 +69,10 @@ COMPLETED는 409이며, 응답 작업이 없는 과거 입력은 404다.
 HTTP 409 RESPONSE_SUPERSEDED로 과거 응답 삽입을 거절하고 새 메시지로 대화를 이어간다.
 이 판단과 선점은 같은 기록 잠금 아래 이루어진다.
 후속 작업에 실행 중·완료 상태가 없으면 선행 최종 실패의 재시도를 허용한다.
+일시적 네트워크·서버 오류는 제한된 backoff로 자동 재시도한다. HTTP 429는 별도 최소 대기와 공급자의
+`Retry-After` 중 더 늦은 시각을 따르며, 인증·명확한 입력 오류는 자동 반복을 중단한다.
+수동 재시도는 실패 시각부터 기본 1분을 기다리고, 자동·수동·리스 복구를 합친 누적 호출 상한을 넘지 않는다.
+대기 중 요청은 429, 상한 소진은 409다. 시도 횟수는 수동 재시도에도 초기화하지 않는다.
 
 ## 메시지와 작업 상태 조회
 
@@ -84,6 +88,7 @@ GET /api/conversations/response-jobs?ids={id1},{id2}는 1~100개 작업의
 id, userMessageId, status, failureReason, retryable을 반환한다.
 중복 ID는 합치며 요청 ID 중 조회 불가능한 것이 있으면 전체를 404로 응답한다.
 메시지 페이지와 작업 묶음 조회는 후속 실행·완료가 있는 과거 실패의 retryable을 false로 표시한다.
+누적 호출 상한을 소진해도 false다. 간격 제한 중에는 나중에 재시도할 수 있으므로 true일 수 있으며 요청 시 429를 반환한다.
 조회와 재요청 사이에는 상태가 바뀔 수 있으므로 재요청 시 서버가 다시 검증한다.
 
 ## 개발 기본값과 제한
@@ -97,6 +102,10 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 | moeum.conversation.limits.context-message-limit        | 100                   |
 | moeum.conversation.limits.context-char-budget          | 20,000                |
 | moeum.conversation.limits.max-message-length           | 4,000                 |
+| moeum.conversation.response-job.max-attempts           | 3                     |
+| moeum.conversation.response-job.max-total-attempts     | 5                     |
+| moeum.conversation.response-job.manual-retry-cooldown  | 1분                   |
+| moeum.conversation.response-job.rate-limit-backoff     | 최소 1분              |
 
 횟수와 기간은 사용자 확정값이 아닌 조정 가능한 개발 가정이다.
 접수 속도 제한은 승인된 새 원본을 제한한다. 인증 실패·잘못된 입력·중복 재전송·조회 요청 전체의

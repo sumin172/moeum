@@ -10,6 +10,7 @@ import com.moeum.conversation.domain.MessageNotFoundException
 import com.moeum.conversation.domain.ResponseAlreadyCompletedException
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.observability.SafeFailure
+import com.moeum.platform.job.ManualRetryUnavailableException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -56,6 +57,13 @@ class ConversationExceptionHandler {
     @ExceptionHandler(com.moeum.conversation.domain.ConversationRateExceededException::class)
     fun rateExceeded(): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ErrorResponse(code="MESSAGE_RATE_EXCEEDED",message="잠시 후 다시 전송해주세요"))
+
+    @ExceptionHandler(ManualRetryUnavailableException::class)
+    fun retryUnavailable(e: ManualRetryUnavailableException): ResponseEntity<ErrorResponse> =
+        if (e.nextAllowedAt == null) ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ErrorResponse(code="RESPONSE_RETRY_EXHAUSTED",message="응답 재시도 횟수를 모두 사용했습니다"))
+        else ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .body(ErrorResponse(code="RESPONSE_RETRY_TOO_SOON",message="잠시 후 다시 요청해주세요"))
     private fun error(status: HttpStatus, code: ConversationErrorCode): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(status).body(ErrorResponse(code = code.code, message = code.description))
 }

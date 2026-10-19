@@ -3,6 +3,7 @@ package com.moeum.conversation.domain.model
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobPolicy
+import com.moeum.platform.job.JobFailure
 import com.moeum.platform.job.JobState
 import com.moeum.platform.job.JobStatus
 import java.time.Instant
@@ -23,16 +24,16 @@ data class ResponseJob(
     val inputSourceRevision: Long,
 ) {
     // 최종 생성 실패만 재시도 대상이다. 후속 작업과의 순서는 요청 시 다시 검증한다.
-    val retryable: Boolean
-        get() = state.status == JobStatus.FAILED
+    fun retryable(policy: JobPolicy): Boolean =
+        state.status == JobStatus.FAILED && policy.manualRetryAt(state.attemptCount, updatedAt) != null
 
     val failureReason: ResponseFailureReason?
         get() = if (state.status == JobStatus.FAILED) ResponseFailureReason.GENERATION_FAILED else null
 
     fun completed(now: Instant): ResponseJob = copy(state = state.completed(), updatedAt = now)
 
-    fun failed(policy: JobPolicy, now: Instant): ResponseJob {
-        val next = state.failed(policy, now)
+    fun failed(policy: JobPolicy, now: Instant, failure: JobFailure): ResponseJob {
+        val next = state.failed(policy, now, failure)
         return copy(state = next, updatedAt = now)
     }
 

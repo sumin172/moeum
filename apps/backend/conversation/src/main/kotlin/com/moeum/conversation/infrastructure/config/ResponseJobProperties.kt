@@ -14,10 +14,14 @@ data class ResponseJobProperties(
     // 실행 슬롯을 미리 확보하고 이 수 이하를 한 트랜잭션에서 선점한다.
     val claimBatchSize: Int = 32,
     val pollInterval: Duration = Duration.ofSeconds(1),
+    val maxTotalAttempts: Int = maxAttempts + 2,
+    val manualRetryCooldown: Duration = Duration.ofMinutes(1),
+    val rateLimitBackoff: Duration = Duration.ofMinutes(1),
 ) {
     init {
         require(claimBatchSize in 1..64)
         require(!pollInterval.isNegative && !pollInterval.isZero)
     }
-    fun toPolicy(): JobPolicy = JobPolicy(maxAttempts = maxAttempts, backoff = backoff, lease = lease)
+    fun toPolicy(): JobPolicy = JobPolicy(maxAttempts = maxAttempts, backoff = backoff, lease = lease,
+        maxTotalAttempts = maxTotalAttempts, manualRetryCooldown = manualRetryCooldown, rateLimitBackoff = rateLimitBackoff)
 }

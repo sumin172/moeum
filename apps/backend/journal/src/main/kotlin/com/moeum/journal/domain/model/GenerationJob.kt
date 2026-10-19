@@ -3,6 +3,7 @@ package com.moeum.journal.domain.model
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobPolicy
+import com.moeum.platform.job.JobFailure
 import com.moeum.platform.job.JobState
 import java.time.Instant
 
@@ -21,8 +22,8 @@ data class GenerationJob(
             updatedAt = now,
         )
 
-    fun failed(policy: JobPolicy, now: Instant): GenerationJob =
-        copy(state = state.failed(policy, now), updatedAt = now)
+    fun failed(policy: JobPolicy, now: Instant, failure: JobFailure): GenerationJob =
+        copy(state = state.failed(policy, now, failure), updatedAt = now)
 
     fun failedPermanently(now: Instant): GenerationJob =
         copy(state = state.failedPermanently(), updatedAt = now)

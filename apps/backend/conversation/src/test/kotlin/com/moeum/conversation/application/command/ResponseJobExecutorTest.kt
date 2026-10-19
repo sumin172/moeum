@@ -143,6 +143,23 @@ class ResponseJobExecutorTest {
     }
 
     @Test
+    fun `인증 오류는 자동 반복하지 않고 429는 공급자 대기 시간 뒤에 예약한다`() {
+        val unauthorized = enqueue()
+        executor(ScriptedResponder(ArrayDeque(listOf { throw LlmException("sanitized", errorCode = "HTTP_401") }))).executeNext()
+        assertThat(jobOf(unauthorized).state.status).isEqualTo(JobStatus.FAILED)
+
+        val limited = enqueue("다른 대화")
+        executor(ScriptedResponder(ArrayDeque(listOf {
+            throw LlmException(
+                "sanitized",
+                errorCode = "HTTP_429",
+                retryAfter = Duration.ofMinutes(3)
+            )
+        }))).executeNext()
+        assertThat(jobOf(limited).state.nextAttemptAt).isAfterOrEqualTo(start.plus(Duration.ofMinutes(3)))
+    }
+
+    @Test
     fun `poller가 재시도 차례가 된 작업을 다시 실행하고, 재시도를 모두 실패하면 사용자 재시도 가능한 최종 실패로 끝난다`() {
         val job = enqueue()
         val executor = executor(ScriptedResponder(ArrayDeque(listOf(failure, failure, failure))))
@@ -157,7 +174,7 @@ class ResponseJobExecutorTest {
         assertThat(failed.state.status).isEqualTo(JobStatus.FAILED)
         assertThat(failed.state.attemptCount).isEqualTo(3)
         assertThat(failed.failureReason).isEqualTo(ResponseFailureReason.GENERATION_FAILED)
-        assertThat(failed.retryable).isTrue()
+        assertThat(failed.retryable(testResponseJobProperties.toPolicy())).isTrue()
         assertThat(executor.executeNext()).isFalse()
     }
 
@@ -193,10 +210,10 @@ class ResponseJobExecutorTest {
     }
 
     @Test
-    fun `리스 만료로 다시 잡혀 시도 횟수를 넘긴 작업은 실행하지 않고 최종 실패시킨다`() {
+    fun `리스 만료로 다시 잡혀 누적 시도 상한을 넘긴 작업은 실행하지 않고 최종 실패시킨다`() {
         val job = enqueue()
         jobRepository.jobs[job.id] = job.copy(
-            state = job.state.copy(status = JobStatus.PROCESSING, attemptCount = 3, leaseExpiresAt = start.minusSeconds(1)),
+            state = job.state.copy(status = JobStatus.PROCESSING, attemptCount = 5, leaseExpiresAt = start.minusSeconds(1)),
         )
         val responder = ScriptedResponder(ArrayDeque())
         val executor = executor(responder)
