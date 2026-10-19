@@ -4,6 +4,7 @@ import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.kernel.TimeProvider
+import com.moeum.platform.job.JobFailure
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -17,8 +18,8 @@ class MarkGenerationFailedService(
 
     // 재시도가 남았으면 다음 시도를 예약하고, 소진됐으면 최종 실패로 둔다.
     @Transactional
-    fun markFailed(job: GenerationJob) {
-        generationJobRepository.save(job.failed(policy, timeProvider.now()))
+    fun markFailed(job: GenerationJob, failure: JobFailure) {
+        generationJobRepository.save(job.failed(policy, timeProvider.now(), failure))
     }
 
     @Transactional

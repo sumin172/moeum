@@ -21,7 +21,7 @@ data class MessageResponse(
     val retryable: Boolean?,
 ) {
     companion object {
-        fun from(message: Message, responseJob: ResponseJob?, retryable: Boolean? = responseJob?.retryable): MessageResponse =
+        fun from(message: Message, responseJob: ResponseJob?, retryable: Boolean? = responseJob?.let { false }): MessageResponse =
             MessageResponse(
                 id = message.id.value,
                 role = message.role.name,

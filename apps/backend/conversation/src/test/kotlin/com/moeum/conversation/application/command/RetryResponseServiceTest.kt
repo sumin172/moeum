@@ -10,6 +10,7 @@ import com.moeum.conversation.support.*
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
+import com.moeum.platform.job.ManualRetryUnavailableException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -26,7 +27,8 @@ class RetryResponseServiceTest {
     private val records = InMemoryRecordDayRepository().also {
         it.insert(RecordDay.create(userId,now,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,null).copy(id=recordDayId))
     }
-    private fun service() = RetryResponseService(messageRepository, jobRepository, records, FixedTimeProvider(now))
+    private fun service() = RetryResponseService(messageRepository, jobRepository, records, FixedTimeProvider(now),
+        com.moeum.conversation.infrastructure.config.ResponseJobProperties(manualRetryCooldown = java.time.Duration.ZERO))
 
     private fun messageWithJob(transform: (ResponseJob) -> ResponseJob): ResponseJob {
         val message = messageRepository.append(userMessage(userId, "질문", now, recordDayId))
@@ -78,5 +80,17 @@ class RetryResponseServiceTest {
 
         assertThatThrownBy { service().retry(UserId.generate(), job.userMessageId) }
             .isInstanceOf(MessageNotFoundException::class.java)
+    }
+
+    @Test
+    fun `실패 직후 수동 재시도는 기다리고 누적 시도 상한에 도달하면 중단한다`() {
+        val job = messageWithJob { it.copy(state = it.state.copy(attemptCount = 3)).failedPermanently(now) }
+        val limited = RetryResponseService(messageRepository, jobRepository, records, FixedTimeProvider(now),
+            com.moeum.conversation.infrastructure.config.ResponseJobProperties())
+        assertThatThrownBy { limited.retry(userId, job.userMessageId) }
+            .isInstanceOf(ManualRetryUnavailableException::class.java)
+        jobRepository.jobs[job.id] = job.copy(state = job.state.copy(attemptCount = 5))
+        assertThatThrownBy { service().retry(userId, job.userMessageId) }
+            .isInstanceOf(ManualRetryUnavailableException::class.java)
     }
 }

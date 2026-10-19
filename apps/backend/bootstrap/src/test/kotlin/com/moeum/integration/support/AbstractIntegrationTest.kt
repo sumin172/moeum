@@ -49,7 +49,9 @@ import java.util.UUID
         "moeum.journal.delivery.initial-delay=PT1H",
         "moeum.journal.generation-job.max-attempts=2",
         "moeum.journal.generation-job.backoff=200ms",
+        "moeum.journal.generation-job.manual-retry-cooldown=0s",
         "moeum.conversation.response-job.backoff=200ms",
+        "moeum.conversation.response-job.manual-retry-cooldown=0s",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
         // 실제 provider 없이 LlmClient → 관측 수집 경로를 검증하기 위한 용도(FakeLlmProvider)
         "moeum.llm.routes.integration-test.provider=fake",

@@ -12,6 +12,6 @@ data class RecordSummaryResponse(val recordDayId: UUID, val displayDate: LocalDa
 data class RecordConversationResponse(val record: RecordSummaryResponse, val messages: List<MessageResponse>, val nextCursor: Long?) {
     companion object {
         fun from(result: RecordMessages) = RecordConversationResponse(RecordSummaryResponse.from(result.record),
-            result.messages.map { MessageResponse.from(it,result.responseJobs[it.id],result.responseJobs[it.id]?.let { job -> job.retryable && job.id !in result.supersededIds }) }, result.nextCursor)
+            result.messages.map { MessageResponse.from(it,result.responseJobs[it.id],result.responseJobs[it.id]?.let { job -> job.id in result.retryableIds }) }, result.nextCursor)
     }
 }

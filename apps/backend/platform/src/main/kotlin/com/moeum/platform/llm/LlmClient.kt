@@ -37,4 +37,9 @@ data class LlmResult(
     val promptVersion: String,
 )
 
-class LlmException(message: String, cause: Throwable? = null, val errorCode: String? = null) : RuntimeException(message, cause)
+class LlmException(
+    message: String,
+    cause: Throwable? = null,
+    val errorCode: String? = null,
+    val retryAfter: java.time.Duration? = null,
+) : RuntimeException(message, cause)

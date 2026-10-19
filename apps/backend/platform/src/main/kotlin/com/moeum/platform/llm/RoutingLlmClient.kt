@@ -13,6 +13,10 @@ import com.moeum.platform.llm.provider.LlmProviderResult
 import org.springframework.stereotype.Component
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import java.time.Duration
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import org.springframework.web.client.RestClientResponseException
 
 // 용도(purpose)별 라우팅 → provider별 동시 호출 상한 → provider 호출(서킷브레이커는 provider에) → 비차단 관측 기록.
 @ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
@@ -63,7 +67,9 @@ class RoutingLlmClient(
         } catch (e: Exception) {
             record(request, provider, route, startedAt, result = null, generationId = generationId, error = e)
             // 외부 예외의 응답 본문·URL·인증 정보가 업무 예외와 로그로 전파되지 않게 한다.
-            throw LlmException("LLM 호출 실패", errorCode = SafeFailure.code(e))
+            throw LlmException("LLM 호출 실패",
+                errorCode = if (e is LlmException) e.errorCode else SafeFailure.code(e),
+                retryAfter = retryAfter(e))
         } finally {
             permit.release()
         }
@@ -96,4 +102,14 @@ class RoutingLlmClient(
             ))
         }
     }
+}
+
+private fun retryAfter(error: Exception): Duration? {
+    val response = error as? RestClientResponseException ?: return null
+    if (response.statusCode.value() != 429) return null
+    val value = response.responseHeaders?.getFirst("Retry-After")?.trim() ?: return null
+    value.toLongOrNull()?.takeIf { it >= 0 }?.let { return Duration.ofSeconds(it) }
+    return runCatching {
+        Duration.between(java.time.Instant.now(), ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant())
+    }.getOrNull()?.takeIf { !it.isNegative }
 }

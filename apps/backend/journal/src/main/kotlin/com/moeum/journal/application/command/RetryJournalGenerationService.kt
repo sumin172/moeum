@@ -8,6 +8,8 @@ import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
+import com.moeum.platform.job.ManualRetryUnavailableException
+import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -18,7 +20,9 @@ class RetryJournalGenerationService(
     private val generationJobRepository: GenerationJobRepository,
     private val timeProvider: TimeProvider,
     private val journals: com.moeum.journal.domain.JournalRepository,
+    properties: GenerationJobProperties,
 ) {
+    private val policy = properties.toPolicy()
     @Transactional
     fun retry(userId: UserId, recordDayId: RecordDayId): GenerationJob {
         val job = generationJobRepository.findByUserIdAndRecordDayId(userId, recordDayId)
@@ -32,7 +36,12 @@ class RetryJournalGenerationService(
             // 이미 대기·진행 중이면 같은 요청을 다시 받은 것으로 보고 현재 상태를 돌려준다
             JobStatus.PENDING, JobStatus.PROCESSING -> job
             JobStatus.COMPLETED -> throw JournalGenerationNotRetryableException("이미 생성된 일기입니다: recordDayId=${recordDayId.value}")
-            JobStatus.FAILED -> generationJobRepository.save(job.restarted(timeProvider.now()))
+            JobStatus.FAILED -> {
+                val now = timeProvider.now()
+                val retryAt = policy.manualRetryAt(job.state.attemptCount, job.updatedAt)
+                if (retryAt == null || now.isBefore(retryAt)) throw ManualRetryUnavailableException(retryAt)
+                generationJobRepository.save(job.restarted(now))
+            }
         }
     }
 }

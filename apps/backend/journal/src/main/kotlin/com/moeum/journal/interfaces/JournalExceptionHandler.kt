@@ -10,6 +10,7 @@ import com.moeum.journal.domain.JournalNotFoundException
 import com.moeum.journal.domain.JournalVersionConflictException
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.observability.SafeFailure
+import com.moeum.platform.job.ManualRetryUnavailableException
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpStatus
@@ -39,6 +40,13 @@ class JournalExceptionHandler {
     @ExceptionHandler(JournalGenerationNotRetryableException::class)
     fun handleNotRetryable(e: JournalGenerationNotRetryableException) =
         error(HttpStatus.CONFLICT, JournalErrorCode.GENERATION_NOT_RETRYABLE, e)
+
+    @ExceptionHandler(ManualRetryUnavailableException::class)
+    fun retryUnavailable(e: ManualRetryUnavailableException): ResponseEntity<ErrorResponse> =
+        if (e.nextAllowedAt == null) ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ErrorResponse(code="JOURNAL_RETRY_EXHAUSTED",message="일기 생성 재시도 횟수를 모두 사용했습니다"))
+        else ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .body(ErrorResponse(code="JOURNAL_RETRY_TOO_SOON",message="잠시 후 다시 요청해주세요"))
 
     private fun error(status: HttpStatus, code: JournalErrorCode, e: Exception): ResponseEntity<ErrorResponse> {
         log.info("일기 요청 거부: code={}, reason={}", code.code, SafeFailure.code(e))

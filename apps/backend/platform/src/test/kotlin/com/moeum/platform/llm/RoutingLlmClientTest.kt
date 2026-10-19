@@ -11,6 +11,9 @@ import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
+import org.springframework.web.client.HttpClientErrorException
 
 class RoutingLlmClientTest {
 
@@ -122,5 +125,21 @@ class RoutingLlmClientTest {
         val client = RoutingLlmClient(listOf(FakeProvider("gemini", ::ok)), properties(), telemetry)
 
         assertThatThrownBy { client.generate(request("unknown")) }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `429 응답의 Retry-After는 본문 없이 작업 예약에 전달한다`() {
+        val headers = HttpHeaders().apply { add("Retry-After", "180") }
+        val provider = FakeProvider("gemini") {
+            throw HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS, "rate limit", headers,
+                "PRIVATE_BODY".toByteArray(), Charsets.UTF_8)
+        }
+        val client = RoutingLlmClient(listOf(provider), properties("chat" to LlmRoute("gemini", "flash", 150)), telemetry)
+
+        val error = org.assertj.core.api.Assertions.catchThrowable { client.generate(request("chat")) } as LlmException
+        assertThat(error.errorCode).isEqualTo("HTTP_429")
+        assertThat(error.retryAfter).isEqualTo(Duration.ofSeconds(180))
+        assertThat(error.message).doesNotContain("PRIVATE_BODY")
+        assertThat(error.cause).isNull()
     }
 }

@@ -15,6 +15,7 @@ import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import com.moeum.platform.llm.LlmException
+import com.moeum.journal.infrastructure.ai.JournalGenerationException
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -111,5 +112,20 @@ class GenerationExecutorTest {
         assertThat(generator.calls).isEqualTo(2)
         assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.FAILED)
         assertThat(journals).isEmpty()
+    }
+
+    @Test
+    fun `일기 출력 형식 오류는 한 번만 자동 재시도한다`() {
+        val job = enqueue()
+        val invalid = object : JournalGenerator {
+            override fun generate(displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal =
+                throw JournalGenerationException("invalid output")
+        }
+        val runner = executor(invalid)
+        runner.executeNext()
+        assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.PENDING)
+        now = now.plus(Duration.ofMinutes(2))
+        runner.executeNext()
+        assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.FAILED)
     }
 }
