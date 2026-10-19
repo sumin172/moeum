@@ -24,7 +24,7 @@ class ResponseJobExecutorTest {
     private val start = Instant.parse("2026-08-08T10:00:00Z")
     private val timeProvider = FixedTimeProvider(start)
     private val messageRepository = InMemoryMessageRepository()
-    private val jobRepository = InMemoryResponseJobRepository()
+    private val jobRepository = InMemoryResponseJobRepository(messageRepository)
     private val records = InMemoryRecordDayRepository().also { it.insert(RecordDay.create(userId,start,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,null).copy(id=recordDayId)) }
 
     private class ScriptedResponder(private val outcomes: ArrayDeque<() -> ConversationResponse>) : ConversationResponder {

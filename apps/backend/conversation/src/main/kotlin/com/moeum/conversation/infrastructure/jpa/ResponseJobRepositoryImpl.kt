@@ -41,17 +41,23 @@ class ResponseJobRepositoryImpl(
 
     override fun hasLaterStarted(job: ResponseJob): Boolean =
         (entityManager.createNativeQuery("""
-            SELECT EXISTS(SELECT 1 FROM conversation.response_jobs
-                WHERE record_day_id=:recordId AND input_source_revision>:revision AND status IN ('PROCESSING','COMPLETED'))
-        """).setParameter("recordId",job.recordDayId.value).setParameter("revision",job.inputSourceRevision).singleResult as Boolean)
+            SELECT EXISTS(SELECT 1 FROM conversation.messages
+                WHERE user_id=:userId AND record_day_id=:recordId AND source_sequence>:revision AND role='ASSISTANT')
+                OR EXISTS(SELECT 1 FROM conversation.response_jobs
+                WHERE record_day_id=:recordId AND input_source_revision>:revision AND status='PROCESSING')
+        """).setParameter("userId",job.userId.value).setParameter("recordId",job.recordDayId.value)
+            .setParameter("revision",job.inputSourceRevision).singleResult as Boolean)
 
     override fun supersededIds(userId: UserId, ids: Collection<ResponseJobId>): Set<ResponseJobId> {
         if (ids.isEmpty()) return emptySet()
         return entityManager.createNativeQuery("""
             SELECT j.id FROM conversation.response_jobs j WHERE j.user_id=:userId AND j.id IN (:ids)
-            AND EXISTS (SELECT 1 FROM conversation.response_jobs later
+            AND (EXISTS (SELECT 1 FROM conversation.messages later_message
+                WHERE later_message.user_id=j.user_id AND later_message.record_day_id=j.record_day_id
+                AND later_message.source_sequence>j.input_source_revision AND later_message.role='ASSISTANT')
+            OR EXISTS (SELECT 1 FROM conversation.response_jobs later
                 WHERE later.record_day_id=j.record_day_id AND later.input_source_revision>j.input_source_revision
-                AND later.status IN ('PROCESSING','COMPLETED'))
+                AND later.status='PROCESSING'))
         """).setParameter("userId",userId.value).setParameter("ids",ids.map { it.value })
             .resultList.map { ResponseJobId(it as java.util.UUID) }.toSet()
     }

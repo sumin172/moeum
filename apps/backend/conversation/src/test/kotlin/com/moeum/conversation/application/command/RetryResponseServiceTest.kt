@@ -6,6 +6,8 @@ import java.time.ZoneId
 import com.moeum.conversation.domain.MessageNotFoundException
 import com.moeum.conversation.domain.ResponseAlreadyCompletedException
 import com.moeum.conversation.domain.model.ResponseJob
+import com.moeum.conversation.domain.model.Message
+import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.support.*
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
@@ -22,7 +24,7 @@ class RetryResponseServiceTest {
     private val recordDayId = RecordDayId.generate()
     private val now = Instant.parse("2026-08-08T10:00:00Z")
     private val messageRepository = InMemoryMessageRepository()
-    private val jobRepository = InMemoryResponseJobRepository()
+    private val jobRepository = InMemoryResponseJobRepository(messageRepository)
 
     private val records = InMemoryRecordDayRepository().also {
         it.insert(RecordDay.create(userId,now,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,null).copy(id=recordDayId))
@@ -70,8 +72,18 @@ class RetryResponseServiceTest {
         val job = messageWithJob(::failed)
         val laterMessage = messageRepository.append(userMessage(userId,"다음 질문",now,recordDayId,sourceSequence=2))
         jobRepository.save(ResponseJob.pending(laterMessage,now).completed(now))
+        messageRepository.append(Message.assistantMessage(MessageId.generate(),userId,"다음 답변",now,recordDayId,2))
         assertThatThrownBy { service().retry(userId,job.userMessageId) }.isInstanceOf(ResponseSupersededException::class.java)
         assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.FAILED)
+    }
+
+    @Test
+    fun `후속 응답이 대기 중일 뿐이면 선행 실패 응답을 재시도할 수 있다`() {
+        val job = messageWithJob(::failed)
+        val laterMessage = messageRepository.append(userMessage(userId,"다음 질문",now,recordDayId,sourceSequence=2))
+        jobRepository.save(ResponseJob.pending(laterMessage,now))
+
+        assertThat(service().retry(userId,job.userMessageId).responseJob.state.status).isEqualTo(JobStatus.PENDING)
     }
 
     @Test

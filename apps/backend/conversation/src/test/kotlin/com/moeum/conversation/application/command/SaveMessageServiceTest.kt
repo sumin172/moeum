@@ -25,7 +25,7 @@ class SaveMessageServiceTest {
     private val now = Instant.parse("2026-08-02T10:00:00Z")
     private val messageRepository = InMemoryMessageRepository()
     private val recordDayRepository = InMemoryRecordDayRepository()
-    private val responseJobRepository = InMemoryResponseJobRepository()
+    private val responseJobRepository = InMemoryResponseJobRepository(messageRepository)
     private val service = newService()
 
     private fun accepted(result: SaveMessageResult) = result as SaveMessageResult.Accepted

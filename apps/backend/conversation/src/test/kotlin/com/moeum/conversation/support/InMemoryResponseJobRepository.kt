@@ -4,13 +4,14 @@ import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.domain.model.ResponseJobId
+import com.moeum.conversation.domain.model.MessageRole
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import java.time.Instant
 
 // 실제 구현의 선점 규칙(JobClaimSql)과 낙관적 락(version)을 메모리에서 흉내 낸다.
-class InMemoryResponseJobRepository : ResponseJobRepository {
+class InMemoryResponseJobRepository(private val messages: InMemoryMessageRepository) : ResponseJobRepository {
     val jobs = linkedMapOf<ResponseJobId, ResponseJob>()
 
     override fun insert(job: ResponseJob) {
@@ -35,7 +36,9 @@ class InMemoryResponseJobRepository : ResponseJobRepository {
         jobs.values.filter { it.userId == userId && it.userMessageId in userMessageIds }
 
     override fun hasLaterStarted(job: ResponseJob) =
-        jobs.values.any { it.recordDayId==job.recordDayId && it.inputSourceRevision>job.inputSourceRevision && it.state.status in listOf(JobStatus.PROCESSING,JobStatus.COMPLETED) }
+        messages.messages.values.any { it.userId==job.userId && it.recordDayId==job.recordDayId &&
+            it.sourceSequence>job.inputSourceRevision && it.role==MessageRole.ASSISTANT } ||
+            jobs.values.any { it.recordDayId==job.recordDayId && it.inputSourceRevision>job.inputSourceRevision && it.state.status==JobStatus.PROCESSING }
     override fun supersededIds(userId: UserId, ids: Collection<ResponseJobId>) =
         jobs.values.filter { it.userId==userId && it.id in ids && hasLaterStarted(it) }.map { it.id }.toSet()
     override fun findAllByUserIdAndIdIn(userId: UserId, ids: Collection<ResponseJobId>) =

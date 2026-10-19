@@ -5,6 +5,11 @@ import com.moeum.conversation.application.command.*
 import com.moeum.conversation.application.publicapi.RecordDayOperations
 import com.moeum.conversation.application.publicapi.RecordDelivery
 import com.moeum.conversation.domain.ResponseJobRepository
+import com.moeum.conversation.domain.MessageRepository
+import com.moeum.conversation.domain.ResponseSupersededException
+import com.moeum.conversation.domain.model.Message
+import com.moeum.conversation.domain.model.MessageId
+import com.moeum.conversation.application.query.ResponseStatusQueryService
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.infrastructure.scheduling.CompletedResponseJobCleaner
 import com.moeum.journal.application.command.RegisterRecordGenerationService
@@ -31,6 +36,9 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var save: SaveMessageService
     @Autowired lateinit var records: RecordDayOperations
     @Autowired lateinit var responses: ResponseJobRepository
+    @Autowired lateinit var messages: MessageRepository
+    @Autowired lateinit var retryResponse: RetryResponseService
+    @Autowired lateinit var responseStatuses: ResponseStatusQueryService
     @Autowired lateinit var generations: GenerationJobRepository
     @Autowired lateinit var journals: JournalRepository
     @Autowired lateinit var registration: RegisterRecordGenerationService
@@ -87,7 +95,7 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
         }
     }
 
-    @Test fun `열린 기록 최근 완료 활성 실패 작업과 실패 작업의 후속 완료를 보존한다`() {
+    @Test fun `실패 작업을 보존하면서 후속 완료 작업은 정리하고 원본 응답으로 재시도를 막는다`() {
         val open = input(user(), close = false)
         val openJob = response(open)
         val recent = input(user())
@@ -109,11 +117,19 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
             Timestamp.from(old), failedFirst.responseJob!!.id.value)
         val failedJob = responses.findByUserIdAndUserMessageId(failedFirst.message.userId, failedFirst.message.id)!!
         val laterJob = response(later)
-        assertThat(responseCleaner().cleanBatch()).isZero()
-        listOf(openJob, recentJob, pendingJob, processingJob, failedJob, laterJob).forEach {
+        TransactionTemplate(transactions).executeWithoutResult {
+            messages.append(Message.assistantMessage(MessageId.generate(),later.message.userId,"후속 답변",now,
+                later.message.recordDayId,later.message.sourceSequence))
+        }
+        assertThat(responseCleaner().cleanBatch()).isEqualTo(1)
+        listOf(openJob, recentJob, pendingJob, processingJob, failedJob).forEach {
             assertThat(responses.findByUserIdAndUserMessageId(it.userId, it.userMessageId)).isNotNull()
         }
+        assertThat(responses.findByUserIdAndUserMessageId(laterJob.userId,laterJob.userMessageId)).isNull()
         assertThat(responses.hasLaterStarted(failedJob)).isTrue()
+        assertThat(responseStatuses.get(failedFirst.message.userId,listOf(failedJob.id)).single().retryable).isFalse()
+        assertThatThrownBy { retryResponse.retry(failedFirst.message.userId,failedFirst.message.id) }
+            .isInstanceOf(ResponseSupersededException::class.java)
     }
 
     @Test fun `정리 작업은 잠긴 기록을 건너뛰고 잠금 해제 이후 정리한다`() {
