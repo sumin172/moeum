@@ -95,6 +95,22 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
         }
     }
 
+    @Test fun `정기 정리는 한 배치보다 큰 완료 작업 backlog를 이어서 처리한다`() {
+        val responseIds = (1..5).map { response(input(user())).id.value }
+        val generationIds = (1..5).map {
+            val owner = user()
+            generations.save(TestGenerationJobs.pending(owner, RecordDayId.generate(), now, old).completed(old)).id.value
+        }
+
+        responseCleaner().scheduledCleanup()
+        generationCleaner().scheduledCleanup()
+
+        assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE id IN (?,?,?,?,?)",
+            *responseIds.toTypedArray())).isZero()
+        assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM journal.generation_jobs WHERE id IN (?,?,?,?,?)",
+            *generationIds.toTypedArray())).isZero()
+    }
+
     @Test fun `실패 작업을 보존하면서 후속 완료 작업은 정리하고 원본 응답으로 재시도를 막는다`() {
         val open = input(user(), close = false)
         val openJob = response(open)

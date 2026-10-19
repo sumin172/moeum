@@ -72,13 +72,14 @@ Logback appender가 내부에서 오류를 삼킨 경우도 sink_failure가 원�
 
 ## 완료 작업 정리
 
-기본 보존 기간은 완료 시각(updated_at)에서 30일, 한 번에 최대 100행, 실행 간격은 1분이다.
+기본 보존 기간은 완료 시각(updated_at)에서 30일, 한 배치에 최대 100행, 실행 간격은 10초다.
 제품 확정값이 아닌 조정 가능한 운영 기본안이다.
 moeum.jobs.retention.completed-age / batch-size / interval / initial-delay로 설정한다.
 
 대화와 일기 워커가 각 모듈의 정리만 실행한다.
 정리 scheduler는 응답 poll·일기 poll·마감 전달과 별도 스레드를 사용한다.
 한 배치의 선점과 DELETE는 하나의 SQL statement로 원자적으로 실행하며 SKIP LOCKED로 경합 중인 행을 건너뛴다.
+대상이 남으면 한 실행에서 최대 10배치 이어 처리한다. 2초가 지나면 다음 배치를 시작하지 않고 대상이 없으면 즉시 멈춘다.
 완료 행의 updated_at/id 부분 인덱스를 사용한다. 무제한 삭제 반복 루프는 없다.
 여러 replica의 배치 합산 부하는 R6에서 측정한다.
 

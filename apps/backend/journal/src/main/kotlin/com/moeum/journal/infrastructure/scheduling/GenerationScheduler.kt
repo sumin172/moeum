@@ -12,14 +12,16 @@ import org.springframework.stereotype.Component
 class GenerationScheduler(private val delivery: RecordDeliveryWorker, private val generationExecutor: GenerationExecutor,
     @Qualifier("journalWorkerPool") private val pool: WorkerPool) {
     private val log = LoggerFactory.getLogger(javaClass)
-    @Scheduled(scheduler = "journalDeliveryScheduler", fixedDelayString = "PT5S",
-        initialDelayString = "\${moeum.journal.delivery.initial-delay:PT0S}")
+    @Scheduled(scheduler = "journalDeliveryScheduler", fixedDelayString = $$"${moeum.journal.delivery.interval:PT5S}",
+        initialDelayString = $$"${moeum.journal.delivery.initial-delay:PT0S}"
+    )
     fun deliverClosedRecords() {
         runCatching { delivery.runBatch() }.onFailure { log.error("기록 마감·전달 실패: code={}", SafeFailure.code(it)) }
     }
     @Scheduled(scheduler = "journalPollScheduler",
-        fixedDelayString = "\${moeum.journal.generation-job.poll-interval:PT1S}",
-        initialDelayString = "\${moeum.journal.generation-job.initial-delay:PT0S}")
+        fixedDelayString = $$"${moeum.journal.generation-job.poll-interval:PT1S}",
+        initialDelayString = $$"${moeum.journal.generation-job.initial-delay:PT0S}"
+    )
     fun pollDueJobs() {
         repeat(pool.concurrency) { if (!pool.submit { generationExecutor.executeNext() }) return }
     }

@@ -29,9 +29,18 @@ class CompletedGenerationJobCleaner(
         DELETE FROM journal.generation_jobs WHERE id IN (SELECT id FROM candidates)
     """.trimIndent(), Timestamp.from(time.now().minus(properties.completedAge)), properties.batchSize)
 
-    @Scheduled(scheduler = "journalRetentionScheduler", fixedDelayString = $$"${moeum.jobs.retention.interval:PT1M}", initialDelayString = $$"${moeum.jobs.retention.initial-delay:PT1M}")
+    @Scheduled(scheduler = "journalRetentionScheduler", fixedDelayString = $$"${moeum.jobs.retention.interval:PT10S}", initialDelayString = $$"${moeum.jobs.retention.initial-delay:PT1M}")
     fun scheduledCleanup() {
-        runCatching { cleanBatch() }
+        runCatching {
+            val deadline = System.nanoTime() + java.time.Duration.ofSeconds(2).toNanos()
+            var deleted = 0
+            repeat(10) {
+                val count = cleanBatch()
+                deleted += count
+                if (count < properties.batchSize || System.nanoTime() >= deadline) return@runCatching deleted
+            }
+            deleted
+        }
             .onSuccess { if (it > 0) log.info("완료 일기 작업 정리: deleted={}", it) }
             .onFailure { log.warn("완료 일기 작업 정리 실패: code={}", SafeFailure.code(it)) }
     }

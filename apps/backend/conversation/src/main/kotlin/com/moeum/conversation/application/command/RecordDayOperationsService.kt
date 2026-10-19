@@ -43,7 +43,6 @@ class RecordDayOperationsService(
     override fun acknowledge(delivery: RecordDelivery): Boolean =
         records.acknowledgeDelivery(delivery.userId, delivery.recordDayId, delivery.version)
 
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     override fun readJournalInput(userId: UserId, recordDayId: RecordDayId): JournalInput {
         val day = records.find(userId, recordDayId) ?: throw RecordDayNotFoundException("기록이 없습니다")
         val closedAt = checkNotNull(day.closedAt) { "열린 기록은 일기 입력이 아닙니다" }

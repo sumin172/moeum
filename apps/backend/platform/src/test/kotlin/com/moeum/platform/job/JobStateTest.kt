@@ -79,6 +79,15 @@ class JobStateTest {
     }
 
     @Test
+    fun `Spring 예외에 감싸진 일시적 DB 연결 오류는 재시도한다`() {
+        val failure = JobFailure.classify(IllegalStateException("DB 연결 실패",
+            java.sql.SQLTransientConnectionException("connection pool timeout")))
+
+        assertThat(failure.kind).isEqualTo(JobFailureKind.TRANSIENT)
+        assertThat(JobState.pending(now).claimed().failed(policy, now, failure).status).isEqualTo(JobStatus.PENDING)
+    }
+
+    @Test
     fun `출력 오류는 한 번만 자동 재시도하고 수동 재시도는 간격과 누적 횟수로 제한한다`() {
         val invalid = JobFailure(JobFailureKind.INVALID_OUTPUT)
         val first = JobState.pending(now).claimed().failed(policy, now, invalid)

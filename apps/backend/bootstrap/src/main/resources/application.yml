@@ -75,7 +75,7 @@ moeum:
     retention:
       completed-age: 30d
       batch-size: 100
-      interval: PT1M
+      interval: PT10S
       initial-delay: PT1M
   identity:
     conversation:
