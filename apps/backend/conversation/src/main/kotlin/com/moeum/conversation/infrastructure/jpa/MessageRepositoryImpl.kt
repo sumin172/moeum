@@ -53,7 +53,7 @@ class MessageRepositoryImpl(
             SELECT stream_sequence FROM conversation.messages
             WHERE user_id=? AND record_day_id=? AND role='USER' AND source_sequence=?
         """.trimIndent(), userId.value, recordDayId.value, sourceRevision)
-            ?: error("동결된 마지막 사용자 메시지가 없습니다")
+            ?: error("마감 기록의 마지막 사용자 메시지가 없습니다")
         return jpaRepository.findByUserIdAndRecordDayIdAndSourceSequenceLessThanEqualAndStreamSequenceLessThanEqualOrderByStreamSequenceAsc(
             userId.value, recordDayId.value, sourceRevision, lastUserStream,
         ).map { it.toDomain() }.filter { it.role == MessageRole.USER || it.occurredAt < closedAt }

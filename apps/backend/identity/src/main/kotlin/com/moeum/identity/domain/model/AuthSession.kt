@@ -18,7 +18,7 @@ data class AuthSessionId(val value: UUID) {
 data class AuthSession(
     val id: AuthSessionId,
     val userId: UserId,
-    // 클라이언트가 앱 설치 단위로 만든 식별자. 기기별 세션 관리("다른 기기에서 로그아웃")의 기준.
+    // 클라이언트가 앱 설치 단위로 만든 식별자. 같은 기기로 로그인할 때 활성 세션을 교체하는 기준.
     val deviceId: UUID,
     val refreshTokenHash: String,
     // 직전 토큰 해시 — 동시 refresh(같은 토큰으로 거의 동시에 두 번 요청)를 재사용으로 오인하지 않기 위함

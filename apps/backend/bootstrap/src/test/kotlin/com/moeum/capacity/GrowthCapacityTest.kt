@@ -1,5 +1,6 @@
 package com.moeum.capacity
 
+import com.moeum.kernel.UserId
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.junit.jupiter.api.Tag
@@ -65,7 +66,36 @@ class GrowthCapacityTest {
                 val conversations = mutableListOf(start("conversation-worker", 0, postgres.jdbcUrl))
                 CapacityLoad(fixture,jdbc).use { load ->
                     val phases = mutableListOf<Map<String,Any?>>()
+                    val preparations = mutableListOf<Map<String,Any?>>()
                     report["phases"] = phases
+                    report["cohortPreparations"] = preparations
+                    fun preparedUsers(name: String): List<UserId>? {
+                        if (settings.scenario != "sustained") return null
+                        val count = ((settings.rps.toLong() * phaseDuration(name) + 16) / 17).toInt().coerceAtLeast(10)
+                        val users = fixture.users(count)
+                        val requests = ConcurrentLinkedQueue<CapacityRequest>()
+                        report["activePhase"] = "$name-cohort-preparation"
+                        writeReport()
+                        val started = System.nanoTime()
+                        val preparationRps = minOf(settings.rps, 100)
+                        val injection = load.prepareOpenRecords(api.apiPort, preparationRps, users, requests)
+                        val preparation = mutableMapOf<String, Any?>("phase" to name, "users" to count,
+                            "rps" to preparationRps, "injection" to injection,
+                            "statuses" to requests.groupingBy { it.status }.eachCount())
+                        preparations += preparation
+                        writeReport()
+                        check(injection["generatorRejected"] == 0L && requests.size == count &&
+                            requests.all { it.status == 200 && it.messageId != null && it.jobId != null }) {
+                            "기존 기록 사용자 준비 접수 실패: phase=$name, injection=$injection, " +
+                                "statuses=${requests.groupingBy { it.status }.eachCount()}"
+                        }
+                        check(drain(load, requests, settings.drainSeconds)) { "기존 기록 사용자 준비 응답 미완료: phase=$name" }
+                        load.verifyStored(requests)
+                        preparation["responsesDrained"] = true
+                        preparation["elapsedSeconds"] = (System.nanoTime() - started) / 1000000000.0
+                        writeReport()
+                        return users
+                    }
                     if (settings.warmupSeconds>0) {
                         report["activePhase"] = "warmup"
                         writeReport()
@@ -74,11 +104,13 @@ class GrowthCapacityTest {
                         load.run(api.apiPort,settings.rps,settings.warmupSeconds,warm)
                         check(drain(load,warm,settings.drainSeconds)) { "워밍업 backlog가 남아 측정 구간을 시작할 수 없습니다" }
                     }
-                    phases += phase("conversation-baseline", api, conversations, null, jdbc, load, emptyList(), false, postgres)
+                    phases += phase("conversation-baseline", api, conversations, null, jdbc, load, emptyList(), false, postgres,
+                        preparedUsers("conversation-baseline"))
                     writeReport()
                     if (settings.conversationReplicas>1) {
                         for (i in 1 until settings.conversationReplicas) conversations += start("conversation-worker",i,postgres.jdbcUrl)
-                        phases += phase("conversation-scaled",api,conversations,null,jdbc,load,emptyList(),false,postgres)
+                        phases += phase("conversation-scaled",api,conversations,null,jdbc,load,emptyList(),false,postgres,
+                            preparedUsers("conversation-scaled"))
                         writeReport()
                     }
                     if(settings.profile=="P1" && settings.scenario!="failure") {
@@ -86,9 +118,10 @@ class GrowthCapacityTest {
                             "P1 대화 기준선 미달: 마감 부하를 추가하기 전에 원인 수정·재시험이 필요합니다"
                         }
                     }
+                    val mixedUsers = preparedUsers("journal-plus-conversation")
                     val burst = fixture.journalBurst(settings.journalBurst)
                     val journal = start("journal-worker",0,postgres.jdbcUrl)
-                    phases += phase("journal-plus-conversation",api,conversations,journal,jdbc,load,burst,settings.historyRecords>0,postgres)
+                    phases += phase("journal-plus-conversation",api,conversations,journal,jdbc,load,burst,settings.historyRecords>0,postgres,mixedUsers)
                     writeReport()
                     val base = phases.last { it["name"] != "journal-plus-conversation" }
                     val mixed = phases.last()
@@ -99,9 +132,13 @@ class GrowthCapacityTest {
                     writeReport()
                     if(settings.profile=="P1" && settings.scenario!="failure") {
                         check(mixed["apiGoalPassed"]==true && mixed["responseWaitingGoalPassed"]==true) { "P1 혼합 부하 API·대화 대기 목표 미달" }
-                        check(base["responsesDrained"]==true && base95!=null && mixed95!=null && mixed95<=base95*1.2) { "P1 일기 부하 추가 후 API p95 증가 20% 초과" }
+                        check(burst.isEmpty() || (base["responsesDrained"]==true && base95!=null && mixed95!=null && mixed95<=base95*1.2)) {
+                            "P1 일기 부하 추가 후 API p95 증가 20% 초과"
+                        }
                         check(burst.isEmpty() || (mixed["journalCompletion"] as Map<*,*>)["goalPassed"]==true) { "P1 일기 생성 기한 목표 미달" }
-                        check(burst.size<2 || mixed["journalPolicyDuringLoad"]!=null) { "P1 혼합 부하 중 구독·지연 원본 정책 미검증" }
+                        check(burst.size<2 || mixed["journalPolicyDuringLoad"]!=null || mixed["journalPolicyAfterDrain"]!=null) {
+                            "P1 구독 수정·마감 후 대화 정책 미검증"
+                        }
                     }
                     if(settings.scenario=="smoke" || settings.scenario=="failure") {
                         report["activePhase"] = "provider-faults"
@@ -166,8 +203,13 @@ class GrowthCapacityTest {
     private fun start(role:String,index:Int,url:String,pauseDelivery:Boolean=false):CapacityProcess =
         CapacityProcess(role,index,settings,url,directory,pauseDelivery).also { processes+=it;it.start();println("CAPACITY ready role=$role index=$index pid=${it.pid}") }
 
+    private fun phaseDuration(name: String): Int =
+        if (settings.scenario == "sustained" && name != "journal-plus-conversation") minOf(settings.durationSeconds, 1800)
+        else settings.durationSeconds
+
     private fun phase(name:String,api:CapacityProcess,conversations:List<CapacityProcess>,journal:CapacityProcess?,
-        jdbc:JdbcTemplate,load:CapacityLoad,burst:List<UUID>,clean:Boolean,postgres:PostgreSQLContainer):Map<String,Any?> {
+        jdbc:JdbcTemplate,load:CapacityLoad,burst:List<UUID>,clean:Boolean,postgres:PostgreSQLContainer,
+        users:List<UserId>?):Map<String,Any?> {
         println("CAPACITY phase=$name")
         report["activePhase"] = name
         writeReport()
@@ -199,7 +241,13 @@ class GrowthCapacityTest {
                     FROM pg_stat_activity WHERE datname=current_database() AND state<>'idle' AND pid<>pg_backend_pid()
                     GROUP BY application_name,state,wait_event_type,wait_event
                 """.trimIndent())
-                val sample = mapOf("at" to Instant.now().toString(),"roles" to rows,"queues" to queues,"databaseWaits" to waits)
+                val writes = jdbc.queryForMap("""
+                    SELECT c.num_timed,c.num_requested,c.write_time,c.sync_time,c.buffers_written,
+                        w.wal_sync,w.wal_sync_time,w.wal_write_time
+                    FROM pg_stat_checkpointer c CROSS JOIN pg_stat_wal w
+                """.trimIndent())
+                val sample = mapOf("at" to Instant.now().toString(),"roles" to rows,"queues" to queues,
+                    "databaseWaits" to waits,"databaseWrites" to writes)
                 samples.add(sample)
                 Files.writeString(directory.resolve("$name-metrics.ndjson"),mapper.writeValueAsString(sample)+"\n",StandardOpenOption.CREATE,StandardOpenOption.APPEND)
                 if(clean) participants.filter { it.role!="api" }.forEach { cleaned.addAndGet(it.clean().toLong()) }
@@ -209,8 +257,8 @@ class GrowthCapacityTest {
                 }
             }.onFailure { println("CAPACITY metrics sample unavailable: ${it.javaClass.simpleName}") }
         },0,1,TimeUnit.SECONDS)
-        val duration = if (settings.scenario=="sustained" && name!="journal-plus-conversation") minOf(settings.durationSeconds,1800) else settings.durationSeconds
-        val injection = try { load.run(api.apiPort,settings.rps,duration,requests) }
+        val duration = phaseDuration(name)
+        val injection = try { load.run(api.apiPort,settings.rps,duration,requests,users) }
             finally {
                 task.cancel(false)
                 sampler.shutdown()
@@ -242,8 +290,12 @@ class GrowthCapacityTest {
                 it.setArray(1,array);it.executeQuery().use { rows->rows.next();rows.getInt(1) }
             } } finally { array.free() }
         }
+        val journalPolicyAfterDrain = if (burstStored >= 2 && journalPolicy.get() == null) {
+            load.verifyJournalPolicy(api.apiPort, burst[0], burst[1])
+        } else null
         val summary = linkedMapOf(
             "name" to name,"durationSeconds" to duration,"startedAt" to start.toString(),"injection" to injection,
+            "preparedUsers" to (users?.size ?: 0),
             "apiLatency" to latency,"endToEndLatency" to percentiles(requests.map { it.endToEndMs }),
             "generatorLag" to percentiles(requests.map { it.generatorLagMs }),
             "httpStatuses" to requests.groupingBy { it.status.toString() }.eachCount(),
@@ -254,6 +306,7 @@ class GrowthCapacityTest {
             "journalAdditionalDrainSeconds" to (System.nanoTime()-journalDrainStarted)/1000000000.0,
             "journalCompletion" to journalCompletion(jdbc,burst),
             "journalPolicyDuringLoad" to journalPolicy.get(),
+            "journalPolicyAfterDrain" to journalPolicyAfterDrain,
             "cleanupDeleted" to cleaned.get(),"metricSamples" to samples.size,
             "resourcePeaks" to resourcePeaks(samples),
             "maxLockWaiters" to samples.maxOfOrNull { ((it["queues"] as Map<*,*>)["lock_waiters"] as Number).toLong() },

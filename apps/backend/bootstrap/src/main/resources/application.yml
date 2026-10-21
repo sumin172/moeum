@@ -115,7 +115,7 @@ moeum:
       poll-interval: PT1S
   llm:
     # 용도별 provider·모델·토큰 상한. 모델 교체나 provider 전환(예: 일기를 Claude Haiku로)은 이 설정만 바꾼다.
-    # Gemini 모델 alias는 구세대가 조기 폐기되는 경우가 있어(2026-08-08 gemini-2.5-flash 404) latest alias를 쓴다.
+    # 현재 두 용도 모두 Gemini latest alias를 사용한다.
     routes:
       conversation-response:
         provider: gemini
@@ -124,7 +124,6 @@ moeum:
         max-output-tokens: 150
         thinking-budget: 0
       journal-generation:
-        # 목표는 Claude Haiku(claude-haiku-4-5-20251001)지만 결제 설정 전까지 Gemini를 쓴다
         provider: gemini
         model: gemini-flash-latest
         max-output-tokens: 2000

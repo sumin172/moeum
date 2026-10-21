@@ -30,7 +30,7 @@ import java.util.UUID
 
 /**
  * 실제 Postgres(Testcontainers) + Flyway + JPA + Security 필터 체인을 전부 태우는 통합 테스트 베이스.
- * Google 실서버 호출만 [FakeGoogleVerifierConfig]로 대체한다 — 그 경계 밖은 전부 프로덕션 그대로 동작한다.
+ * Google 검증·대화 응답·LLM 공급자는 제어 가능한 테스트 구현을 사용한다.
  */
 @ActiveProfiles("local", "local-all")
 @AutoConfigureTestRestTemplate
