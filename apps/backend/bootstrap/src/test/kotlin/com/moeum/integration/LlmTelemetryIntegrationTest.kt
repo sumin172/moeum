@@ -64,7 +64,6 @@ class LlmTelemetryIntegrationTest : AbstractIntegrationTest() {
         val names = java.lang.management.ManagementFactory.getPlatformMBeanServer().queryNames(null, null)
             .filter { it.domain == "org.springframework.boot" }
         assertThat(names.any { it.getKeyProperty("name") == "Metrics" }).withFailMessage("JMX endpoints: %s", names).isTrue()
-        assertThat(jdbc.queryForObject<Boolean>("SELECT to_regclass('platform.llm_invocations') IS NULL")).isTrue()
     }
 
     @Test

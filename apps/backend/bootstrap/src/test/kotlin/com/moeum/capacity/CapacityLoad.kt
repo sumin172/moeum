@@ -31,10 +31,17 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
     private val signer = JwtProviderImpl(JwtProperties(CapacitySettings.JWT_SECRET), object : TimeProvider { override fun now() = Instant.now() })
     private val tokens = ConcurrentHashMap<UserId, IssuedAccessToken>()
 
-    fun run(port: Int, rps: Int, seconds: Int, requests: ConcurrentLinkedQueue<CapacityRequest>): Map<String, Any> {
+    fun run(port: Int, rps: Int, seconds: Int, requests: ConcurrentLinkedQueue<CapacityRequest>, users: List<UserId>? = null): Map<String, Any> {
         val offered = rps.toLong() * seconds
+        return send(port, rps, offered, requests, users ?: fixtures.users(ceil(offered / 18.0).toInt().coerceAtLeast(10)))
+    }
+
+    fun prepareOpenRecords(port: Int, rps: Int, users: List<UserId>, requests: ConcurrentLinkedQueue<CapacityRequest>): Map<String, Any> =
+        send(port, rps, users.size.toLong(), requests, users)
+
+    private fun send(port: Int, rps: Int, offered: Long, requests: ConcurrentLinkedQueue<CapacityRequest>, users: List<UserId>): Map<String, Any> {
         require(offered <= 2000000) { "로컬 주입기 1회 요청 상한은 200만입니다" }
-        val users = fixtures.users(ceil(offered / 18.0).toInt().coerceAtLeast(10))
+        require(users.isNotEmpty())
         val permits = Semaphore(512)
         val rejected = AtomicLong()
         val futures = mutableListOf<CompletableFuture<*>>()

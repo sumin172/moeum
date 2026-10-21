@@ -1,6 +1,6 @@
 # 대화 접수·응답·조회 계약
 
-R3의 서버 구현 계약이다. 하루 귀속·마감·일기 입력은 [하루 기록](RECORD_DAY.md),
+현재 서버의 대화 계약이다. 하루 귀속·마감·일기 입력은 [하루 기록](RECORD_DAY.md),
 프로세스와 공급자 자원 예산은 [실행 역할](WORKER_ROLES.md)을 따른다.
 
 ## 책임과 순번
@@ -18,8 +18,7 @@ streamSequence는 USER·ASSISTANT를 합친 메시지 증분 순번이다.
 메시지 추가 시 RecordDay의 카운터를 UPDATE하고 잠금을 커밋까지 유지한다.
 UUID 생성 시각이나 occurredAt으로 커밋 순서를 추정하지 않는다.
 화면은 occurredAt으로 정렬할 수 있지만 다음 조회 커서는 최대 streamSequence를 사용한다.
-현지 달력 날짜는 occurredAt/timezone으로 계산하며 localDate 컬럼으로 중복 보관하지 않는다.
-현재 삭제 흐름이 없는 메시지에 삭제 상태 컬럼을 미리 두지 않는다.
+메시지는 발생 시각을 반환하고 기록은 표시 날짜와 마지막 장소 타임존을 반환한다.
 
 ## 접수와 한도
 
@@ -43,7 +42,7 @@ GET /api/conversations/quota는 limit, used, remaining, resetAt을 반환한다.
 구독 변경은 같은 UTC 기간의 used를 유지하며 새 limit을 적용한다.
 하향 변경으로 used가 limit보다 크면 remaining은 0이다.
 클라이언트는 잔여 횟수를 사전 표시하고 0이면 전송을 막는다. 서버 검사는 별도로 유지한다.
-클라이언트 화면 구현은 이 서버 이슈의 범위에 포함하지 않는다.
+클라이언트 화면은 미구현이다.
 
 ## 응답 실행과 복구
 
@@ -65,7 +64,7 @@ DB 잠금과 트랜잭션은 선점 후 해제하며 LLM 호출 동안 유지하
 POST /api/conversations/messages/{messageId}/response-attempts는 실패한 같은 작업을 다시 대기 상태로 만든다.
 PENDING/PROCESSING의 반복 요청은 현재 상태를 반환한다.
 COMPLETED는 409이며, 응답 작업이 없는 과거 입력은 404다.
-같은 기록에서 더 뒤의 응답이 PROCESSING 또는 COMPLETED이면
+같은 기록에서 더 뒤의 응답 작업이 PROCESSING이거나 후속 ASSISTANT 메시지가 있으면
 HTTP 409 RESPONSE_SUPERSEDED로 과거 응답 삽입을 거절하고 새 메시지로 대화를 이어간다.
 이 판단과 선점은 같은 기록 잠금 아래 이루어진다.
 후속 작업에 실행 중·완료 상태가 없으면 선행 최종 실패의 재시도를 허용한다.
@@ -113,7 +112,7 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 접수 횟수, 자동 재시도 횟수, 실행 슬롯/공급자 호출 예산은 서로 다른 제한이다.
 
 기능·동시성 검증은 실제 PostgreSQL과 fake 공급자를 사용한다.
-독립 JVM 강제 종료·실제 공급자 할당량·P0/P1/P2 부하·6개월 누적 데이터 성능 승인은 R6 범위다.
+독립 JVM 부하·복구와 실제 공급자 검증 범위는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
 
 ## 완료 작업 보존
 

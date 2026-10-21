@@ -19,7 +19,6 @@ import org.springframework.stereotype.Component
 const val CONVERSATION_RESPONSE_PURPOSE = "conversation-response"
 
 // 프롬프트를 바꾸면 요청의 버전을 올린다.
-// v2: 응답 토큰 상한(150)에 맞춰 짧게 답하도록 지시 추가
 private const val PROMPT_VERSION = "v2"
 
 // 저널링 앱의 대화 상대로서 소재를 유도하는 시스템 지시. 프롬프트 기반이라 100% 강제는 아니고 최소 가드레일 목적.

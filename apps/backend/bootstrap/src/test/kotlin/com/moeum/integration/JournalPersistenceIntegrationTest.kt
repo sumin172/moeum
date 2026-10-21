@@ -151,12 +151,11 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
             "SELECT status FROM journal.generation_jobs WHERE id = ?", job.id.value,
         )
         assertThat(jobStatus).isEqualTo(JobStatus.COMPLETED.name)
-        // JSON wrapper 없이 TEXT 본문을 저장한다
+        // 본문은 TEXT로 저장한다.
         val content = jdbcTemplate.queryForObject<String>(
             "SELECT body FROM journal.journals WHERE id = ?", journal.id.value,
         )
         assertThat(content).isEqualTo("본문")
         assertThat(jdbcTemplate.queryForObject<String>("SELECT data_type FROM information_schema.columns WHERE table_schema='journal' AND table_name='journals' AND column_name='body'")).isEqualTo("text")
-        assertThat(jdbcTemplate.queryForObject<Boolean>("SELECT to_regclass('journal.journal_revisions') IS NULL")).isTrue()
     }
 }

@@ -55,7 +55,9 @@ class CapacityProcess(
             "--moeum.conversation.response-job.claim-batch-size=${settings.conversationBatchSize}",
             "--moeum.journal.generation-job.poll-interval=PT0.1S",
             "--moeum.conversation.response-job.backoff=1s,2s",
+            "--moeum.conversation.response-job.rate-limit-backoff=2s",
             "--moeum.journal.generation-job.backoff=1s,2s,4s,8s",
+            "--moeum.journal.generation-job.rate-limit-backoff=2s",
             "--moeum.journal.delivery.initial-delay=${if (pauseDelivery) "PT24H" else "PT0S"}",
             // 전달 경계 시험에서는 등록 직후 generation 선점이 먼저 일어나지 않게 격리한다.
             "--moeum.journal.generation-job.initial-delay=${if (pauseDelivery) "PT24H" else "PT0S"}",

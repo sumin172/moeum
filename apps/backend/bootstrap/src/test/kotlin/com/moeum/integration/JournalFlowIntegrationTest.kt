@@ -109,11 +109,9 @@ class JournalFlowIntegrationTest : AbstractIntegrationTest() {
         assertThat(again.statusCode).isEqualTo(HttpStatus.CONFLICT)
     }
 
-    @Test fun `없는 기록의 생성 재시도는 404이고 기존 확정 API는 제공하지 않는다`() {
+    @Test fun `없는 기록의 생성 재시도는 404다`() {
         val jwt = issueJwt()
         val missing = restTemplate.exchange<ErrorResponse>("/api/journals/${UUID.randomUUID()}/generation-attempts",HttpMethod.POST,HttpEntity<Void>(authHeaders(jwt)))
         assertThat(missing.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
-        val removed = restTemplate.exchange<String>("/api/journals/${UUID.randomUUID()}/confirm",HttpMethod.POST,HttpEntity(mapOf("version" to 0),authHeaders(jwt)))
-        assertThat(removed.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
     }
 }

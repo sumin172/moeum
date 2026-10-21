@@ -13,7 +13,7 @@ import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
-// 자동 재시도를 모두 소진해 실패한 일기 생성을 사용자가 다시 요청한다. 서비스 쪽 실패를 복구하는 일이라 요금제와 무관하다.
+// 최종 실패한 일기 생성을 누적 시도 상한과 대기 간격 안에서 다시 요청한다. 실패 복구는 요금제와 무관하다.
 // 다시 시작한 작업은 Executor의 다음 poll에 실행된다.
 @Service
 class RetryJournalGenerationService(
