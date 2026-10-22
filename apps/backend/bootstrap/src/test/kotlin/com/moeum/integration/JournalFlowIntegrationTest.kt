@@ -85,7 +85,7 @@ class JournalFlowIntegrationTest : AbstractIntegrationTest() {
         assertThat(late.message.content).isEqualTo("다음 기록의 대화")
         assertThat(late.recordDayId).isNotEqualTo(day)
         assertThat(journalDay(jwt,day).journal!!.body).isEqualTo("바람이 좋았다")
-        assertThat(quota.current(user).used).isEqualTo(2)
+        assertThat(quota.current(user).used).isEqualTo(1)
     }
 
     @Test fun `무료 사용자 실패 복구는 같은 마감 입력을 사용하고 대화 횟수를 추가 차감하지 않는다`() {

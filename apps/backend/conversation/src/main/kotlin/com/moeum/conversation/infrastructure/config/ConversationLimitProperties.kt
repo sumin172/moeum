@@ -2,7 +2,7 @@ package com.moeum.conversation.infrastructure.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 
-// 메시지 접수와 AI 대화 문맥의 개발 기본 상한.
+// 메시지 접수 상한과 AI 대화 문맥의 실행 상한.
 @ConfigurationProperties(prefix = "moeum.conversation.limits")
 data class ConversationLimitProperties(
     // 메시지 하나의 최대 글자 수. 넘으면 저장을 거부한다(400).
@@ -12,5 +12,5 @@ data class ConversationLimitProperties(
     val contextMessageLimit: Int = 100,
     val acceptedMessagesPerMinute: Int = 60,
 ) {
-    init { require(maxMessageLength > 0 && contextCharBudget >= maxMessageLength && contextMessageLimit > 0 && acceptedMessagesPerMinute > 0) }
+    init { require(maxMessageLength in 1..contextCharBudget && contextMessageLimit > 0 && acceptedMessagesPerMinute > 0) }
 }

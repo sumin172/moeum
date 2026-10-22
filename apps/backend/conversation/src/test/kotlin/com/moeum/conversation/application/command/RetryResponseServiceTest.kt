@@ -17,6 +17,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import java.time.LocalTime
+import java.time.Duration
 
 class RetryResponseServiceTest {
 
@@ -27,10 +29,11 @@ class RetryResponseServiceTest {
     private val jobRepository = InMemoryResponseJobRepository(messageRepository)
 
     private val records = InMemoryRecordDayRepository().also {
-        it.insert(RecordDay.create(userId,now,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,null).copy(id=recordDayId))
+        it.insert(RecordDay.create(userId,now,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,LocalTime.of(18,0),LocalTime.of(4,0)).copy(id=recordDayId))
     }
     private fun service() = RetryResponseService(messageRepository, jobRepository, records, FixedTimeProvider(now),
-        com.moeum.conversation.infrastructure.config.ResponseJobProperties(manualRetryCooldown = java.time.Duration.ZERO))
+        com.moeum.conversation.infrastructure.config.ResponseJobProperties(manualRetryCooldown = Duration.ZERO),
+        com.moeum.platform.job.JobRetentionProperties())
 
     private fun messageWithJob(transform: (ResponseJob) -> ResponseJob): ResponseJob {
         val message = messageRepository.append(userMessage(userId, "질문", now, recordDayId))
@@ -38,6 +41,13 @@ class RetryResponseServiceTest {
     }
 
     private fun failed(job: ResponseJob) = job.failedPermanently(now)
+
+    @Test
+    fun `최종 실패 후 30일이 지나면 정리 전이라도 재시도하지 않는다`() {
+        val job = messageWithJob { it.failedPermanently(now.minus(Duration.ofDays(30))) }
+        assertThatThrownBy { service().retry(userId, job.userMessageId) }
+            .isInstanceOf(MessageNotFoundException::class.java)
+    }
 
     @Test
     fun `최종 실패한 응답을 재요청하면 즉시 실행 가능한 대기 상태로 되돌린다`() {
@@ -98,7 +108,8 @@ class RetryResponseServiceTest {
     fun `실패 직후 수동 재시도는 기다리고 누적 시도 상한에 도달하면 중단한다`() {
         val job = messageWithJob { it.copy(state = it.state.copy(attemptCount = 3)).failedPermanently(now) }
         val limited = RetryResponseService(messageRepository, jobRepository, records, FixedTimeProvider(now),
-            com.moeum.conversation.infrastructure.config.ResponseJobProperties())
+            com.moeum.conversation.infrastructure.config.ResponseJobProperties(),
+            com.moeum.platform.job.JobRetentionProperties())
         assertThatThrownBy { limited.retry(userId, job.userMessageId) }
             .isInstanceOf(ManualRetryUnavailableException::class.java)
         jobRepository.jobs[job.id] = job.copy(state = job.state.copy(attemptCount = 5))

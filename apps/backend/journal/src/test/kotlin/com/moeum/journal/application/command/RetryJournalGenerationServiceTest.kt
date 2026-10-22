@@ -13,6 +13,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import java.time.Duration
 
 class RetryJournalGenerationServiceTest {
 
@@ -22,10 +23,17 @@ class RetryJournalGenerationServiceTest {
     private val jobs = InMemoryGenerationJobRepository()
     private val service = RetryJournalGenerationService(jobs, MutableTimeProvider(now),
         com.moeum.journal.support.InMemoryJournalRepository(),
-        com.moeum.journal.infrastructure.config.GenerationJobProperties(manualRetryCooldown = java.time.Duration.ZERO))
+        com.moeum.journal.infrastructure.config.GenerationJobProperties(manualRetryCooldown = Duration.ZERO),
+        com.moeum.platform.job.JobRetentionProperties())
 
     private fun job(transform: (GenerationJob) -> GenerationJob) =
         jobs.save(transform(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, day, now.minusSeconds(3600), now.minusSeconds(7200))))
+
+    @Test
+    fun `최종 실패 후 30일이 지나면 정리 전이라도 재시도하지 않는다`() {
+        job { it.failedPermanently(now.minus(Duration.ofDays(30))) }
+        assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalNotFoundException::class.java)
+    }
 
     @Test
     fun `재시도를 소진해 실패한 생성을 다시 시작한다`() {
@@ -51,7 +59,8 @@ class RetryJournalGenerationServiceTest {
         val failed = job { it.copy(state = it.state.copy(attemptCount = 2)).failedPermanently(now) }
         val limited = RetryJournalGenerationService(jobs, MutableTimeProvider(now),
             com.moeum.journal.support.InMemoryJournalRepository(),
-            com.moeum.journal.infrastructure.config.GenerationJobProperties(maxAttempts = 2))
+            com.moeum.journal.infrastructure.config.GenerationJobProperties(maxAttempts = 2),
+            com.moeum.platform.job.JobRetentionProperties())
         assertThatThrownBy { limited.retry(userId, day) }.isInstanceOf(ManualRetryUnavailableException::class.java)
         jobs.jobs[failed.id] = failed.copy(state = failed.state.copy(attemptCount = 4))
         assertThatThrownBy { limited.retry(userId, day) }.isInstanceOf(ManualRetryUnavailableException::class.java)

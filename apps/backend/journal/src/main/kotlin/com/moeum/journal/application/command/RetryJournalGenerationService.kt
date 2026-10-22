@@ -9,6 +9,7 @@ import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import com.moeum.platform.job.ManualRetryUnavailableException
+import com.moeum.platform.job.JobRetentionProperties
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -21,6 +22,7 @@ class RetryJournalGenerationService(
     private val timeProvider: TimeProvider,
     private val journals: com.moeum.journal.domain.JournalRepository,
     properties: GenerationJobProperties,
+    private val retention: JobRetentionProperties,
 ) {
     private val policy = properties.toPolicy()
     @Transactional
@@ -38,6 +40,7 @@ class RetryJournalGenerationService(
             JobStatus.COMPLETED -> throw JournalGenerationNotRetryableException("이미 생성된 일기입니다: recordDayId=${recordDayId.value}")
             JobStatus.FAILED -> {
                 val now = timeProvider.now()
+                if (!now.isBefore(job.updatedAt.plus(retention.terminalAge))) throw JournalNotFoundException("일기 생성 작업의 재시도 기간이 끝났습니다")
                 val retryAt = policy.manualRetryAt(job.state.attemptCount, job.updatedAt)
                 if (retryAt == null || now.isBefore(retryAt)) throw ManualRetryUnavailableException(retryAt)
                 generationJobRepository.save(job.restarted(now))

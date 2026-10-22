@@ -13,6 +13,7 @@ import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
 import com.moeum.platform.job.ManualRetryUnavailableException
+import com.moeum.platform.job.JobRetentionProperties
 import com.moeum.conversation.infrastructure.config.ResponseJobProperties
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -28,6 +29,7 @@ class RetryResponseService(
     private val records: com.moeum.conversation.domain.RecordDayRepository,
     private val timeProvider: TimeProvider,
     properties: ResponseJobProperties,
+    private val retention: JobRetentionProperties,
 ) {
     private val policy = properties.toPolicy()
     @Transactional
@@ -49,6 +51,7 @@ class RetryResponseService(
                     throw ResponseSupersededException("후속 응답이 시작됐습니다. 새 메시지로 이어서 대화해주세요")
                 }
                 val now = timeProvider.now()
+                if (!now.isBefore(job.updatedAt.plus(retention.terminalAge))) throw MessageNotFoundException("응답 작업의 재시도 기간이 끝났습니다")
                 val retryAt = policy.manualRetryAt(job.state.attemptCount, job.updatedAt)
                 if (retryAt == null || now.isBefore(retryAt)) throw ManualRetryUnavailableException(retryAt)
                 val restarted = responseJobRepository.save(job.restarted(now))

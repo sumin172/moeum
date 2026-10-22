@@ -11,14 +11,14 @@ import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
 import com.moeum.conversation.application.query.ResponseStatusQueryService
 import com.moeum.conversation.domain.model.ResponseJob
-import com.moeum.conversation.infrastructure.scheduling.CompletedResponseJobCleaner
+import com.moeum.conversation.infrastructure.scheduling.TerminalResponseJobCleaner
 import com.moeum.journal.application.command.RegisterRecordGenerationService
 import com.moeum.journal.application.command.RetryJournalGenerationService
 import com.moeum.journal.domain.*
 import com.moeum.journal.domain.model.*
-import com.moeum.journal.infrastructure.scheduling.CompletedGenerationJobCleaner
+import com.moeum.journal.infrastructure.scheduling.TerminalGenerationJobCleaner
 import com.moeum.kernel.*
-import com.moeum.platform.job.CompletedJobRetentionProperties
+import com.moeum.platform.job.JobRetentionProperties
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -32,7 +32,7 @@ import java.time.*
 import java.util.UUID
 import java.util.concurrent.*
 
-class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
+class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var save: SaveMessageService
     @Autowired lateinit var records: RecordDayOperations
     @Autowired lateinit var responses: ResponseJobRepository
@@ -50,7 +50,7 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
     private val now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS)
     private val old = now.minus(Duration.ofDays(40))
     private val time = object : TimeProvider { override fun now() = now }
-    private val props = CompletedJobRetentionProperties(batchSize=2)
+    private val props = JobRetentionProperties(batchSize=2)
     private fun user() = UserId.generate().also(users::add)
     private fun input(user: UserId, close: Boolean = true): SaveMessageResult.Accepted {
         val saved = save.save(user, SaveMessageCommand(UUID.randomUUID(), "원본",
@@ -68,8 +68,8 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
             Timestamp.from(old), pending.id.value)
         return responses.findByUserIdAndUserMessageId(pending.userId, pending.userMessageId)!!
     }
-    private fun responseCleaner() = CompletedResponseJobCleaner(jdbc, time, props)
-    private fun generationCleaner() = CompletedGenerationJobCleaner(jdbc, time, props)
+    private fun responseCleaner() = TerminalResponseJobCleaner(jdbc, time, props)
+    private fun generationCleaner() = TerminalGenerationJobCleaner(jdbc, time, props)
 
     @AfterEach fun cleanupFixture() {
         users.forEach {
@@ -130,7 +130,7 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
         jdbc.update("UPDATE conversation.record_days SET close_at=?,closed_at=?,delivery_acknowledged=true WHERE id=?",
             boundary, boundary, failedFirst.record.id.value)
         jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',updated_at=? WHERE id=?",
-            Timestamp.from(old), failedFirst.responseJob!!.id.value)
+            Timestamp.from(now), failedFirst.responseJob!!.id.value)
         val failedJob = responses.findByUserIdAndUserMessageId(failedFirst.message.userId, failedFirst.message.id)!!
         val laterJob = response(later)
         TransactionTemplate(transactions).executeWithoutResult {
@@ -178,7 +178,7 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
         val pending = TestGenerationJobs.pending(user, day, now.plus(Duration.ofDays(10)), old)
         generations.save(pending.completed(old))
         val failed = TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), old)
-            .failedPermanently(old)
+            .failedPermanently(now)
         generations.save(failed)
         val processing = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), old))
         jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING',lease_expires_at=? WHERE id=?",
@@ -190,5 +190,19 @@ class CompletedJobRetentionIntegrationTest : AbstractIntegrationTest() {
         assertThat(registration.register(RecordDelivery(day, user, old, 1))).isFalse()
         assertThatThrownBy { retry.retry(user, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
         listOf(failed, processing, recent).forEach { assertThat(generations.findByUserIdAndRecordDayId(user, it.recordDayId)).isNotNull() }
+    }
+
+    @Test fun `30일 지난 실패 작업은 원본을 보존하고 정리한다`() {
+        val saved = input(user())
+        jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',updated_at=? WHERE id=?",
+            Timestamp.from(old), saved.responseJob!!.id.value)
+        val owner = user()
+        val generation = generations.save(TestGenerationJobs.pending(owner, RecordDayId.generate(), now, old).failedPermanently(old))
+
+        assertThat(responseCleaner().cleanBatch()).isEqualTo(1)
+        assertThat(generationCleaner().cleanBatch()).isEqualTo(1)
+        assertThat(responses.findByUserIdAndUserMessageId(saved.message.userId, saved.message.id)).isNull()
+        assertThat(messages.findByUserIdAndId(saved.message.userId, saved.message.id)).isNotNull()
+        assertThat(generations.findByUserIdAndRecordDayId(owner, generation.recordDayId)).isNull()
     }
 }

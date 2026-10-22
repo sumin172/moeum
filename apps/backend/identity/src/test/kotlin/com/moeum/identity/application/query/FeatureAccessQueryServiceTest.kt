@@ -60,6 +60,6 @@ class FeatureAccessQueryServiceTest {
         premium(startsAt=timeProvider.now.plusSeconds(60))
         premium(revokedAt=timeProvider.now)
         assertThat(query.isEnabled(userId,Feature.JOURNAL_EDIT)).isFalse()
-        assertThat(query.dailyLimit(userId)).isEqualTo(20)
+        assertThat(query.recordLimit(userId)).isEqualTo(20)
     }
 }

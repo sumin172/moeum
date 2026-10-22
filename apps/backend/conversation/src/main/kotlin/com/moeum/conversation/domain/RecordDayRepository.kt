@@ -14,7 +14,7 @@ interface RecordDayRepository {
     fun saveState(state: UserRecordState)
     fun find(userId: UserId, id: RecordDayId, lock: Boolean = false): RecordDay?
     fun findOpen(userId: UserId, lock: Boolean = false): RecordDay?
-    fun latestClosedBoundary(userId: UserId): Instant?
+    fun latestClosed(userId: UserId): RecordDay?
     fun list(userId: UserId, displayDate: LocalDate?, limit: Int): List<RecordDay>
     fun insert(day: RecordDay)
     fun update(day: RecordDay)

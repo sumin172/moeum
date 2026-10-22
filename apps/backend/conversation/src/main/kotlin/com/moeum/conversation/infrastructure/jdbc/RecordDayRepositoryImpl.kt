@@ -3,6 +3,7 @@ package com.moeum.conversation.infrastructure.jdbc
 import com.moeum.conversation.domain.RecordDayRepository
 import com.moeum.conversation.domain.model.RecordDay
 import com.moeum.conversation.domain.model.UserRecordState
+import com.moeum.conversation.infrastructure.config.RecordDayProperties
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import org.springframework.jdbc.core.JdbcTemplate
@@ -15,14 +16,14 @@ import java.time.LocalTime
 import java.util.*
 
 @Repository
-class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayRepository {
+class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate, private val recordDayProperties: RecordDayProperties) : RecordDayRepository {
     override fun lockState(userId: UserId): UserRecordState {
         val lockSql="SELECT * FROM conversation.user_record_states WHERE user_id = ? FOR UPDATE"
         jdbc.query(lockSql,stateMapper,userId.value).firstOrNull()?.let { return it }
         return jdbc.query("""
             INSERT INTO conversation.user_record_states(user_id,close_time) VALUES (?,?)
             ON CONFLICT (user_id) DO NOTHING RETURNING *
-        """.trimIndent(),stateMapper,userId.value,RecordDay.DEFAULT_CLOSE_TIME).firstOrNull()
+        """.trimIndent(),stateMapper,userId.value,recordDayProperties.defaultCloseTime).firstOrNull()
             ?: jdbc.query(lockSql,stateMapper,userId.value).single()
     }
 
@@ -42,9 +43,9 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate) : RecordDayReposit
         jdbc.query("SELECT * FROM conversation.record_days WHERE user_id = ? AND closed_at IS NULL" + if (lock) " FOR UPDATE" else "",
             dayMapper, userId.value).firstOrNull()
 
-    override fun latestClosedBoundary(userId: UserId): Instant? =
-        jdbc.query("SELECT closed_at FROM conversation.record_days WHERE user_id = ? AND closed_at IS NOT NULL ORDER BY start_at DESC LIMIT 1",
-            { rs, _ -> rs.getTimestamp(1).toInstant() }, userId.value).firstOrNull()
+    override fun latestClosed(userId: UserId): RecordDay? =
+        jdbc.query("SELECT * FROM conversation.record_days WHERE user_id = ? AND closed_at IS NOT NULL ORDER BY start_at DESC LIMIT 1",
+            dayMapper, userId.value).firstOrNull()
 
     override fun list(userId: UserId, displayDate: LocalDate?, limit: Int): List<RecordDay> =
         if (displayDate == null) jdbc.query("SELECT * FROM conversation.record_days WHERE user_id = ? ORDER BY start_at DESC, id DESC LIMIT ?", dayMapper, userId.value, limit)

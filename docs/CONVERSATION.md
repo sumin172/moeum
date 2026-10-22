@@ -31,15 +31,16 @@ POST /api/conversations/messages는 입력 검증과 사용자 상태 잠금 뒤
 한도 소진은 HTTP 429 QUOTA_EXCEEDED이며 현재 quota를 포함한다.
 속도 초과는 HTTP 429 MESSAGE_RATE_EXCEEDED다.
 거절 또는 저장 오류는 트랜잭션 전체를 롤백하여 메시지·원본 변경·마감 변경·작업·사용량을 남기지 않는다.
-새 기록에 접수된 사용자 메시지는 한도를 소비하고 AI 응답 작업을 만든다. 장소 변경으로 즉시 마감되는 기록은 AI 응답 작업을 만들지 않는다.
+새 사용자 메시지는 한도를 소비하고 AI 응답 작업을 만든다. 장소 변경으로 이전 기록이 마감되면 새 기록에 접수하고 그 메시지의 AI 응답 작업도 만든다.
 
-사용량은 사용자당 한 행으로 보관한다.
-서버 UTC 날짜와 분 단위 접수 창을 기록하고 기간이 바뀌면 같은 행을 갱신한다.
-과거 occurredAt이나 여행 타임존으로 한도를 초기화하지 않는다.
+현재 기록의 `sourceRevision`이 접수한 USER 메시지 수다. 사용자별 사용량 행에는 분 단위 접수 속도만 보관한다.
+기록이 닫히고 새 기록이 열리면 전체 횟수 한도를 다시 제공한다. 여행으로 조기 마감돼도 동일하다.
+과거 `occurredAt`은 기록 귀속이나 한도 기간을 변경하지 않는다.
 접수 후 AI 실패가 발생해도 최초 사용량은 유지하고 자동·사용자 실패 재시도는 추가 차감하지 않는다.
 
-GET /api/conversations/quota는 limit, used, remaining, resetAt을 반환한다.
-구독 변경은 같은 UTC 기간의 used를 유지하며 새 limit을 적용한다.
+GET /api/conversations/quota는 limit, used, remaining, resetAt을 반환한다. 열린 기록이 없거나 예정 마감이 지났으면 used는 0이고 resetAt은 null이다.
+열린 기록의 resetAt은 현재 예약된 closeAt이며 장소 이동에 따라 바뀔 수 있다.
+구독 변경은 같은 기록의 used를 유지하며 새 limit을 적용한다.
 하향 변경으로 used가 limit보다 크면 remaining은 0이다.
 클라이언트는 잔여 횟수를 사전 표시하고 0이면 전송을 막는다. 서버 검사는 별도로 유지한다.
 클라이언트 화면은 미구현이다.
@@ -90,13 +91,13 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 누적 호출 상한을 소진해도 false다. 간격 제한 중에는 나중에 재시도할 수 있으므로 true일 수 있으며 요청 시 429를 반환한다.
 조회와 재요청 사이에는 상태가 바뀔 수 있으므로 재요청 시 서버가 다시 검증한다.
 
-## 개발 기본값과 제한
+## 현재 설정과 제한
 
-| 설정                                                   | 기본안                |
+| 설정                                                   | 현재 설정값           |
 |--------------------------------------------------------|-----------------------|
-| moeum.identity.conversation.free-daily-limit           | 20                    |
-| moeum.identity.conversation.premium-daily-limit        | 100                   |
-| 사용 기간                                              | 서버 UTC 00:00 초기화 |
+| moeum.identity.conversation.free-record-limit          | 20                    |
+| moeum.identity.conversation.premium-record-limit       | 100                   |
+| 사용 기간                                              | RecordDay별 초기화    |
 | moeum.conversation.limits.accepted-messages-per-minute | 60                    |
 | moeum.conversation.limits.context-message-limit        | 100                   |
 | moeum.conversation.limits.context-char-budget          | 20,000                |
@@ -106,7 +107,8 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 | moeum.conversation.response-job.manual-retry-cooldown  | 1분                   |
 | moeum.conversation.response-job.rate-limit-backoff     | 최소 1분              |
 
-횟수와 기간은 사용자 확정값이 아닌 조정 가능한 개발 가정이다.
+무료·구독 횟수, 분당 새 메시지 상한, 메시지당 길이 상한은 확정된 현재 수치이며 서버 설정으로 변경할 수 있다. 횟수 한도는 기록별로 적용한다.
+AI 문맥의 100개 메시지·20,000자는 사용자에게 보장하는 기억량이 아닌 실행 상한이다.
 접수 속도 제한은 승인된 새 원본을 제한한다. 인증 실패·잘못된 입력·중복 재전송·조회 요청 전체의
 네트워크 남용 차단은 API gateway 등 운영 경계에서 별도로 집행해야 한다.
 접수 횟수, 자동 재시도 횟수, 실행 슬롯/공급자 호출 예산은 서로 다른 제한이다.
@@ -114,11 +116,12 @@ id, userMessageId, status, failureReason, retryable을 반환한다.
 기능·동시성 검증은 실제 PostgreSQL과 fake 공급자를 사용한다.
 독립 JVM 부하·복구와 실제 공급자 검증 범위는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
 
-## 완료 작업 보존
+## 종료 작업 보존
 
 완료 상태를 확인한 클라이언트는 해당 작업을 미완료 polling 목록에서 제거한다.
 기록이 마감되면 같은 기록에 미완료·실패 작업이 있어도 오래된 완료 작업은 정리될 수 있다.
 후속 완료 판단은 보관된 ASSISTANT 메시지로 유지한다.
 정리된 작업 ID 상태 조회·재시도는 404이며 메시지와 AI 응답은 계속 조회할 수 있다.
 기존 메시지의 중복 전송은 quota나 작업을 새로 만들지 않고 원본을 반환하되 responseJob은 null일 수 있다.
-세부 조건과 기본 기간은 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.
+최종 실패 작업도 실패 후 30일이 지나면 정리한다. 정리 전 만료된 작업도 다시 실행할 수 없다.
+세부 조건과 기간은 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.

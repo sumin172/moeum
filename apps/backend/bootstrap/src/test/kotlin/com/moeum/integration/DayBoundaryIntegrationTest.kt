@@ -12,13 +12,19 @@ import com.moeum.conversation.interfaces.dto.SaveMessageRequest
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.journal.application.command.RegisterRecordGenerationService
 import com.moeum.kernel.UserId
+import com.moeum.kernel.TimeProvider
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
+import org.mockito.Mockito.`when`
+import org.springframework.test.context.bean.override.mockito.MockitoBean
+import org.springframework.test.context.TestPropertySource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.resttestclient.exchange
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpMethod
+import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.queryForObject
 import java.sql.Timestamp
@@ -29,12 +35,17 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
+@TestPropertySource(properties = ["moeum.conversation.response-job.initial-delay=PT1H"])
 class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var save: SaveMessageService
+    @Autowired lateinit var quota: com.moeum.conversation.application.command.ConversationQuotaService
     @Autowired lateinit var records: RecordDayOperations
     @Autowired lateinit var query: RecordQueryService
     @Autowired lateinit var registration: RegisterRecordGenerationService
     @Autowired lateinit var jdbc: JdbcTemplate
+    @MockitoBean lateinit var time: TimeProvider
+
+    @BeforeEach fun useCurrentTime() { `when`(time.now()).thenAnswer { Instant.now() } }
 
     private fun command(at: Instant = Instant.now(), id: UUID = UUID.randomUUID()) =
         SaveMessageCommand(id, "원본", at, "Asia/Seoul")
@@ -49,17 +60,92 @@ class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
         jdbc.update("UPDATE conversation.record_days SET close_at=?,closed_at=? WHERE id=?", boundary, boundary, day)
     }
 
-    @Test fun `설정은 즉시 저장하지만 이미 열린 기록의 마감 스냅샷은 유지한다`() {
+    @Test fun `마감 설정 변경은 현재 기록을 유지하고 다음 기록부터 적용한다`() {
         val jwt = issueJwt()
         val initial = restTemplate.exchange<CloseTimeRequest>("/api/conversations/preferences", HttpMethod.GET,
             HttpEntity<Void>(authHeaders(jwt))).body!!
         assertThat(initial.closeTime).isEqualTo(LocalTime.of(2, 0))
         val saved = restTemplate.exchange<SaveMessageResponse>("/api/conversations/messages", HttpMethod.POST,
             HttpEntity(SaveMessageRequest(UUID.randomUUID(), "스냅샷", Instant.now(), "Asia/Seoul"), authHeaders(jwt))).body!!
-        restTemplate.exchange<CloseTimeRequest>("/api/conversations/preferences", HttpMethod.PUT,
+        val changed = restTemplate.exchange<CloseTimeRequest>("/api/conversations/preferences", HttpMethod.PUT,
             HttpEntity(CloseTimeRequest(LocalTime.of(4, 0)), authHeaders(jwt)))
+        assertThat(changed.statusCode).isEqualTo(HttpStatus.OK)
         assertThat(jdbc.queryForObject<LocalTime>("SELECT close_time FROM conversation.record_days WHERE id=?",
             saved.recordDayId)).isEqualTo(LocalTime.of(2, 0))
+        val deadline = jdbc.queryForObject<Timestamp>("SELECT close_at FROM conversation.record_days WHERE id=?",saved.recordDayId)!!.toInstant()
+        `when`(time.now()).thenReturn(deadline)
+        val next = restTemplate.exchange<SaveMessageResponse>("/api/conversations/messages", HttpMethod.POST,
+            HttpEntity(SaveMessageRequest(UUID.randomUUID(), "다음 기록", Instant.now(), "Asia/Seoul"), authHeaders(jwt))).body!!
+        assertThat(next.recordDayId).isNotEqualTo(saved.recordDayId)
+        assertThat(jdbc.queryForObject<LocalTime>("SELECT close_time FROM conversation.record_days WHERE id=?",next.recordDayId))
+            .isEqualTo(LocalTime.of(4, 0))
+        assertThat(jdbc.queryForObject<Timestamp>("SELECT close_at FROM conversation.record_days WHERE id=?",next.recordDayId)!!.toInstant())
+            .isEqualTo(deadline.plusSeconds(26 * 60 * 60))
+        assertThat(jdbc.queryForObject<Timestamp>("SELECT closed_at FROM conversation.record_days WHERE id=?",saved.recordDayId)!!.toInstant())
+            .isEqualTo(deadline)
+    }
+
+    @Test fun `허용 시간 밖의 마감 설정은 400이고 저장 설정은 유지된다`() {
+        val jwt = issueJwt()
+        listOf("18:00", "00:00", "04:00").forEach { value ->
+            val response = restTemplate.exchange<CloseTimeRequest>("/api/conversations/preferences",HttpMethod.PUT,
+                HttpEntity(CloseTimeRequest(LocalTime.parse(value)),authHeaders(jwt)))
+            assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+        }
+        listOf("04:00:01", "12:00", "17:59:59").forEach { value ->
+            val response = restTemplate.exchange<com.moeum.platform.web.ErrorResponse>("/api/conversations/preferences",HttpMethod.PUT,
+                HttpEntity(CloseTimeRequest(LocalTime.parse(value)),authHeaders(jwt)))
+            assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        }
+        val current = restTemplate.exchange<CloseTimeRequest>("/api/conversations/preferences",HttpMethod.GET,
+            HttpEntity<Void>(authHeaders(jwt))).body!!
+        assertThat(current.closeTime).isEqualTo(LocalTime.of(4,0))
+    }
+
+    @Test fun `미국에서 한국으로 이동한 새 대화는 이전 일기 입력에서 분리되고 중복 접수에도 유지된다`() {
+        val user = UserId.generate()
+        val before = Instant.parse("2026-08-02T05:00:00Z")
+        `when`(time.now()).thenReturn(before)
+        val first = accepted(user,command(before).copy(timezone="America/Los_Angeles",content="미국의 밤"))
+        val arrival = before.plusSeconds(60)
+        `when`(time.now()).thenReturn(arrival)
+        val request = command(arrival).copy(content="한국의 오후")
+        val next = accepted(user,request)
+        val retried = accepted(user,request)
+
+        assertThat(next.record.id).isNotEqualTo(first.record.id)
+        assertThat(next.responseJob).isNotNull()
+        assertThat(retried.message.id).isEqualTo(next.message.id)
+        assertThat(records.readJournalInput(user,first.record.id).messages.filter { it.role=="USER" }.map { it.content })
+            .containsExactly("미국의 밤")
+        assertThat(next.record.startAt).isEqualTo(arrival)
+        assertThat(countUserMessages(user)).isEqualTo(2)
+        assertThat(count("conversation.response_jobs",user)).isEqualTo(2)
+        assertThat(quota.current(user).used).isEqualTo(1)
+        assertThat(jdbc.queryForObject<Int>("SELECT request_count FROM conversation.conversation_usage WHERE user_id=?",user.value))
+            .isEqualTo(1)
+    }
+
+    @Test fun `여행으로 기록이 일찍 닫히면 새 기록에 대화 한도를 다시 제공한다`() {
+        val user = UserId.generate()
+        val before = Instant.parse("2026-08-02T05:00:00Z")
+        `when`(time.now()).thenReturn(before)
+        val first = (1..20).map { accepted(user,command(before).copy(timezone="America/Los_Angeles")) }.last().record
+        assertThat(quota.current(user).remaining).isZero()
+        `when`(time.now()).thenReturn(before.plusSeconds(60))
+        val next = accepted(user,command(before.plusSeconds(60)))
+        assertThat(next.record.id).isNotEqualTo(first.id)
+        assertThat(quota.current(user)).extracting("used","remaining").containsExactly(1,19)
+        assertThat(jdbc.queryForObject<Long>("SELECT source_revision FROM conversation.record_days WHERE id=?",first.id.value)).isEqualTo(20)
+    }
+
+    @Test fun `열린 기록이 없으면 전체 한도가 남고 초기화 시각은 없다`() {
+        val user = UserId.generate()
+        assertThat(quota.current(user)).extracting("used","remaining","resetAt").containsExactly(0,20,null)
+        val first = accepted(user)
+        assertThat(quota.current(user).resetAt).isEqualTo(first.record.closeAt)
+        close(first.record.id.value)
+        assertThat(quota.current(user)).extracting("used","remaining","resetAt").containsExactly(0,20,null)
     }
 
     @Test fun `오래된 발화 시각이어도 현재 기록에 접수하고 응답 작업을 만든다`() {
@@ -69,6 +155,26 @@ class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
         assertThat(first.responseJob).isNotNull()
         assertThat(countUserMessages(user)).isEqualTo(1)
         assertThat(first.message.occurredAt).isBefore(first.record.startAt)
+    }
+
+    @Test fun `장소 이동 메시지가 접수 속도 초과로 거절되면 이전 기록의 마감도 롤백한다`() {
+        val user = UserId.generate()
+        val before = Instant.parse("2026-08-02T05:00:00Z")
+        `when`(time.now()).thenReturn(before)
+        val first = accepted(user,command(before).copy(timezone="America/Los_Angeles"))
+        jdbc.update("UPDATE conversation.conversation_usage SET request_window=?,request_count=60 WHERE user_id=?",
+            Timestamp.from(before.plusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.MINUTES)),user.value)
+        `when`(time.now()).thenReturn(before.plusSeconds(60))
+
+        assertThatThrownBy { accepted(user,command(before.plusSeconds(60))) }
+            .isInstanceOf(com.moeum.conversation.domain.ConversationRateExceededException::class.java)
+        val current = query.list(user,null,50).single()
+        assertThat(current.id).isEqualTo(first.record.id)
+        assertThat(current.closedAt).isNull()
+        assertThat(current.closeAt).isEqualTo(first.record.closeAt)
+        assertThat(current.timezone).isEqualTo(first.record.timezone)
+        assertThat(countUserMessages(user)).isEqualTo(1)
+        assertThat(count("conversation.response_jobs",user)).isEqualTo(1)
     }
 
     @Test fun `마감 후 도착한 과거 발화는 다음 기록에 들어가고 이전 입력은 불변이다`() {
@@ -97,7 +203,7 @@ class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
         assertThat(count("conversation.response_jobs", user)).isEqualTo(1)
         assertThat(jdbc.queryForObject<Long>("SELECT source_revision FROM conversation.record_days WHERE user_id=?",
             user.value)).isEqualTo(1)
-        assertThat(jdbc.queryForObject<Int>("SELECT message_count FROM conversation.conversation_usage WHERE user_id=?",
+        assertThat(jdbc.queryForObject<Int>("SELECT request_count FROM conversation.conversation_usage WHERE user_id=?",
             user.value)).isEqualTo(1)
     }
 

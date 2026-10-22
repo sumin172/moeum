@@ -66,8 +66,8 @@ object CapacityRoleMain {
         }
         control.createContext("/clean") { exchange ->
             val deleted = when (role) {
-                "conversation-worker" -> context.getBean<com.moeum.conversation.infrastructure.scheduling.CompletedResponseJobCleaner>().cleanBatch()
-                "journal-worker" -> context.getBean<com.moeum.journal.infrastructure.scheduling.CompletedGenerationJobCleaner>().cleanBatch()
+                "conversation-worker" -> context.getBean<com.moeum.conversation.infrastructure.scheduling.TerminalResponseJobCleaner>().cleanBatch()
+                "journal-worker" -> context.getBean<com.moeum.journal.infrastructure.scheduling.TerminalGenerationJobCleaner>().cleanBatch()
                 else -> 0
             }
             respond(exchange, mapper.writeValueAsBytes(mapOf("deleted" to deleted)))
