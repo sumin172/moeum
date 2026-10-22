@@ -110,7 +110,7 @@ class ConversationOrderingIntegrationTest {
         val jwt = jwtProvider.issue(user).token
         val disclosed = rest.exchange<ConversationQuota>("/api/conversations/quota",HttpMethod.GET,HttpEntity<Void>(headers(jwt))).body!!
         assertThat(disclosed.remaining).isZero()
-        assertThat(disclosed.resetAt.atZone(ZoneOffset.UTC).toLocalTime()).isEqualTo(LocalTime.MIDNIGHT)
+        assertThat(disclosed.resetAt).isEqualTo(query.list(user,null,1).single().closeAt)
         val denied = rest.exchange<QuotaErrorResponse>("/api/conversations/messages",HttpMethod.POST,
             HttpEntity(SaveMessageRequest(UUID.randomUUID(),"초과",now,"Asia/Seoul"),headers(jwt)))
         assertThat(denied.statusCode).isEqualTo(HttpStatus.TOO_MANY_REQUESTS)

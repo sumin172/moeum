@@ -3,6 +3,7 @@ package com.moeum.conversation.application.command
 import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.model.UserRecordState
 import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
+import com.moeum.conversation.infrastructure.config.RecordDayProperties
 import com.moeum.conversation.support.FixedTimeProvider
 import com.moeum.conversation.support.InMemoryRecordDayRepository
 import com.moeum.conversation.support.InMemoryMessageRepository
@@ -33,17 +34,37 @@ class SaveMessageServiceTest {
     private fun newService(quotaLimit: Int = 20) =
         SaveMessageService(
             recordDayRepository, messageRepository, responseJobRepository, quotaService(quotaLimit),
-            ConversationLimitProperties(maxMessageLength = 10), FixedTimeProvider(now),
+            ConversationLimitProperties(maxMessageLength = 10), RecordDayProperties(), FixedTimeProvider(now),
         )
 
     private fun command(occurredAt: String, content: String = "내용", clientMessageId: UUID = UUID.randomUUID()) =
         SaveMessageCommand(clientMessageId, content, Instant.parse(occurredAt), "Asia/Seoul")
 
     @Test
+    fun `미국의 밤에서 한국의 다음날로 이동하면 새 기록에 접수하고 답변을 예약한다`() {
+        val clock = FixedTimeProvider(Instant.parse("2026-08-02T05:00:00Z"))
+        val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20),
+            ConversationLimitProperties(),RecordDayProperties(),clock)
+        val first = service.save(userId,command(clock.now().toString()).copy(timezone="America/Los_Angeles"))
+        clock.fixedNow = clock.now().plusSeconds(60)
+        val next = service.save(userId,command(clock.now().toString()))
+
+        assertThat(first.record.displayDate).isEqualTo(LocalDate.of(2026,8,1))
+        assertThat(next.record.displayDate).isEqualTo(LocalDate.of(2026,8,2))
+        assertThat(next.record.id).isNotEqualTo(first.record.id)
+        assertThat(recordDayRepository.days.getValue(first.record.id).closedAt).isEqualTo(clock.now())
+        assertThat(recordDayRepository.days.getValue(first.record.id).sourceRevision).isEqualTo(1)
+        assertThat(next.record.startAt).isEqualTo(clock.now())
+        assertThat(next.record.sourceRevision).isEqualTo(1)
+        assertThat(next.responseJob!!.recordDayId).isEqualTo(next.record.id)
+        assertThat(responseJobRepository.jobs).hasSize(2)
+    }
+
+    @Test
     fun `마감 이후 도착한 과거 발화도 다음 기록에 저장한다`() {
         val clock=FixedTimeProvider(now)
         val service=SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20),
-            ConversationLimitProperties(maxMessageLength=10),clock)
+            ConversationLimitProperties(maxMessageLength=10),RecordDayProperties(),clock)
         val first=accepted(service.save(userId,command(now.toString())))
         clock.fixedNow=first.record.closeAt.plusSeconds(1)
         val late=accepted(service.save(userId,command(first.record.closeAt.minusSeconds(1).toString())))
@@ -53,6 +74,21 @@ class SaveMessageServiceTest {
         assertThat(late.responseJob).isNotNull()
         assertThat(responseJobRepository.jobs).hasSize(2)
         assertThat(recordDayRepository.findOpen(userId)?.id).isEqualTo(late.record.id)
+    }
+
+    @Test
+    fun `배치가 이미 마감한 기록 뒤에도 변경한 설정은 다음 날짜에 적용한다`() {
+        val clock = FixedTimeProvider(Instant.parse("2026-08-01T12:00:00Z"))
+        val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20),
+            ConversationLimitProperties(),RecordDayProperties(),clock)
+        val first = service.save(userId,command(clock.now().toString())).record
+        recordDayRepository.update(first.closeIfDue(first.closeAt))
+        recordDayRepository.saveState(UserRecordState(userId,LocalTime.of(4,0)))
+        clock.fixedNow = first.closeAt
+        val next = service.save(userId,command(clock.now().toString())).record
+        assertThat(next.displayDate).isEqualTo(first.displayDate.plusDays(1))
+        assertThat(next.startAt).isEqualTo(first.closeAt)
+        assertThat(next.closeAt).isEqualTo(Instant.parse("2026-08-02T19:00:00Z"))
     }
 
     @Test
@@ -103,7 +139,7 @@ class SaveMessageServiceTest {
         val usage = com.moeum.conversation.support.InMemoryConversationUsageRepository()
         val clock = FixedTimeProvider(now)
         val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20,usage),
-            ConversationLimitProperties(maxMessageLength = 10),clock)
+            ConversationLimitProperties(maxMessageLength = 10),RecordDayProperties(),clock)
         val command = command("2026-08-01T16:30:00Z")
         val first = accepted(service.save(userId,command))
         clock.fixedNow = first.record.closeAt.plusSeconds(1)
@@ -117,14 +153,14 @@ class SaveMessageServiceTest {
     }
 
     @Test
-    fun `서버 UTC 기간은 발화의 현지 날짜나 과거 시각으로 바뀌지 않는다`() {
+    fun `발화 시각과 장소가 달라도 접수 속도는 사용자별로 센다`() {
         val usage = com.moeum.conversation.support.InMemoryConversationUsageRepository()
         val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20,usage),
-            ConversationLimitProperties(),FixedTimeProvider(now))
+            ConversationLimitProperties(),RecordDayProperties(),FixedTimeProvider(now))
         val first = accepted(service.save(userId,command("2026-08-02T10:00:00Z").copy(timezone="Pacific/Kiritimati")))
         assertThat(first.message.occurredAt.atZone(java.time.ZoneId.of("Pacific/Kiritimati")).toLocalDate()).isEqualTo(LocalDate.of(2026,8,3))
         service.save(userId,command("2026-07-31T10:00:00Z"))
-        assertThat(usage.counts).containsEntry(userId to LocalDate.of(2026,8,2),2)
+        assertThat(usage.counts).containsEntry(userId,2)
         assertThat(usage.counts).hasSize(1)
     }
 

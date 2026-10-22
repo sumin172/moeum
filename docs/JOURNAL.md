@@ -19,9 +19,10 @@ JSON 파싱 뒤 제목·본문의 공백과 길이를 검사한다.
 ## 최대 입력의 검증 범위
 
 현재 구독 한도는 UTC 하루 100회, 메시지 최대 길이는 4,000자다.
-36시간 기록은 최대 세 UTC 사용 기간과 겹칠 수 있다.
+기록 경계는 장소 타임존과 설정 마감으로 정해지며, 여행 중 하나의 기록이 여러 UTC 사용 기간에 걸칠 수 있다.
 입력 조립 시험은 USER 300개·1,200,000자에 합성 AI 300개·각 1,000자를 더해 약 150만 자의 전달을 검사한다.
 AI 길이는 합성 가정이며 실제 출력은 공급자 토큰 설정에 달려 있다.
+300개는 입력 조립 시험의 크기이며 기록당 최대 접수량을 뜻하지 않는다.
 
 현재 생성기는 해당 기록의 입력 전체를 한 호출로 전달한다.
 실제 모델 토큰 한도에는 역할·시각·시스템 프롬프트와 출력 여유도 포함된다.
@@ -41,12 +42,12 @@ LLM 호출은 트랜잭션 밖에서 수행한다.
 
 ## API
 
-| API | 응답·동작 |
-|---|---|
-| GET /api/journals?date= | 표시 날짜별 생성 일기 목록, 본문 포함 |
-| GET /api/journals/{recordDayId} | recordDayId, journal, generation |
-| PUT /api/journals/{recordDayId} | title/body/version으로 수정 |
-| POST /api/journals/{recordDayId}/generation-attempts | 실패한 같은 작업 복구 |
+| API                                                  | 응답·동작                             |
+|------------------------------------------------------|---------------------------------------|
+| GET /api/journals?date=                              | 표시 날짜별 생성 일기 목록, 본문 포함 |
+| GET /api/journals/{recordDayId}                      | recordDayId, journal, generation      |
+| PUT /api/journals/{recordDayId}                      | title/body/version으로 수정           |
+| POST /api/journals/{recordDayId}/generation-attempts | 실패한 같은 작업 복구                 |
 
 일기 응답은 recordDayId, displayDate, title, body, version, editable을 포함한다.
 표시 날짜가 같은 기록이 여러 개면 각각 반환한다.
@@ -63,14 +64,14 @@ LLM 호출은 트랜잭션 밖에서 수행한다.
 PENDING/PROCESSING의 반복 요청은 현재 작업을 반환한다.
 완료 결과가 있거나 COMPLETED 작업이면 409, 작업이 없으면 404다.
 
-| 정책 | 현재 기본값 |
-|---|---|
-| 자동 시도 상한 | 첫 시도 포함 5회 |
-| 자동 대기 | 1분, 5분, 30분, 2시간 + jitter |
-| 누적 시도 상한 | 자동·수동·리스 회수 합계 7회 |
-| 수동 재시도 대기 | 실패 시각부터 1분 |
-| 429 최소 대기 | 5분과 공급자 Retry-After, 일반 backoff 중 가장 늦은 시각 |
-| 생성 리스 | 5분 |
+| 정책             | 현재 기본값                                              |
+|------------------|----------------------------------------------------------|
+| 자동 시도 상한   | 첫 시도 포함 5회                                         |
+| 자동 대기        | 1분, 5분, 30분, 2시간 + jitter                           |
+| 누적 시도 상한   | 자동·수동·리스 회수 합계 7회                             |
+| 수동 재시도 대기 | 실패 시각부터 1분                                        |
+| 429 최소 대기    | 5분과 공급자 Retry-After, 일반 backoff 중 가장 늦은 시각 |
+| 생성 리스        | 5분                                                      |
 
 일시적 오류는 제한된 재예약, 인증·명확한 입력 오류는 자동 반복 중단으로 처리한다.
 잘못된 출력은 전체 시도 횟수 기준 두 번째 시도부터 자동 재예약하지 않는다.
@@ -78,7 +79,7 @@ PENDING/PROCESSING의 반복 요청은 현재 작업을 반환한다.
 
 ## 보관과 검증
 
-원본 대화와 현재 일기는 보관한다. 완료 작업은 [보존 정책](OBSERVABILITY_RETENTION.md)으로 정리한다.
+원본 대화와 현재 일기는 보관한다. 완료·최종 실패 작업은 30일 뒤 [보존 정책](OBSERVABILITY_RETENTION.md)으로 정리한다.
 JournalFlowIntegrationTest와 JournalPersistenceIntegrationTest는 생성·수정 권한·충돌·수정본 보호를,
 ClosedJournalInputIntegrationTest는 같은 마감 입력의 재사용을,
 JournalInputConnectionIntegrationTest는 단일 연결에서의 입력 조회를 검사한다.

@@ -24,8 +24,8 @@ API는 servlet, 워커는 none web application type이다.
 | 역할 | 실행 경로 | DB pool 최대/최소 | 실행 슬롯 | provider별 동시 호출 상한 |
 |---|---|---:|---:|---:|
 | API | HTTP 저장·조회·재시도 접수 | 10 / 2 | 해당 없음 | 해당 없음 |
-| conversation-worker | 대화 응답·완료 작업 정리 | 4 / 1 | 8 | 8 |
-| journal-worker | 마감·전달·일기 생성·완료 작업 정리 | 2 / 1 | 2 | 2 |
+| conversation-worker | 대화 응답·종료 작업 정리 | 4 / 1 | 8 | 8 |
+| journal-worker | 마감·전달·일기 생성·종료 작업 정리 | 2 / 1 | 2 | 2 |
 
 수치는 설정 기본값이며 성능 시험 설정과 별개다.
 외부 호출 동안 DB 트랜잭션을 유지하지 않는다.
@@ -53,7 +53,7 @@ API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등
 마감·전달은 별도 journalDeliveryScheduler에서 기본 5초 간격으로 처리한다.
 마감·전달 각각 최대 100건, 실행당 최대 5회 반복하며 2초 경과 뒤 새 반복을 시작하지 않는다.
 전달 리스는 1분이다. 설정은 moeum.journal.delivery.interval과 initial-delay다.
-완료 작업 정리는 역할별 독립 스케줄러에서 실행하며 [보존 계약](OBSERVABILITY_RETENTION.md)을 따른다.
+종료 작업 정리는 역할별 독립 스케줄러에서 실행하며 [보존 계약](OBSERVABILITY_RETENTION.md)을 따른다.
 
 ## 배포 설정
 

@@ -35,7 +35,7 @@ PROCESSING 작업으로 후속 실행을 확인하면 완료 작업 보존과 �
 
 ## 검증
 
-ResponseRetryIntegrationTest와 CompletedJobRetentionIntegrationTest는
+ResponseRetryIntegrationTest와 TerminalJobRetentionIntegrationTest는
 후속 진행에 따른 재시도 거절, 완료 이력 정리 후 동일 판단, 중복 접수 무차감을 검사한다.
 JobStateTest는 오류 분류별 재예약과 수동 재시도 제한을 검사한다.
 현재 계약은 [대화](../CONVERSATION.md), [일기](../JOURNAL.md), [보존](../OBSERVABILITY_RETENTION.md)에 있다.

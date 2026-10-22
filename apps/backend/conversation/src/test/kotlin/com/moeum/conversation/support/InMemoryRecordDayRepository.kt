@@ -11,8 +11,8 @@ class InMemoryRecordDayRepository : RecordDayRepository {
     override fun saveState(state: UserRecordState) { states[state.userId] = state }
     override fun find(userId: UserId, id: RecordDayId, lock: Boolean) = days[id]?.takeIf { it.userId == userId }
     override fun findOpen(userId: UserId, lock: Boolean) = days.values.firstOrNull { it.userId == userId && it.closedAt == null }
-    override fun latestClosedBoundary(userId: UserId) =
-        days.values.filter { it.userId == userId }.mapNotNull { it.closedAt }.maxOrNull()
+    override fun latestClosed(userId: UserId) =
+        days.values.filter { it.userId == userId && it.closedAt != null }.maxByOrNull { it.startAt }
     override fun list(userId: UserId, displayDate: LocalDate?, limit: Int) =
         days.values.filter { it.userId == userId && (displayDate == null || it.displayDate == displayDate) }.sortedByDescending { it.startAt }.take(limit)
     override fun insert(day: RecordDay) { days[day.id] = day }

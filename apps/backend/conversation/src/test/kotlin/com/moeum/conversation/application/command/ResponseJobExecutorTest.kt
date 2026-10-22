@@ -14,6 +14,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -25,7 +26,7 @@ class ResponseJobExecutorTest {
     private val timeProvider = FixedTimeProvider(start)
     private val messageRepository = InMemoryMessageRepository()
     private val jobRepository = InMemoryResponseJobRepository(messageRepository)
-    private val records = InMemoryRecordDayRepository().also { it.insert(RecordDay.create(userId,start,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,null).copy(id=recordDayId)) }
+    private val records = InMemoryRecordDayRepository().also { it.insert(RecordDay.create(userId,start,ZoneId.of("Asia/Seoul"),RecordDay.DEFAULT_CLOSE_TIME,LocalTime.of(18,0),LocalTime.of(4,0)).copy(id=recordDayId)) }
 
     private class ScriptedResponder(private val outcomes: ArrayDeque<() -> ConversationResponse>) : ConversationResponder {
         val requests = mutableListOf<List<Message>>()

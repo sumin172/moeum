@@ -10,6 +10,7 @@ import com.moeum.conversation.domain.model.RecordDay
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.domain.parseTimezone
 import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
+import com.moeum.conversation.infrastructure.config.RecordDayProperties
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import org.slf4j.LoggerFactory
@@ -37,6 +38,7 @@ class SaveMessageService(
     private val responseJobRepository: ResponseJobRepository,
     private val quota: ConversationQuotaService,
     private val limits: ConversationLimitProperties,
+    private val recordDayProperties: RecordDayProperties,
     private val timeProvider: TimeProvider,
 ) {
     private val log = LoggerFactory.getLogger(SaveMessageService::class.java)
@@ -59,21 +61,19 @@ class SaveMessageService(
         if (occurredAt > now.plus(Duration.ofMinutes(5))) {
             throw InvalidConversationRequestException("미래 발화 허용 범위를 초과했습니다")
         }
-        var active = recordDayRepository.findOpen(userId, lock = true)
-        if (active != null && active.closedAt == null && now >= active.closeAt) {
-            active = active.closeIfDue(now)
+        val active = recordDayRepository.findOpen(userId, lock = true)?.prepareForMessage(zone, now)
+        if (active?.closedAt != null) {
             recordDayRepository.update(active)
+            log.info("기록 마감: recordDayId={}, closedAt={}", active.id.value, active.closedAt)
         }
         val created = active == null || active.closedAt != null
         var record = if (created) RecordDay.create(userId, now, zone, state.closeTime,
-            active?.closedAt ?: recordDayRepository.latestClosedBoundary(userId)) else active
+            recordDayProperties.eveningStart, recordDayProperties.morningEnd,
+            active ?: recordDayRepository.latestClosed(userId)) else active
 
-        quota.consume(userId, now)
-        record = record.append(zone, now)
+        quota.consume(userId, record, now)
+        record = record.append()
         if (created) recordDayRepository.insert(record) else recordDayRepository.update(record)
-        if (record.closedAt != null) {
-            log.info("기록 마감: recordDayId={}, closedAt={}", record.id.value, record.closedAt)
-        }
         val message = Message.userMessage(
             id = MessageId.generate(), userId = userId, content = command.content,
             occurredAt = occurredAt,
@@ -81,8 +81,7 @@ class SaveMessageService(
             clientMessageId = command.clientMessageId, now = now,
         )
         val saved = messageRepository.append(message)
-        // 장소 변경으로 즉시 마감된 경우에는 대화 응답을 시작하지 않는다.
-        val job = if (record.closedAt != null) null else ResponseJob.pending(saved, now).also(responseJobRepository::insert)
+        val job = ResponseJob.pending(saved, now).also(responseJobRepository::insert)
         return SaveMessageResult.Accepted(saved, job, record)
     }
 }

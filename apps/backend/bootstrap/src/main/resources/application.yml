@@ -73,15 +73,15 @@ moeum:
     shutdown-timeout: 2s
   jobs:
     retention:
-      completed-age: 30d
+      terminal-age: 30d
       batch-size: 100
       interval: PT10S
       initial-delay: PT1M
   identity:
     conversation:
-      # 제품 확정값이 아닌 개발 기본안. 무료·구독 모두 유한한 한도.
-      free-daily-limit: 20
-      premium-daily-limit: 100
+      # 확정된 현재 횟수. 무료·구독 모두 유한한 한도이며 설정으로 변경할 수 있다.
+      free-record-limit: 20
+      premium-record-limit: 100
   auth:
     session:
       # refresh token 수명(로그인·refresh 때마다 연장). access token 수명은 moeum.jwt.expiration-seconds(기본 15분)
@@ -94,7 +94,11 @@ moeum:
     journal-concurrency: 2
     shutdown-timeout: 10s
   conversation:
-    # 이상 사용으로 LLM 비용이 튀지 않게 하는 상한(잠정값, ConversationLimitProperties 참고)
+    record-day:
+      evening-start: "18:00"
+      morning-end: "04:00"
+      default-close-time: "02:00"
+    # 사용자 메시지 길이·접수 속도 상한과 AI 문맥 실행 상한
     limits:
       max-message-length: 4000
       context-char-budget: 20000

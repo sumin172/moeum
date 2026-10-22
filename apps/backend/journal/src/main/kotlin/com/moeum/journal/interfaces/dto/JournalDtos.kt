@@ -3,9 +3,8 @@ package com.moeum.journal.interfaces.dto
 import com.moeum.journal.application.query.JournalDay
 import com.moeum.journal.domain.model.GenerationJob
 import com.moeum.journal.domain.model.Journal
-import com.moeum.platform.job.JobStatus
 import java.time.LocalDate
-import java.util.UUID
+import java.util.*
 
 data class EditJournalRequest(
     val title: String,
@@ -43,8 +42,8 @@ data class GenerationStatusResponse(
     val retryable: Boolean,
 ) {
     companion object {
-        fun from(job: GenerationJob): GenerationStatusResponse =
-            GenerationStatusResponse(status = job.state.status.name, retryable = job.state.status == JobStatus.FAILED)
+        fun from(job: GenerationJob, retryable: Boolean = false): GenerationStatusResponse =
+            GenerationStatusResponse(status = job.state.status.name, retryable = retryable)
     }
 }
 
@@ -60,7 +59,7 @@ data class JournalDayResponse(
             JournalDayResponse(
                 recordDayId = day.recordDayId.value,
                 journal = day.journal?.let { JournalResponse.from(it, day.editable) },
-                generation = day.generationJob?.let { GenerationStatusResponse.from(it) },
+                generation = day.generationJob?.let { GenerationStatusResponse.from(it, day.generationRetryable) },
             )
     }
 }
