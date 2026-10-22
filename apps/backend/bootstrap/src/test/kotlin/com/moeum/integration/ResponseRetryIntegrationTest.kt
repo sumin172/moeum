@@ -7,6 +7,9 @@ import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.platform.web.ErrorResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForObject
 import org.springframework.boot.resttestclient.exchange
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpMethod
@@ -19,13 +22,17 @@ import java.util.UUID
  * backoff/poll 주기는 AbstractIntegrationTest에서 짧게 줄여 둔다.
  */
 class ResponseRetryIntegrationTest : AbstractIntegrationTest() {
+    @Autowired lateinit var jdbc: JdbcTemplate
 
-    private fun saveMessage(jwt: String, content: String): MessageResponse =
+    private fun attempts(messageId: UUID): Int? = jdbc.queryForObject<Int>(
+        "SELECT attempt_count FROM conversation.response_jobs WHERE user_message_id=?", messageId)
+
+    private fun saveMessage(jwt: String, content: String, clientMessageId: UUID = UUID.randomUUID()): MessageResponse =
         restTemplate.exchange<com.moeum.conversation.interfaces.SaveMessageResponse>(
             "/api/conversations/messages",
             HttpMethod.POST,
-            HttpEntity(SaveMessageRequest(UUID.randomUUID(), content, Instant.now(), "Asia/Seoul"), authHeaders(jwt)),
-        ).body!!.message!!
+            HttpEntity(SaveMessageRequest(clientMessageId, content, Instant.now(), "Asia/Seoul"), authHeaders(jwt)),
+        ).body!!.message
 
     private fun awaitUserMessage(jwt: String, id: UUID, condition: (MessageResponse) -> Boolean): MessageResponse {
         repeat(50) {
@@ -41,23 +48,27 @@ class ResponseRetryIntegrationTest : AbstractIntegrationTest() {
     @Test
     fun `일시적으로 실패한 응답은 poller가 자동 재시도해 결국 완료된다`() {
         val jwt = issueJwt()
-        conversationResponder.failNext(2) // 3번까지 시도하므로 세 번째에 성공
+        val clientMessageId = UUID.randomUUID()
+        conversationResponder.failNext(clientMessageId, 2) // 3번까지 시도하므로 세 번째에 성공
 
-        val saved = saveMessage(jwt, "자동 재시도 테스트")
+        val saved = saveMessage(jwt, "자동 재시도 테스트", clientMessageId)
 
         val completed = awaitUserMessage(jwt, saved.id) { it.responseStatus == "COMPLETED" }
         assertThat(completed.retryable).isFalse()
+        assertThat(attempts(saved.id)).isEqualTo(3)
     }
 
     @Test
     fun `재시도를 모두 실패한 응답은 재시도 가능으로 표시되고, 사용자가 다시 요청하면 응답이 생성된다`() {
         val jwt = issueJwt()
-        conversationResponder.failNext(3)
+        val clientMessageId = UUID.randomUUID()
+        conversationResponder.failNext(clientMessageId, 3)
 
-        val saved = saveMessage(jwt, "사용자 재시도 테스트")
+        val saved = saveMessage(jwt, "사용자 재시도 테스트", clientMessageId)
         val failed = awaitUserMessage(jwt, saved.id) { it.responseStatus == "FAILED" }
         assertThat(failed.responseFailureReason).isEqualTo("GENERATION_FAILED")
         assertThat(failed.retryable).isTrue()
+        assertThat(attempts(saved.id)).isEqualTo(3)
 
         val retry = restTemplate.exchange<MessageResponse>(
             "/api/conversations/messages/${saved.id}/response-attempts",
@@ -67,6 +78,7 @@ class ResponseRetryIntegrationTest : AbstractIntegrationTest() {
         assertThat(retry.statusCode).isEqualTo(HttpStatus.ACCEPTED)
 
         awaitUserMessage(jwt, saved.id) { it.responseStatus == "COMPLETED" }
+        assertThat(attempts(saved.id)).isEqualTo(4)
         val assistantReplies = restTemplate.exchange<RecordConversationResponse>(
             recordUrl(jwt), HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt)),
         ).body!!.messages.filter { it.role == "ASSISTANT" }
