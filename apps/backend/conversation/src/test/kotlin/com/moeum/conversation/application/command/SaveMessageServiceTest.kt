@@ -29,8 +29,6 @@ class SaveMessageServiceTest {
     private val responseJobRepository = InMemoryResponseJobRepository(messageRepository)
     private val service = newService()
 
-    private fun accepted(result: SaveMessageResult) = result as SaveMessageResult.Accepted
-
     private fun newService(quotaLimit: Int = 20) =
         SaveMessageService(
             recordDayRepository, messageRepository, responseJobRepository, quotaService(quotaLimit),
@@ -65,9 +63,9 @@ class SaveMessageServiceTest {
         val clock=FixedTimeProvider(now)
         val service=SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20),
             ConversationLimitProperties(maxMessageLength=10),RecordDayProperties(),clock)
-        val first=accepted(service.save(userId,command(now.toString())))
+        val first=service.save(userId,command(now.toString()))
         clock.fixedNow=first.record.closeAt.plusSeconds(1)
-        val late=accepted(service.save(userId,command(first.record.closeAt.minusSeconds(1).toString())))
+        val late=service.save(userId,command(first.record.closeAt.minusSeconds(1).toString()))
         assertThat(late.record.id).isNotEqualTo(first.record.id)
         assertThat(recordDayRepository.days.getValue(first.record.id).closedAt).isEqualTo(first.record.closeAt)
         assertThat(late.record.sourceRevision).isEqualTo(1)
@@ -94,7 +92,7 @@ class SaveMessageServiceTest {
     @Test
     fun `발화 표시 시각과 서버 접수 기준의 표시 날짜를 구분한다`() {
         // KST 2026-08-02 01:30 — 달력으로는 8/2지만 하루 경계(02:00) 전이라 8/1 하루에 속한다
-        val result = accepted(service.save(userId, command("2026-08-01T16:30:00Z")))
+        val result = service.save(userId, command("2026-08-01T16:30:00Z"))
 
         assertThat(result.message.occurredAt.atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate()).isEqualTo(LocalDate.of(2026, 8, 2))
         assertThat(result.record.displayDate).isEqualTo(LocalDate.of(2026, 8, 2))
@@ -107,7 +105,7 @@ class SaveMessageServiceTest {
             UserRecordState(userId, LocalTime.of(18, 0)),
         )
 
-        val result = accepted(service.save(userId, command("2026-08-01T16:30:00Z")))
+        val result = service.save(userId, command("2026-08-01T16:30:00Z"))
 
         assertThat(result.record.displayDate).isEqualTo(LocalDate.of(2026, 8, 3))
     }
@@ -115,7 +113,7 @@ class SaveMessageServiceTest {
     @Test
     fun `오프라인으로 늦게 도착한 메시지도 서버 접수 기준 하루에 들어간다`() {
         // 저장 시각(now)은 8/2 19:00 KST지만 발화는 7/31 12:00 KST
-        val result = accepted(service.save(userId, command("2026-07-31T03:00:00Z")))
+        val result = service.save(userId, command("2026-07-31T03:00:00Z"))
 
         assertThat(result.record.displayDate).isEqualTo(LocalDate.of(2026, 8, 2))
         assertThat(result.responseJob).isNotNull()
@@ -125,8 +123,8 @@ class SaveMessageServiceTest {
     fun `동일한 clientMessageId로 재요청하면 중복 저장하지 않고 기존 메시지를 반환한다`() {
         val clientMessageId = UUID.randomUUID()
 
-        val first = accepted(service.save(userId, command("2026-08-02T03:00:00Z", clientMessageId = clientMessageId)))
-        val retried = accepted(service.save(userId, command("2026-08-02T03:00:00Z", clientMessageId = clientMessageId)))
+        val first = service.save(userId, command("2026-08-02T03:00:00Z", clientMessageId = clientMessageId))
+        val retried = service.save(userId, command("2026-08-02T03:00:00Z", clientMessageId = clientMessageId))
 
         assertThat(retried.message.id).isEqualTo(first.message.id)
         assertThat(retried.responseJob!!.id).isEqualTo(first.responseJob!!.id)
@@ -141,15 +139,15 @@ class SaveMessageServiceTest {
         val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20,usage),
             ConversationLimitProperties(maxMessageLength = 10),RecordDayProperties(),clock)
         val command = command("2026-08-01T16:30:00Z")
-        val first = accepted(service.save(userId,command))
+        val first = service.save(userId,command)
         clock.fixedNow = first.record.closeAt.plusSeconds(1)
-        val next = accepted(service.save(userId,command.copy(clientMessageId = UUID.randomUUID())))
+        val next = service.save(userId,command.copy(clientMessageId = UUID.randomUUID()))
         assertThat(next.record.id).isNotEqualTo(first.record.id)
         assertThat(messageRepository.messages).hasSize(2)
         assertThat(responseJobRepository.jobs).hasSize(2)
         assertThat(recordDayRepository.days[first.record.id]!!.sourceRevision).isEqualTo(1)
         assertThat(usage.counts.values.single()).isEqualTo(2)
-        assertThat(accepted(service.save(userId,command)).message.id).isEqualTo(first.message.id)
+        assertThat(service.save(userId,command).message.id).isEqualTo(first.message.id)
     }
 
     @Test
@@ -157,7 +155,7 @@ class SaveMessageServiceTest {
         val usage = com.moeum.conversation.support.InMemoryConversationUsageRepository()
         val service = SaveMessageService(recordDayRepository,messageRepository,responseJobRepository,quotaService(20,usage),
             ConversationLimitProperties(),RecordDayProperties(),FixedTimeProvider(now))
-        val first = accepted(service.save(userId,command("2026-08-02T10:00:00Z").copy(timezone="Pacific/Kiritimati")))
+        val first = service.save(userId,command("2026-08-02T10:00:00Z").copy(timezone="Pacific/Kiritimati"))
         assertThat(first.message.occurredAt.atZone(java.time.ZoneId.of("Pacific/Kiritimati")).toLocalDate()).isEqualTo(LocalDate.of(2026,8,3))
         service.save(userId,command("2026-07-31T10:00:00Z"))
         assertThat(usage.counts).containsEntry(userId,2)
@@ -167,8 +165,8 @@ class SaveMessageServiceTest {
     @Test
     fun `같은 나노초 발화는 DB 정밀도로 맞춰 원본 버전 순으로 장소를 갱신한다`() {
         val command = command("2026-08-02T10:00:00.123456789Z")
-        val first = accepted(service.save(userId,command))
-        val second = accepted(service.save(userId,command.copy(clientMessageId = UUID.randomUUID(),timezone = "Asia/Bangkok")))
+        val first = service.save(userId,command)
+        val second = service.save(userId,command.copy(clientMessageId = UUID.randomUUID(),timezone = "Asia/Bangkok"))
         assertThat(first.message.occurredAt).isEqualTo(Instant.parse("2026-08-02T10:00:00.123456Z"))
         assertThat(second.record.timezone).isEqualTo("Asia/Bangkok")
         assertThat(second.record.sourceRevision).isEqualTo(2)
@@ -176,15 +174,15 @@ class SaveMessageServiceTest {
 
     @Test
     fun `content가 비어있으면 저장을 거부한다`() {
-        assertThatThrownBy { accepted(service.save(userId, command("2026-08-02T03:00:00Z", content = "   "))) }
+        assertThatThrownBy { service.save(userId, command("2026-08-02T03:00:00Z", content = "   ")) }
             .isInstanceOf(InvalidConversationRequestException::class.java)
     }
 
     @Test
     fun `최대 길이를 넘는 메시지는 저장을 거부한다`() {
-        assertThatThrownBy { accepted(service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(11)))) }
+        assertThatThrownBy { service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(11))) }
             .isInstanceOf(InvalidConversationRequestException::class.java)
-        assertThat(accepted(service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(10)))).message.content).isEqualTo("가".repeat(10))
+        assertThat(service.save(userId, command("2026-08-02T03:00:00Z", content = "가".repeat(10))).message.content).isEqualTo("가".repeat(10))
     }
 
     @Test
@@ -197,7 +195,7 @@ class SaveMessageServiceTest {
 
     @Test
     fun `메시지와 함께 바로 실행할 수 있는 AI 응답 작업을 만든다`() {
-        val result = accepted(service.save(userId, command("2026-08-02T03:00:00Z")))
+        val result = service.save(userId, command("2026-08-02T03:00:00Z"))
 
         val job = result.responseJob!!
         assertThat(job.userMessageId).isEqualTo(result.message.id)
@@ -209,7 +207,7 @@ class SaveMessageServiceTest {
     @Test
     fun `한도 소진 시 새 원본과 응답 작업을 남기지 않는다`() {
         val service = newService(quotaLimit=1)
-        val first = accepted(service.save(userId,command("2026-08-02T03:00:00Z")))
+        val first = service.save(userId,command("2026-08-02T03:00:00Z"))
         assertThatThrownBy { service.save(userId,command("2026-08-02T03:01:00Z")) }.isInstanceOf(AiQuotaExceededException::class.java)
         assertThat(messageRepository.messages).hasSize(1)
         assertThat(responseJobRepository.jobs).hasSize(1)

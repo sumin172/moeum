@@ -1,7 +1,5 @@
 package com.moeum.platform.llm
 
-import java.util.UUID
-
 // 업무 모듈이 LLM을 부르는 유일한 진입점. platform은 "어떻게 부르는지"(provider, 모델, 토큰 상한, 장애 격리,
 // 호출 관측)만 알고, "무엇을 시킬지"(프롬프트, 응답 해석)는 각 업무 모듈이 소유한다.
 interface LlmClient {
@@ -14,7 +12,7 @@ data class LlmRequest(
     val purpose: String,
     val systemPrompt: String,
     val messages: List<LlmMessage>,
-    // 프롬프트를 소유한 모듈이 관리하는 버전. 관측과 생성 메타데이터에 남긴다.
+    // 프롬프트를 소유한 모듈이 관리하는 버전. 호출 관측에 남긴다.
     val promptVersion: String,
     val responseFormat: LlmResponseFormat = LlmResponseFormat.TEXT,
 )
@@ -31,10 +29,8 @@ enum class LlmResponseFormat {
 }
 
 data class LlmResult(
-    val generationId: UUID,
     val text: String,
     val model: String,
-    val promptVersion: String,
 )
 
 class LlmException(

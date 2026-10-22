@@ -59,10 +59,8 @@ class RoutingLlmClient(
             val result = provider.generate(route, request)
             record(request, provider, route, startedAt, result = result, generationId = generationId, error = null)
             return LlmResult(
-                generationId = generationId,
                 text = result.text,
                 model = result.model,
-                promptVersion = request.promptVersion,
             )
         } catch (e: Exception) {
             record(request, provider, route, startedAt, result = null, generationId = generationId, error = e)
@@ -88,10 +86,10 @@ class RoutingLlmClient(
         runCatching {
             telemetry.record(LlmCallEvent(
                 purpose = request.purpose,
-                provider = provider.vendor,
-                model = route.model,
                 promptVersion = request.promptVersion,
                 generationId = generationId,
+                provider = provider.vendor,
+                model = route.model,
                 latencyMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
                 succeeded = error == null,
                 errorCode = error?.let(SafeFailure::code),

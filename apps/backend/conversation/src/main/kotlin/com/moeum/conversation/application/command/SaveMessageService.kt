@@ -27,9 +27,7 @@ data class SaveMessageCommand(
     val occurredAt: Instant,
     val timezone: String,
 )
-sealed interface SaveMessageResult {
-    data class Accepted(val message: Message, val responseJob: ResponseJob?, val record: RecordDay) : SaveMessageResult
-}
+data class SaveMessageResult(val message: Message, val responseJob: ResponseJob?, val record: RecordDay)
 
 @Service
 class SaveMessageService(
@@ -44,7 +42,7 @@ class SaveMessageService(
     private val log = LoggerFactory.getLogger(SaveMessageService::class.java)
 
     @Transactional
-    fun save(userId: UserId, command: SaveMessageCommand): SaveMessageResult.Accepted {
+    fun save(userId: UserId, command: SaveMessageCommand): SaveMessageResult {
         if (command.content.isBlank() || command.content.length > limits.maxMessageLength) {
             throw InvalidConversationRequestException("메시지 길이가 유효하지 않습니다")
         }
@@ -53,7 +51,7 @@ class SaveMessageService(
         // 사용자 상태 잠금으로 동시 중복을 직렬화한다. 유니크 제약 예외를 포괄적으로 삼키지 않는다.
         messageRepository.findByUserIdAndClientMessageId(userId, command.clientMessageId)?.let { existing ->
             val record = recordDayRepository.find(userId, existing.recordDayId) ?: error("메시지의 기록이 없습니다")
-            return SaveMessageResult.Accepted(existing,
+            return SaveMessageResult(existing,
                 responseJobRepository.findByUserIdAndUserMessageId(userId, existing.id), record)
         }
         val now = timeProvider.now().truncatedTo(ChronoUnit.MICROS)
@@ -82,6 +80,6 @@ class SaveMessageService(
         )
         val saved = messageRepository.append(message)
         val job = ResponseJob.pending(saved, now).also(responseJobRepository::insert)
-        return SaveMessageResult.Accepted(saved, job, record)
+        return SaveMessageResult(saved, job, record)
     }
 }

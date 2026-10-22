@@ -9,6 +9,7 @@ import com.moeum.identity.domain.model.AuthSession
 import com.moeum.identity.domain.model.AuthSessionId
 import com.moeum.identity.domain.model.RefreshToken
 import com.moeum.identity.infrastructure.config.AuthSessionProperties
+import com.moeum.identity.infrastructure.security.RefreshTokenCodec
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.UserId
 import com.moeum.platform.security.jwt.JwtProvider
@@ -41,6 +42,7 @@ class AuthSessionService(
     private val jwtProvider: JwtProvider,
     private val properties: AuthSessionProperties,
     private val timeProvider: TimeProvider,
+    private val refreshTokens: RefreshTokenCodec,
 ) {
     private val log = LoggerFactory.getLogger(AuthSessionService::class.java)
 
@@ -52,7 +54,7 @@ class AuthSessionService(
             authSessionRepository.save(it.revoked(now))
         }
         val sessionId = AuthSessionId.generate()
-        val refreshToken = RefreshToken.issue(sessionId)
+        val refreshToken = refreshTokens.issue(sessionId)
         val session = authSessionRepository.save(
             AuthSession.start(sessionId, userId, deviceId, refreshToken.hash(), now, properties.refreshTokenTtl),
         )
@@ -62,7 +64,7 @@ class AuthSessionService(
     @Transactional
     fun refresh(refreshTokenValue: String): RefreshOutcome {
         val now = timeProvider.now()
-        val token = RefreshToken.parse(refreshTokenValue) ?: return RefreshOutcome.Invalid
+        val token = refreshTokens.verify(refreshTokenValue) ?: return RefreshOutcome.Invalid
         val session = authSessionRepository.findById(token.sessionId) ?: return RefreshOutcome.Invalid
         if (!session.isActive(now)) return RefreshOutcome.Invalid
 
@@ -83,7 +85,7 @@ class AuthSessionService(
             return RefreshOutcome.Invalid
         }
 
-        val newToken = RefreshToken.issue(session.id)
+        val newToken = refreshTokens.issue(session.id)
         val rotated = authSessionRepository.save(session.rotated(newToken.hash(), now, properties.refreshTokenTtl))
         return RefreshOutcome.Refreshed(issueTokens(user.id, newToken, rotated))
     }
@@ -91,9 +93,12 @@ class AuthSessionService(
     // 로그아웃은 멱등이다 — 이미 끝난 세션이나 알 수 없는 토큰이어도 성공으로 본다.
     @Transactional
     fun logout(refreshTokenValue: String) {
-        val token = RefreshToken.parse(refreshTokenValue) ?: return
+        val token = refreshTokens.verify(refreshTokenValue) ?: return
         val session = authSessionRepository.findById(token.sessionId) ?: return
         val now = timeProvider.now()
+        if (!session.isActive(now)) return
+        val hash = token.hash()
+        if (!session.matchesCurrent(hash) && !session.isRecentlyRotated(hash, now, properties.rotationGrace)) return
         authSessionRepository.save(session.revoked(now))
     }
 

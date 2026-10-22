@@ -12,6 +12,10 @@ spring:
       connection-timeout: 10000
 
 moeum:
+  auth:
+    session:
+      # 로컬 전용. 운영에서는 MOEUM_AUTH_SESSION_SIGNINGSECRET로 별도 키를 주입한다.
+      signing-secret: local-dev-only-refresh-signing-secret-32-bytes-min
   jwt:
     # 로컬 개발 전용 시크릿. 운영 환경에서는 환경변수/시크릿 매니저로 주입한다.
     secret: local-dev-only-jwt-secret-key-must-be-32-bytes-min

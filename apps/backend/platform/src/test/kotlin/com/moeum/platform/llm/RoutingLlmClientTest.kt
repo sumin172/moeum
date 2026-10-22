@@ -61,7 +61,8 @@ class RoutingLlmClientTest {
         val invocation = telemetry.invocations.single()
         assertThat(invocation.purpose).isEqualTo("diary")
         assertThat(invocation.succeeded).isTrue()
-        assertThat(invocation.generationId).isEqualTo(result.generationId)
+        assertThat(invocation.generationId).isNotNull()
+        assertThat(invocation.promptVersion).isEqualTo("v1")
         assertThat(invocation.cachedInputTokens).isEqualTo(3)
     }
 

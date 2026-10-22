@@ -35,6 +35,39 @@ class AuthSessionIntegrationTest : AbstractIntegrationTest() {
         Regex("\"code\"\\s*:\\s*\"([A-Z_]+)\"").find(response.body!!)!!.groupValues[1]
 
     @Test
+    fun `세션 ID를 알아도 임의 비밀값과 변조 토큰으로 세션을 폐기할 수 없다`() {
+        val tokens = login()
+        val parts = tokens.refreshToken.split('.')
+        val secret = (if (parts[1][0] == 'A') "B" else "A") + parts[1].drop(1)
+        listOf("${parts[0]}.arbitrary", "${parts[0]}.$secret.${parts[2]}").forEach { invalid ->
+            val rejected = refresh(invalid)
+            assertThat(rejected.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+            assertThat(errorCodeOf(rejected)).isEqualTo("IDENTITY_INVALID_REFRESH_TOKEN")
+            assertThat(restTemplate.postForEntity<Void>("/api/auth/logout", RefreshTokenRequest(invalid)).statusCode)
+                .isEqualTo(HttpStatus.NO_CONTENT)
+        }
+        assertThat(refresh(tokens.refreshToken).statusCode).isEqualTo(HttpStatus.OK)
+    }
+
+    @Test
+    fun `두 세대 이전 진짜 토큰의 재사용은 DB에 세션 폐기를 커밋한다`() {
+        val first = login()
+        val second = refreshed(first.refreshToken)
+        val third = refreshed(second.refreshToken)
+        assertThat(refresh(first.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+        assertThat(refresh(third.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+    }
+
+    @Test
+    fun `갱신 직후 직전 토큰으로 로그아웃하면 최신 토큰도 거부된다`() {
+        val first = login()
+        val next = refreshed(first.refreshToken)
+        assertThat(restTemplate.postForEntity<Void>("/api/auth/logout", RefreshTokenRequest(first.refreshToken)).statusCode)
+            .isEqualTo(HttpStatus.NO_CONTENT)
+        assertThat(refresh(next.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+    }
+
+    @Test
     fun `refresh로 받은 새 access token으로 API를 계속 쓸 수 있다`() {
         val tokens = login()
 

@@ -13,7 +13,6 @@ import com.moeum.platform.llm.LlmRole
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.util.UUID
 
 class LlmConversationResponderTest {
 
@@ -21,7 +20,7 @@ class LlmConversationResponderTest {
         var request: LlmRequest? = null
         override fun generate(request: LlmRequest): LlmResult {
             this.request = request
-            return LlmResult(UUID.randomUUID(), "많이 힘드셨겠어요.", "gemini-2.5-flash", request.promptVersion)
+            return LlmResult("많이 힘드셨겠어요.", "gemini-2.5-flash")
         }
     }
 
