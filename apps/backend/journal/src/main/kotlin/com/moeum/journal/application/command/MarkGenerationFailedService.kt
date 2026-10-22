@@ -22,8 +22,4 @@ class MarkGenerationFailedService(
         generationJobRepository.save(job.failed(policy, timeProvider.now(), failure))
     }
 
-    @Transactional
-    fun markExhausted(job: GenerationJob) {
-        generationJobRepository.save(job.failedPermanently(timeProvider.now()))
-    }
 }

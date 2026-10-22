@@ -16,10 +16,8 @@ data class GenerationJobProperties(
         Duration.ofHours(2),
     ),
     val lease: Duration = Duration.ofMinutes(5),
-    val maxTotalAttempts: Int = maxAttempts + 2,
-    val manualRetryCooldown: Duration = Duration.ofMinutes(1),
     val rateLimitBackoff: Duration = Duration.ofMinutes(5),
 ) {
     fun toPolicy(): JobPolicy = JobPolicy(maxAttempts = maxAttempts, backoff = backoff, lease = lease,
-        maxTotalAttempts = maxTotalAttempts, manualRetryCooldown = manualRetryCooldown, rateLimitBackoff = rateLimitBackoff)
+        rateLimitBackoff = rateLimitBackoff)
 }

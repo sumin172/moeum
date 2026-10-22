@@ -28,7 +28,7 @@ data class GenerationJob(
     fun failedPermanently(now: Instant): GenerationJob =
         copy(state = state.failedPermanently(), updatedAt = now)
 
-    // 재시도를 모두 소진한 작업을 사용자가 다시 요청한 경우
+    // 오류 또는 자동 시도 상한으로 종료한 작업을 사용자가 다시 요청한 경우
     fun restarted(now: Instant): GenerationJob = copy(state = state.restarted(now), updatedAt = now)
 
 }

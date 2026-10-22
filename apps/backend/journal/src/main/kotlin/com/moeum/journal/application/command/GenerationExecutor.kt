@@ -42,12 +42,6 @@ class GenerationExecutor(
     }
 
     private fun execute(job: GenerationJob) {
-        if (policy.isExhausted(job.state.attemptCount)) {
-            log.warn("리스 만료로 재시도 횟수를 넘긴 일기 생성 작업을 최종 실패 처리: jobId={}", job.id.value)
-            recordFailure(job) { markGenerationFailedService.markExhausted(job) }
-            return
-        }
-
         try {
             val input = recordDayOperations.readJournalInput(job.userId, job.recordDayId)
             val generation = journalGenerator.generate(input.displayDate, input.messages)

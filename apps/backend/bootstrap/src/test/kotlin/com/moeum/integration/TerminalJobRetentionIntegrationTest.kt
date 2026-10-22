@@ -184,12 +184,13 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
         jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING',lease_expires_at=? WHERE id=?",
             Timestamp.from(now.plus(Duration.ofDays(10))), processing.id.value)
         val recent = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), now))
-        assertThat(generationCleaner().cleanBatch()).isEqualTo(1)
+        assertThat(generationCleaner().cleanBatch()).isEqualTo(2)
         assertThat(journals.findByUserIdAndRecordDayId(user, day)).isEqualTo(edited)
         assertThat(generations.findByUserIdAndRecordDayId(user, day)).isNull()
         assertThat(registration.register(RecordDelivery(day, user, old, 1))).isFalse()
         assertThatThrownBy { retry.retry(user, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
-        listOf(failed, processing, recent).forEach { assertThat(generations.findByUserIdAndRecordDayId(user, it.recordDayId)).isNotNull() }
+        assertThat(generations.findByUserIdAndRecordDayId(user, failed.recordDayId)).isNull()
+        listOf(processing, recent).forEach { assertThat(generations.findByUserIdAndRecordDayId(user, it.recordDayId)).isNotNull() }
     }
 
     @Test fun `30일 지난 실패 작업은 원본을 보존하고 정리한다`() {
