@@ -40,7 +40,7 @@ class ClosedJournalInputIntegrationTest : AbstractIntegrationTest() {
     private fun send(user: UserId, content: String) = save.save(user,
         SaveMessageCommand(UUID.randomUUID(), content, Instant.now(), "Asia/Seoul"))
 
-    private fun assistant(first: SaveMessageResult.Accepted, source: Long, content: String,
+    private fun assistant(first: SaveMessageResult, source: Long, content: String,
                           occurredAt: Instant = Instant.now()) {
         TransactionTemplate(transactionManager).executeWithoutResult {
             messages.append(Message.assistantMessage(MessageId.generate(), first.message.userId, content,
@@ -48,7 +48,7 @@ class ClosedJournalInputIntegrationTest : AbstractIntegrationTest() {
         }
     }
 
-    private fun close(first: SaveMessageResult.Accepted) {
+    private fun close(first: SaveMessageResult) {
         val boundary = Timestamp.from(Instant.now())
         jdbc.update("UPDATE conversation.record_days SET close_at=?,closed_at=? WHERE id=?",
             boundary, boundary, first.record.id.value)
@@ -76,7 +76,7 @@ class ClosedJournalInputIntegrationTest : AbstractIntegrationTest() {
             val input = pool.submit<JournalInput> { records.readJournalInput(user, first.record.id) }
             try {
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue()
-                val next = pool.submit<SaveMessageResult.Accepted> { send(user, "다음 기록") }.get(5, TimeUnit.SECONDS)
+                val next = pool.submit<SaveMessageResult> { send(user, "다음 기록") }.get(5, TimeUnit.SECONDS)
                 assertThat(next.record.id).isNotEqualTo(first.record.id)
             } finally { release.countDown() }
             assertThat(input.get(5, TimeUnit.SECONDS).messages.map { it.content })

@@ -52,7 +52,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     private val time = object : TimeProvider { override fun now() = now }
     private val props = JobRetentionProperties(batchSize=2)
     private fun user() = UserId.generate().also(users::add)
-    private fun input(user: UserId, close: Boolean = true): SaveMessageResult.Accepted {
+    private fun input(user: UserId, close: Boolean = true): SaveMessageResult {
         val saved = save.save(user, SaveMessageCommand(UUID.randomUUID(), "원본",
             now.minus(Duration.ofDays(1)), "Asia/Seoul"))
         if (close) {
@@ -62,7 +62,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
         }
         return saved
     }
-    private fun response(saved: SaveMessageResult.Accepted, complete: Boolean = true): ResponseJob {
+    private fun response(saved: SaveMessageResult, complete: Boolean = true): ResponseJob {
         val pending = saved.responseJob!!
         if (complete) jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=?,version=version+1 WHERE id=?",
             Timestamp.from(old), pending.id.value)

@@ -78,7 +78,7 @@ class ConversationOrderingIntegrationTest {
         val user=UserId.generate()
         val gate=CountDownLatch(1)
         Executors.newFixedThreadPool(8).use { pool ->
-            val futures=(1..8).map { pool.submit<SaveMessageResult.Accepted> { gate.await();accepted(user) } }
+            val futures=(1..8).map { pool.submit<SaveMessageResult> { gate.await();accepted(user) } }
             gate.countDown()
             val saved=futures.map { it.get(15,TimeUnit.SECONDS) }
             assertThat(saved.map { it.record.id }.distinct()).hasSize(1)
@@ -96,7 +96,7 @@ class ConversationOrderingIntegrationTest {
         repeat(19) { accepted(user) }
         val gate = CountDownLatch(1)
         Executors.newFixedThreadPool(8).use { pool ->
-            val futures = (1..8).map { pool.submit<SaveMessageResult.Accepted?> {
+            val futures = (1..8).map { pool.submit<SaveMessageResult?> {
                 gate.await()
                 try { accepted(user) } catch (_: AiQuotaExceededException) { null }
             } }

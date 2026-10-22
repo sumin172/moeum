@@ -52,9 +52,12 @@ class LlmTelemetryIntegrationTest : AbstractIntegrationTest() {
     @Test
     fun `실제 JSON 로그 수집 경로와 메트릭은 작업 생성 ID를 연결하고 본문은 노출하지 않는다`(output: CapturedOutput) {
         val job = UUID.randomUUID()
-        val result = WorkTrace.run(job, UUID.randomUUID(), 1) { llm.generate(request("PRIVATE_USER_CONTENT")) }
+        val generationId = WorkTrace.run(job, UUID.randomUUID(), 1) {
+            llm.generate(request("PRIVATE_USER_CONTENT"))
+            UUID.fromString(org.slf4j.MDC.get("generationId"))
+        }
         val event = awaitEvent(output, job, "llm.call")
-        assertThat(event["generationId"].asString()).isEqualTo(result.generationId.toString())
+        assertThat(event["generationId"].asString()).isEqualTo(generationId.toString())
         assertThat(event["traceId"].asString()).isEqualTo(job.toString())
         assertThat(event["inputTokens"].asInt()).isEqualTo(7)
         assertThat(output.all).doesNotContain("PRIVATE_USER_CONTENT", "PRIVATE_SYSTEM_PROMPT")

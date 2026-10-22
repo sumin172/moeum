@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test
 import tools.jackson.databind.json.JsonMapper
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 class LlmJournalGeneratorTest {
 
@@ -19,7 +18,7 @@ class LlmJournalGeneratorTest {
         var request: LlmRequest? = null
         override fun generate(request: LlmRequest): LlmResult {
             this.request = request
-            return LlmResult(UUID.randomUUID(), text, "gemini-2.5-flash", request.promptVersion)
+            return LlmResult(text, "gemini-2.5-flash")
         }
     }
 

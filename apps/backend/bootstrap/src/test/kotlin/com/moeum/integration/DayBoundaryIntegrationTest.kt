@@ -195,7 +195,7 @@ class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
         val command = command()
         val start = CountDownLatch(1)
         Executors.newFixedThreadPool(8).use { pool ->
-            val results = (1..8).map { pool.submit<SaveMessageResult.Accepted> { start.await(); accepted(user, command) } }
+            val results = (1..8).map { pool.submit<SaveMessageResult> { start.await(); accepted(user, command) } }
             start.countDown()
             assertThat(results.map { it.get(10, TimeUnit.SECONDS).message.id }.distinct()).hasSize(1)
         }
