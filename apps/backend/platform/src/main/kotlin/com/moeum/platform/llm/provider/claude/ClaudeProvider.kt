@@ -51,10 +51,6 @@ class ClaudeProvider(
             ?: throw LlmException("Claude 응답 본문이 비어 있습니다")
 
         val text = response.content.filter { it.type == "text" }.mapNotNull { it.text }.joinToString("")
-        if (text.isBlank()) {
-            throw LlmException("Claude 응답에 유효한 content가 없습니다", errorCode = "EMPTY_CONTENT")
-        }
-
         return LlmProviderResult(
             text = text,
             model = response.model ?: route.model,
@@ -62,6 +58,12 @@ class ClaudeProvider(
             outputTokens = response.usage?.outputTokens ?: 0,
             cachedInputTokens = response.usage?.cacheReadInputTokens ?: 0,
             finishReason = response.stopReason,
+            errorCode = when (response.stopReason) {
+                "end_turn" -> if (text.isBlank()) "EMPTY_CONTENT" else null
+                "max_tokens", "model_context_window_exceeded" -> "OUTPUT_TRUNCATED"
+                "refusal" -> "OUTPUT_BLOCKED"
+                else -> "UNEXPECTED_FINISH_REASON"
+            },
         )
     }
 }
@@ -92,7 +94,7 @@ data class ClaudeMessageResponse(
 data class ClaudeContentBlock(val type: String, val text: String? = null)
 
 data class ClaudeUsage(
-    @JsonProperty("input_tokens") val inputTokens: Int = 0,
-    @JsonProperty("output_tokens") val outputTokens: Int = 0,
-    @JsonProperty("cache_read_input_tokens") val cacheReadInputTokens: Int = 0,
+    @JsonProperty("input_tokens") val inputTokens: Int? = null,
+    @JsonProperty("output_tokens") val outputTokens: Int? = null,
+    @JsonProperty("cache_read_input_tokens") val cacheReadInputTokens: Int? = null,
 )

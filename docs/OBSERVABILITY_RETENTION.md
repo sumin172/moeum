@@ -26,6 +26,18 @@ LLM 이벤트는 bounded queue에 offer하고 전용 daemon 스레드가 메트�
 원문·프롬프트·인증 토큰·응답 본문은 로그 이벤트에 포함하지 않는다.
 오류는 안전한 분류와 코드 위치로 기록한다.
 공급자 finishReason은 허용 목록 외 값을 OTHER로 정규화한다.
+모델은 응답에 포함된 실제 모델을 기록하고, 응답 정보가 없으면 요청 설정의 모델을 사용한다.
+출력 잘림·차단 등 완료되지 않은 응답도 실패 이벤트에 실제 모델·종료 사유·사용 토큰을 남긴다. 본문은 기록하지 않는다.
+succeeded는 공급자 응답이 정상 종료 판정과 본문 공백 검사를 통과했는지를 나타낸다. 이후 업무 모듈의 JSON 검증·결과 저장 성공을 의미하지 않는다.
+누락된 공급자 토큰 수는 0으로 기록한다.
+
+| 출력 판정 errorCode      | 의미                                                      | 자동 재시도                     |
+|--------------------------|-----------------------------------------------------------|---------------------------------|
+| OUTPUT_TRUNCATED         | 출력 토큰 상한 또는 모델 문맥 한계로 중단                 | 중단                            |
+| OUTPUT_BLOCKED           | 입력·출력 차단 또는 공급자의 명시적 거절                  | 중단                            |
+| UNEXPECTED_FINISH_REASON | 종료 사유 누락 또는 현재 요청에서 지원하지 않는 종료 사유 | 중단                            |
+| EMPTY_CONTENT            | 정상 종료했으나 본문이 비어 있음                          | 기존 제한된 출력 오류 정책 적용 |
+
 PostgreSQL 오류 DETAIL 노출을 막는 Hibernate 오류 로거 설정을 적용한다.
 
 ## 메트릭
@@ -85,6 +97,9 @@ FAILED 대화 작업은 최근 실패부터, FAILED 일기 작업은 작업 생�
 
 ## 검증
 
+GeminiProviderTest와 ClaudeProviderTest는 정상 종료·잘림·차단·종료 사유 누락·생략된 사용량의 응답 해석을 검사한다.
+RoutingLlmClientTest는 미완료 출력 거절·오류 분류·실제 모델과 토큰 수의 실패 관측 보존을 검사한다.
+GeminiProviderTest는 라우터의 출력 판정 실패가 공급자 서킷의 실패 횟수에 반영되지 않는지도 검사한다.
 LlmTelemetryTest와 NonBlockingConsoleAppenderTest는 수집 실패·포화·종료·유실을 검사한다.
 LlmTelemetryIntegrationTest는 JSON 출력·JMX·작업 문맥·원문 보호를 검사한다.
 LlmTelemetryIsolationIntegrationTest는 관측 전송 정체 중 업무 진행을 검사한다.

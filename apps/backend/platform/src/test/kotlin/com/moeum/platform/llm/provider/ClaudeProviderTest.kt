@@ -8,6 +8,8 @@ import com.moeum.platform.llm.provider.claude.ClaudeProperties
 import com.moeum.platform.llm.provider.claude.ClaudeProvider
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
 import org.springframework.test.web.client.match.MockRestRequestMatchers.header
@@ -60,5 +62,31 @@ class ClaudeProviderTest {
         assertThat(result.inputTokens).isEqualTo(120)
         assertThat(result.outputTokens).isEqualTo(40)
         assertThat(result.finishReason).isEqualTo("end_turn")
+        assertThat(result.errorCode).isNull()
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = ["end_turn,NULL", "max_tokens,OUTPUT_TRUNCATED", "model_context_window_exceeded,OUTPUT_TRUNCATED", "refusal,OUTPUT_BLOCKED", "stop_sequence,UNEXPECTED_FINISH_REASON", "pause_turn,UNEXPECTED_FINISH_REASON", "NULL,UNEXPECTED_FINISH_REASON"], nullValues = ["NULL"])
+    fun `본문이 있어도 정상 종료가 아니면 오류로 판정한다`(reason: String?, expected: String?) {
+        val reasonJson = reason?.let { "\"$it\"" } ?: "null"
+        server.expect(requestTo("https://claude.test/v1/messages"))
+            .andRespond(withSuccess("""{"content":[{"type":"text","text":"일부 본문"}],"stop_reason":$reasonJson}""", MediaType.APPLICATION_JSON))
+        val result = provider.generate(LlmRoute("claude", "haiku", 20),
+            LlmRequest("chat", "system", listOf(LlmMessage(LlmRole.USER, "안녕")), "v1"))
+        assertThat(result.errorCode).isEqualTo(expected)
+        server.verify()
+    }
+
+    @ParameterizedTest
+    @CsvSource("end_turn,EMPTY_CONTENT", "max_tokens,OUTPUT_TRUNCATED", "refusal,OUTPUT_BLOCKED")
+    fun `빈 본문도 종료 사유를 우선하고 생략된 사용량은 0으로 해석한다`(reason: String, expected: String) {
+        server.expect(requestTo("https://claude.test/v1/messages"))
+            .andRespond(withSuccess("""{"content":[],"stop_reason":"$reason","usage":{"input_tokens":12}}""", MediaType.APPLICATION_JSON))
+        val result = provider.generate(LlmRoute("claude", "haiku", 20),
+            LlmRequest("chat", "system", listOf(LlmMessage(LlmRole.USER, "안녕")), "v1"))
+        assertThat(result.errorCode).isEqualTo(expected)
+        assertThat(result.inputTokens).isEqualTo(12)
+        assertThat(result.outputTokens).isZero()
+        assertThat(result.cachedInputTokens).isZero()
     }
 }

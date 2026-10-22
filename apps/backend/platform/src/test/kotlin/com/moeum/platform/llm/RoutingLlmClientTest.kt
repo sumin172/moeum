@@ -7,6 +7,10 @@ import com.moeum.platform.llm.provider.LlmProviderResult
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import com.moeum.platform.job.JobFailure
+import com.moeum.platform.job.JobFailureKind
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -64,6 +68,29 @@ class RoutingLlmClientTest {
         assertThat(invocation.generationId).isNotNull()
         assertThat(invocation.promptVersion).isEqualTo("v1")
         assertThat(invocation.cachedInputTokens).isEqualTo(3)
+        assertThat(invocation.model).isEqualTo("haiku-001")
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["OUTPUT_TRUNCATED", "OUTPUT_BLOCKED", "UNEXPECTED_FINISH_REASON"])
+    fun `미완료 출력은 반환하지 않고 받은 모델 사용량을 실패 관측에 보존한다`(code: String) {
+        val provider = FakeProvider("gemini") {
+            LlmProviderResult("PRIVATE_PARTIAL_TEXT", "actual-model", 100, 20, 5, "MAX_TOKENS", code)
+        }
+        val client = RoutingLlmClient(listOf(provider), properties("chat" to LlmRoute("gemini", "latest", 20)), telemetry)
+        val error = org.assertj.core.api.Assertions.catchThrowable { client.generate(request("chat")) } as LlmException
+        assertThat(error.errorCode).isEqualTo(code)
+        assertThat(error.message).doesNotContain("PRIVATE_PARTIAL_TEXT")
+        assertThat(error.cause).isNull()
+        assertThat(JobFailure.classify(error).kind).isEqualTo(JobFailureKind.PERMANENT)
+        val event = telemetry.invocations.single()
+        assertThat(event.succeeded).isFalse()
+        assertThat(event.errorCode).isEqualTo(code)
+        assertThat(event.model).isEqualTo("actual-model")
+        assertThat(event.inputTokens).isEqualTo(100)
+        assertThat(event.outputTokens).isEqualTo(20)
+        assertThat(event.cachedInputTokens).isEqualTo(5)
+        assertThat(event.finishReason).isEqualTo("MAX_TOKENS")
     }
 
     @Test
@@ -76,6 +103,7 @@ class RoutingLlmClientTest {
         val invocation = telemetry.invocations.single()
         assertThat(invocation.succeeded).isFalse()
         assertThat(invocation.errorCode).isEqualTo("IO_ERROR")
+        assertThat(invocation.model).isEqualTo("flash")
         assertThat(invocation.generationId).isNotNull()
     }
 

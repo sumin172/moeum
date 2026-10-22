@@ -1,7 +1,7 @@
 package com.moeum.platform.llm
 
 // 업무 모듈이 LLM을 부르는 유일한 진입점. platform은 "어떻게 부르는지"(provider, 모델, 토큰 상한, 장애 격리,
-// 호출 관측)만 알고, "무엇을 시킬지"(프롬프트, 응답 해석)는 각 업무 모듈이 소유한다.
+// 호출 관측, 공급자 출력의 정상 종료 판정)만 알고, "무엇을 시킬지"(프롬프트, 업무 응답 형식의 해석)는 각 업무 모듈이 소유한다.
 interface LlmClient {
     // 실패하면 원문을 포함하지 않는 LlmException. 진단은 bounded 관측 경로로 보낸다.
     fun generate(request: LlmRequest): LlmResult
