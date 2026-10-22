@@ -55,15 +55,17 @@ class RoutingLlmClient(
             record(request, provider, route, startedAt, null, generationId, error)
             throw error
         }
+        var result: LlmProviderResult? = null
         try {
-            val result = provider.generate(route, request)
+            result = provider.generate(route, request)
+            result.errorCode?.let { throw LlmException("LLM 출력이 정상 완료되지 않았습니다", errorCode = it) }
             record(request, provider, route, startedAt, result = result, generationId = generationId, error = null)
             return LlmResult(
                 text = result.text,
                 model = result.model,
             )
         } catch (e: Exception) {
-            record(request, provider, route, startedAt, result = null, generationId = generationId, error = e)
+            record(request, provider, route, startedAt, result = result, generationId = generationId, error = e)
             // 외부 예외의 응답 본문·URL·인증 정보가 업무 예외와 로그로 전파되지 않게 한다.
             throw LlmException("LLM 호출 실패",
                 errorCode = if (e is LlmException) e.errorCode else SafeFailure.code(e),
@@ -89,14 +91,14 @@ class RoutingLlmClient(
                 promptVersion = request.promptVersion,
                 generationId = generationId,
                 provider = provider.vendor,
-                model = route.model,
+                model = result?.model ?: route.model,
                 latencyMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
                 succeeded = error == null,
                 errorCode = error?.let(SafeFailure::code),
                 inputTokens = result?.inputTokens ?: 0,
                 outputTokens = result?.outputTokens ?: 0,
                 cachedInputTokens = result?.cachedInputTokens ?: 0,
-                finishReason = result?.finishReason?.let { if (it in setOf("STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "end_turn", "max_tokens", "stop_sequence")) it else "OTHER" },
+                finishReason = result?.finishReason?.let { if (it in setOf("STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "end_turn", "max_tokens", "stop_sequence", "refusal", "model_context_window_exceeded")) it else "OTHER" },
             ))
         }
     }

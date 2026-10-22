@@ -49,12 +49,8 @@ class GeminiProvider(
             .body<GeminiGenerateContentResponse>()
             ?: throw LlmException("Gemini 응답 본문이 비어 있습니다")
 
-        val candidate = response.candidates.firstOrNull()
+        val candidate = response.candidates.orEmpty().firstOrNull()
         val text = candidate?.content?.parts.orEmpty().filterNot { it.thought == true }.mapNotNull { it.text }.joinToString("")
-        if (text.isBlank()) {
-            throw LlmException("Gemini 응답에 유효한 content가 없습니다", errorCode = "EMPTY_CONTENT")
-        }
-
         val usage = response.usageMetadata
         return LlmProviderResult(
             text = text,
@@ -63,7 +59,15 @@ class GeminiProvider(
             // thinking 토큰도 출력으로 과금되므로 함께 센다
             outputTokens = (usage?.candidatesTokenCount ?: 0) + (usage?.thoughtsTokenCount ?: 0),
             cachedInputTokens = usage?.cachedContentTokenCount ?: 0,
-            finishReason = candidate?.finishReason,
+            finishReason = candidate?.finishReason ?: response.promptFeedback?.blockReason,
+            errorCode = when {
+                response.promptFeedback?.blockReason?.let { it != "BLOCK_REASON_UNSPECIFIED" } == true -> "OUTPUT_BLOCKED"
+                candidate?.finishReason == "MAX_TOKENS" -> "OUTPUT_TRUNCATED"
+                candidate?.finishReason in setOf("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY") -> "OUTPUT_BLOCKED"
+                candidate?.finishReason != "STOP" -> "UNEXPECTED_FINISH_REASON"
+                text.isBlank() -> "EMPTY_CONTENT"
+                else -> null
+            },
         )
     }
 }
@@ -94,16 +98,19 @@ data class GeminiContent(val role: String? = null, val parts: List<GeminiPart> =
 data class GeminiPart(val text: String? = null, val thought: Boolean? = null)
 
 data class GeminiGenerateContentResponse(
-    val candidates: List<GeminiCandidate> = emptyList(),
+    val candidates: List<GeminiCandidate>? = null,
     val usageMetadata: GeminiUsageMetadata? = null,
     val modelVersion: String? = null,
+    val promptFeedback: GeminiPromptFeedback? = null,
 )
+
+data class GeminiPromptFeedback(val blockReason: String? = null)
 
 data class GeminiCandidate(val content: GeminiContent? = null, val finishReason: String? = null)
 
 data class GeminiUsageMetadata(
-    val promptTokenCount: Int = 0,
-    val candidatesTokenCount: Int = 0,
-    val cachedContentTokenCount: Int = 0,
-    val thoughtsTokenCount: Int = 0,
+    val promptTokenCount: Int? = null,
+    val candidatesTokenCount: Int? = null,
+    val cachedContentTokenCount: Int? = null,
+    val thoughtsTokenCount: Int? = null,
 )
