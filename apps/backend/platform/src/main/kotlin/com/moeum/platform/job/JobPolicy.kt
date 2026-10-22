@@ -12,7 +12,7 @@ data class JobPolicy(
     // claim한 워커가 이 시간 안에 끝내지 못하면 죽은 것으로 보고 다른 워커가 다시 가져간다.
     // 외부 호출 타임아웃보다 넉넉해야 한다.
     val lease: Duration,
-    // 자동·수동·리스 복구를 합친 공급자 호출 상한.
+    // 대화 작업에 적용하는 자동·수동·리스 복구 누적 상한. 일기 작업은 집행하지 않는다.
     val maxTotalAttempts: Int = maxAttempts + 2,
     val manualRetryCooldown: Duration = Duration.ofMinutes(1),
     val rateLimitBackoff: Duration = Duration.ofMinutes(1),

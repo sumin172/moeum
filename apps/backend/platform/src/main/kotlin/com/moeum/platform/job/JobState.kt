@@ -34,7 +34,7 @@ data class JobState(
     fun failedPermanently(): JobState =
         copy(status = JobStatus.FAILED, leaseExpiresAt = null)
 
-    // 시도 횟수는 누적 비용 상한에 사용하므로 사용자 재요청에도 초기화하지 않는다.
+    // 자동 재예약 판단과 대화 작업의 누적 상한에 사용하므로 사용자 재요청에도 횟수를 초기화하지 않는다.
     fun restarted(now: Instant): JobState {
         check(status == JobStatus.FAILED) { "최종 실패한 작업만 다시 시작할 수 있습니다: status=$status" }
         return copy(status = JobStatus.PENDING, nextAttemptAt = now, leaseExpiresAt = null)

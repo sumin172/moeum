@@ -8,7 +8,6 @@ import com.moeum.journal.support.MutableTimeProvider
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.job.JobStatus
-import com.moeum.platform.job.ManualRetryUnavailableException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -21,17 +20,33 @@ class RetryJournalGenerationServiceTest {
     private val day = RecordDayId.generate()
     private val now = Instant.parse("2026-08-03T05:00:00Z")
     private val jobs = InMemoryGenerationJobRepository()
-    private val service = RetryJournalGenerationService(jobs, MutableTimeProvider(now),
-        com.moeum.journal.support.InMemoryJournalRepository(),
-        com.moeum.journal.infrastructure.config.GenerationJobProperties(manualRetryCooldown = Duration.ZERO),
+    private val clock = MutableTimeProvider(now)
+    private val journals = com.moeum.journal.support.InMemoryJournalRepository()
+    private val query = com.moeum.journal.application.query.GetJournalService(journals, jobs,
+        org.mockito.Mockito.mock(com.moeum.identity.application.publicapi.FeatureAccessQuery::class.java),
+        clock, com.moeum.platform.job.JobRetentionProperties())
+    private val service = RetryJournalGenerationService(jobs, clock, journals,
         com.moeum.platform.job.JobRetentionProperties())
 
     private fun job(transform: (GenerationJob) -> GenerationJob) =
         jobs.save(transform(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, day, now.minusSeconds(3600), now.minusSeconds(7200))))
 
     @Test
-    fun `최종 실패 후 30일이 지나면 정리 전이라도 재시도하지 않는다`() {
-        job { it.failedPermanently(now.minus(Duration.ofDays(30))) }
+    fun `조회와 실행은 생성 시각의 30일 경계를 공유하고 재실패해도 연장되지 않는다`() {
+        val failed = job { it.copy(createdAt = now.minus(Duration.ofDays(30)).plusSeconds(1),
+            state = it.state.copy(attemptCount = 20)).failedPermanently(now) }
+        assertThat(query.getDay(userId, day).generationRetryable).isTrue()
+        val restarted = service.retry(userId, day)
+        jobs.save(restarted.failedPermanently(now))
+        clock.now = now.plusSeconds(1)
+        assertThat(query.getDay(userId, day).generationRetryable).isFalse()
+        assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalNotFoundException::class.java)
+        assertThat(jobs.jobs.getValue(failed.id).createdAt).isEqualTo(failed.createdAt)
+    }
+
+    @Test
+    fun `작업 생성 후 30일이면 최근 실패라도 재시도하지 않는다`() {
+        job { it.copy(createdAt = now.minus(Duration.ofDays(30))).failedPermanently(now) }
         assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalNotFoundException::class.java)
     }
 
@@ -55,14 +70,12 @@ class RetryJournalGenerationServiceTest {
     }
 
     @Test
-    fun `수동 재시도는 실패 시각 뒤 대기하고 누적 상한에서 멈춘다`() {
-        val failed = job { it.copy(state = it.state.copy(attemptCount = 2)).failedPermanently(now) }
-        val limited = RetryJournalGenerationService(jobs, MutableTimeProvider(now),
-            com.moeum.journal.support.InMemoryJournalRepository(),
-            com.moeum.journal.infrastructure.config.GenerationJobProperties(maxAttempts = 2),
-            com.moeum.platform.job.JobRetentionProperties())
-        assertThatThrownBy { limited.retry(userId, day) }.isInstanceOf(ManualRetryUnavailableException::class.java)
-        jobs.jobs[failed.id] = failed.copy(state = failed.state.copy(attemptCount = 4))
-        assertThatThrownBy { limited.retry(userId, day) }.isInstanceOf(ManualRetryUnavailableException::class.java)
+    fun `누적 상한을 넘겨도 실패 직후 바로 재개하며 생성 시각과 횟수를 유지한다`() {
+        val failed = job { it.copy(state = it.state.copy(attemptCount = 20)).failedPermanently(now) }
+        val restarted = service.retry(userId, day)
+        assertThat(restarted.state.status).isEqualTo(JobStatus.PENDING)
+        assertThat(restarted.state.attemptCount).isEqualTo(20)
+        assertThat(restarted.createdAt).isEqualTo(failed.createdAt)
+        assertThat(service.retry(userId, day)).isEqualTo(restarted)
     }
 }

@@ -21,11 +21,11 @@ API는 servlet, 워커는 none web application type이다.
 
 ## 역할과 기본값
 
-| 역할 | 실행 경로 | DB pool 최대/최소 | 실행 슬롯 | provider별 동시 호출 상한 |
-|---|---|---:|---:|---:|
-| API | HTTP 저장·조회·재시도 접수 | 10 / 2 | 해당 없음 | 해당 없음 |
-| conversation-worker | 대화 응답·종료 작업 정리 | 4 / 1 | 8 | 8 |
-| journal-worker | 마감·전달·일기 생성·종료 작업 정리 | 2 / 1 | 2 | 2 |
+| 역할                | 실행 경로                          | DB pool 최대/최소 | 실행 슬롯 | provider별 동시 호출 상한 |
+|---------------------|------------------------------------|------------------:|----------:|--------------------------:|
+| API                 | HTTP 저장·조회·재시도 접수         |            10 / 2 | 해당 없음 |                 해당 없음 |
+| conversation-worker | 대화 응답·종료 작업 정리           |             4 / 1 |         8 |                         8 |
+| journal-worker      | 마감·전달·일기 생성·종료 작업 정리 |             2 / 1 |         2 |                         2 |
 
 수치는 설정 기본값이며 성능 시험 설정과 별개다.
 외부 호출 동안 DB 트랜잭션을 유지하지 않는다.
@@ -33,7 +33,7 @@ API는 servlet, 워커는 none web application type이다.
 프로세스별 pool·호출 제한·circuit breaker는 독립적이며 DB와 공급자 계정의 총량은 공유한다.
 
 API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등록된다.
-설정 바인딩도 역할별 JWT/Google 또는 LLM 사용 범위를 따른다.
+설정 바인딩도 역할별 JWT/Google 또는 LLM 사용 범위를 따른다. refresh token HMAC 검증 빈은 API 역할에서만 등록된다.
 역할별 등록 계약은 WorkerRoleIsolationIntegrationTest가 검사한다.
 
 ## 작업 실행
@@ -57,19 +57,22 @@ API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등
 
 ## 배포 설정
 
-| 환경변수 | 의미 |
-|---|---|
-| API_DB_POOL_SIZE | API 인스턴스 최대 DB 연결 |
-| CONVERSATION_DB_POOL_SIZE | 대화 인스턴스 최대 DB 연결 |
-| JOURNAL_DB_POOL_SIZE | 일기 인스턴스 최대 DB 연결 |
-| CONVERSATION_WORKER_CONCURRENCY | 대화 실행 슬롯 |
-| CONVERSATION_CLAIM_BATCH_SIZE | 대화 배치 선점 상한 |
-| JOURNAL_WORKER_CONCURRENCY | 일기 실행 슬롯 |
-| CONVERSATION_LLM_CONCURRENCY | 대화 프로세스 provider별 동시 호출 |
-| JOURNAL_LLM_CONCURRENCY | 일기 프로세스 provider별 동시 호출 |
+| 환경변수                         | 의미                                                                                    |
+|----------------------------------|-----------------------------------------------------------------------------------------|
+| API_DB_POOL_SIZE                 | API 인스턴스 최대 DB 연결                                                               |
+| MOEUM_AUTH_SESSION_SIGNINGSECRET | API의 refresh token 전용 HMAC 키. 최소 32바이트이며 모든 API 인스턴스에서 동일하게 유지 |
+| CONVERSATION_DB_POOL_SIZE        | 대화 인스턴스 최대 DB 연결                                                              |
+| JOURNAL_DB_POOL_SIZE             | 일기 인스턴스 최대 DB 연결                                                              |
+| CONVERSATION_WORKER_CONCURRENCY  | 대화 실행 슬롯                                                                          |
+| CONVERSATION_CLAIM_BATCH_SIZE    | 대화 배치 선점 상한                                                                     |
+| JOURNAL_WORKER_CONCURRENCY       | 일기 실행 슬롯                                                                          |
+| CONVERSATION_LLM_CONCURRENCY     | 대화 프로세스 provider별 동시 호출                                                      |
+| JOURNAL_LLM_CONCURRENCY          | 일기 프로세스 provider별 동시 호출                                                      |
 
 기동 시 역할별 슬롯 합계와 provider 호출 상한을 검증한다.
 DB pool의 minimum-idle은 maximum-pool-size 이하여야 한다.
+운영 refresh 키는 access token 키와 분리한다. 교체 시 기존 refresh token은 무효화되어 재로그인이 필요하다.
+키 설정과 인증 동작의 상세는 [서비스 기획의 인증 설명](PRODUCT.md#개발-범위)을 따른다.
 
 ```text
 DB 최대 연결 = Σ(역할별 최대 replica × 해당 pool)

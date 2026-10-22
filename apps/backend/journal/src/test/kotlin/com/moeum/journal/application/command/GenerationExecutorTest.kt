@@ -54,17 +54,44 @@ class GenerationExecutorTest {
 
     private val properties = GenerationJobProperties(maxAttempts = 2, backoff = listOf(Duration.ofMinutes(1)))
 
-    private fun executor(generator: JournalGenerator) = GenerationExecutor(
+    private fun executor(generator: JournalGenerator, settings: GenerationJobProperties = properties) = GenerationExecutor(
         generationJobRepository = jobRepository,
         recordDayOperations = activityQuery,
         journalGenerator = generator,
         saveGeneratedJournalService = SaveGeneratedJournalService(journalRepository, jobRepository, timeProvider),
-        markGenerationFailedService = MarkGenerationFailedService(jobRepository, properties, timeProvider),
-        generationJobProperties = properties,
+        markGenerationFailedService = MarkGenerationFailedService(jobRepository, settings, timeProvider),
+        generationJobProperties = settings,
         timeProvider = timeProvider,
     )
 
     private fun enqueue(): GenerationJob = jobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, recordDayId, dayEnd, dayEnd.minusSeconds(7200)))
+
+    @Test
+    fun `누적 자동 상한을 넘긴 수동 재개도 실행하고 실패하면 자동 재예약하지 않는다`() {
+        val job = enqueue()
+        jobRepository.save(job.copy(state = job.state.copy(attemptCount = 20)).failedPermanently(now).restarted(now))
+        val generator = ScriptedGenerator(failures = 1)
+        executor(generator).executeNext()
+        val failed = jobRepository.jobs.getValue(job.id)
+        assertThat(generator.calls).isEqualTo(1)
+        assertThat(failed.state.attemptCount).isEqualTo(21)
+        assertThat(failed.state.status).isEqualTo(JobStatus.FAILED)
+    }
+
+    @Test
+    fun `조기 종료 후 수동 재개가 일시적 오류로 실패하면 남은 자동 시도를 예약한다`() {
+        val job = enqueue()
+        jobRepository.save(job.copy(state = job.state.copy(attemptCount = 1)).failedPermanently(now).restarted(now))
+        val generator = ScriptedGenerator(failures = 1)
+        val runner = executor(generator, GenerationJobProperties())
+        runner.executeNext()
+        val pending = jobRepository.jobs.getValue(job.id)
+        assertThat(pending.state.status).isEqualTo(JobStatus.PENDING)
+        now = pending.state.nextAttemptAt
+        runner.executeNext()
+        assertThat(generator.calls).isEqualTo(2)
+        assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.COMPLETED)
+    }
 
     @Test
     fun `하루가 끝난 작업을 실행해 일기를 즉시 보관하고 작업을 완료한다`() {

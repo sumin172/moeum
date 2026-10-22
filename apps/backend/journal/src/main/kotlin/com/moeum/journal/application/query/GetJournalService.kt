@@ -17,6 +17,6 @@ class GetJournalService(private val journalRepository: JournalRepository, privat
         val job = generationJobRepository.findByUserIdAndRecordDayId(userId, recordDayId)
         return JournalDay(recordDayId, journalRepository.findByUserIdAndRecordDayId(userId, recordDayId), job,
             featureAccessQuery.isEnabled(userId, Feature.JOURNAL_EDIT),
-            job?.state?.status == JobStatus.FAILED && time.now().isBefore(job.updatedAt.plus(retention.terminalAge)))
+            job?.state?.status == JobStatus.FAILED && time.now().isBefore(job.createdAt.plus(retention.terminalAge)))
     }
 }
