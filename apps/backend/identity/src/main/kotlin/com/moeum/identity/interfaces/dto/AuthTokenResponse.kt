@@ -7,7 +7,7 @@ import java.time.Instant
 data class AuthTokenResponse(
     val accessToken: String,
     val accessTokenExpiresAt: Instant,
-    // refresh할 때마다 새 값으로 바뀐다 — 이전 값은 다시 쓰면 세션이 폐기된다
+    // refresh할 때마다 새 값으로 바뀐다 — 직전 값의 유예 시간 내 중복 갱신은 충돌, 그 밖의 검증된 과거 토큰 재사용은 세션 폐기
     val refreshToken: String,
     val refreshTokenExpiresAt: Instant,
 ) {

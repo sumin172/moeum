@@ -3,6 +3,7 @@ package com.moeum.identity.application.command
 import com.moeum.identity.domain.GoogleIdTokenVerifierPort
 import com.moeum.identity.domain.model.GoogleProfile
 import com.moeum.identity.domain.model.User
+import com.moeum.identity.infrastructure.security.RefreshTokenCodec
 import com.moeum.identity.infrastructure.config.AuthSessionProperties
 import com.moeum.identity.support.FakeJwtProvider
 import com.moeum.identity.support.InMemoryAuthSessionRepository
@@ -28,6 +29,7 @@ class GoogleLoginServiceTest {
         userRepository = userRepository,
         authSessionService = AuthSessionService(
             sessionRepository, userRepository, FakeJwtProvider(timeProvider), AuthSessionProperties(), timeProvider,
+            RefreshTokenCodec(AuthSessionProperties(signingSecret = "test-refresh-secret-at-least-32-bytes")),
         ),
         timeProvider = timeProvider,
     )
