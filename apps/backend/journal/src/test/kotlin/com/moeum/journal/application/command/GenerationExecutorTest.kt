@@ -7,6 +7,7 @@ import com.moeum.conversation.application.publicapi.RecordDelivery
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.JournalGenerator
 import com.moeum.journal.domain.model.GenerationJob
+import com.moeum.journal.domain.model.failedPermanently
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.journal.support.InMemoryJournalRepository

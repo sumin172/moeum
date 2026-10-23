@@ -1,5 +1,7 @@
 package com.moeum.journal.application.command
 
+import com.moeum.journal.domain.model.failedPermanently
+
 import com.moeum.journal.domain.JournalGenerationNotRetryableException
 import com.moeum.journal.domain.JournalNotFoundException
 import com.moeum.journal.domain.model.GenerationJob

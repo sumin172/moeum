@@ -3,6 +3,7 @@ package com.moeum.integration
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJobId
+import com.moeum.journal.domain.model.failedPermanently
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import org.assertj.core.api.Assertions.assertThat
