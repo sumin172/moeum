@@ -10,3 +10,6 @@ object TestGenerationJobs {
     fun pending(userId: UserId, recordDayId: RecordDayId, dayEnd: Instant, now: Instant) =
         GenerationJob(GenerationJobId(UuidV7.generate()), userId, recordDayId, JobState.pending(dayEnd), now, now)
 }
+
+fun GenerationJob.failedPermanently(now: Instant): GenerationJob =
+    copy(state = state.failedPermanently(), updatedAt = now)

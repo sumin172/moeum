@@ -1,5 +1,7 @@
 package com.moeum.integration
 
+import com.moeum.journal.domain.model.failedPermanently
+
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.conversation.application.command.*
 import com.moeum.conversation.application.publicapi.RecordDayOperations

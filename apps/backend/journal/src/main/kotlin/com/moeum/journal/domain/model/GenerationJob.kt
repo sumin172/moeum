@@ -25,9 +25,6 @@ data class GenerationJob(
     fun failed(policy: JobPolicy, now: Instant, failure: JobFailure): GenerationJob =
         copy(state = state.failed(policy, now, failure), updatedAt = now)
 
-    fun failedPermanently(now: Instant): GenerationJob =
-        copy(state = state.failedPermanently(), updatedAt = now)
-
     // 오류 또는 자동 시도 상한으로 종료한 작업을 사용자가 다시 요청한 경우
     fun restarted(now: Instant): GenerationJob = copy(state = state.restarted(now), updatedAt = now)
 
