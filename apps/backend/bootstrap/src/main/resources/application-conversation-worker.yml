@@ -1,0 +1,20 @@
+spring:
+  main:
+    web-application-type: none
+  datasource:
+    hikari:
+      maximum-pool-size: ${CONVERSATION_DB_POOL_SIZE:4}
+      minimum-idle: 1
+      pool-name: conversation-db
+
+moeum:
+  conversation:
+    response-job:
+      claim-batch-size: ${CONVERSATION_CLAIM_BATCH_SIZE:32}
+  runtime:
+    roles: conversation-worker
+    conversation-concurrency: ${CONVERSATION_WORKER_CONCURRENCY:8}
+  llm:
+    max-concurrent-calls:
+      gemini: ${CONVERSATION_LLM_CONCURRENCY:8}
+      claude: ${CONVERSATION_LLM_CONCURRENCY:8}

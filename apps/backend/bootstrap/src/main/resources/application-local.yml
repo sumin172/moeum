@@ -7,15 +7,25 @@ spring:
     username: moeum
     password: moeum
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
       idle-timeout: 30000
       max-lifetime: 1800000
       connection-timeout: 10000
-      pool-name: Moeum-HikariPool
 
 moeum:
+  auth:
+    session:
+      # 로컬 전용. 운영에서는 MOEUM_AUTH_SESSION_SIGNINGSECRET로 별도 키를 주입한다.
+      signing-secret: local-dev-only-refresh-signing-secret-32-bytes-min
   jwt:
     # 로컬 개발 전용 시크릿. 운영 환경에서는 환경변수/시크릿 매니저로 주입한다.
     secret: local-dev-only-jwt-secret-key-must-be-32-bytes-min
-    expiration-seconds: 3600
+    expiration-seconds: 900
+  google:
+    # Google Cloud Console에서 발급받은 OAuth Client ID(콤마 구분, 웹/Android/iOS 등 여러 개 등록 가능)
+    client-ids: ${GOOGLE_OAUTH_CLIENT_IDS:116753834711-vn81v2sooa2q45d4tdg444l26mmcbeam.apps.googleusercontent.com}
+  gemini:
+    # Google AI Studio(aistudio.google.com)에서 발급받은 Gemini API 키. 로컬에선 환경변수로 주입.
+    api-key: ${GEMINI_API_KEY:}
+  claude:
+    # console.anthropic.com에서 발급받은 Claude API 키. 로컬에선 환경변수로 주입.
+    api-key: ${ANTHROPIC_API_KEY:}

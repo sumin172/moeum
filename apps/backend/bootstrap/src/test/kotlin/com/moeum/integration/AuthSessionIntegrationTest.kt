@@ -1,0 +1,131 @@
+package com.moeum.integration
+
+import com.moeum.identity.interfaces.dto.AuthTokenResponse
+import com.moeum.identity.interfaces.dto.RefreshTokenRequest
+import com.moeum.integration.support.AbstractIntegrationTest
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.resttestclient.exchange
+import org.springframework.boot.resttestclient.postForEntity
+import org.springframework.http.HttpEntity
+import org.springframework.http.HttpMethod
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
+import org.springframework.jdbc.core.JdbcTemplate
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+
+/**
+ * 로그인 → refresh → 로그아웃, 재사용 감지, 동시 refresh를 실제 DB·HTTP로 검증한다.
+ */
+class AuthSessionIntegrationTest : AbstractIntegrationTest() {
+
+    @Autowired
+    lateinit var jdbcTemplate: JdbcTemplate
+
+    private fun refresh(refreshToken: String): ResponseEntity<String> =
+        restTemplate.postForEntity<String>("/api/auth/refresh", RefreshTokenRequest(refreshToken))
+
+    private fun refreshed(refreshToken: String): AuthTokenResponse =
+        restTemplate.postForEntity<AuthTokenResponse>("/api/auth/refresh", RefreshTokenRequest(refreshToken)).body!!
+
+    private fun errorCodeOf(response: ResponseEntity<String>): String =
+        Regex("\"code\"\\s*:\\s*\"([A-Z_]+)\"").find(response.body!!)!!.groupValues[1]
+
+    @Test
+    fun `세션 ID를 알아도 임의 비밀값과 변조 토큰으로 세션을 폐기할 수 없다`() {
+        val tokens = login()
+        val parts = tokens.refreshToken.split('.')
+        val secret = (if (parts[1][0] == 'A') "B" else "A") + parts[1].drop(1)
+        listOf("${parts[0]}.arbitrary", "${parts[0]}.$secret.${parts[2]}").forEach { invalid ->
+            val rejected = refresh(invalid)
+            assertThat(rejected.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+            assertThat(errorCodeOf(rejected)).isEqualTo("IDENTITY_INVALID_REFRESH_TOKEN")
+            assertThat(restTemplate.postForEntity<Void>("/api/auth/logout", RefreshTokenRequest(invalid)).statusCode)
+                .isEqualTo(HttpStatus.NO_CONTENT)
+        }
+        assertThat(refresh(tokens.refreshToken).statusCode).isEqualTo(HttpStatus.OK)
+    }
+
+    @Test
+    fun `두 세대 이전 진짜 토큰의 재사용은 DB에 세션 폐기를 커밋한다`() {
+        val first = login()
+        val second = refreshed(first.refreshToken)
+        val third = refreshed(second.refreshToken)
+        assertThat(refresh(first.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+        assertThat(refresh(third.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+    }
+
+    @Test
+    fun `갱신 직후 직전 토큰으로 로그아웃하면 최신 토큰도 거부된다`() {
+        val first = login()
+        val next = refreshed(first.refreshToken)
+        assertThat(restTemplate.postForEntity<Void>("/api/auth/logout", RefreshTokenRequest(first.refreshToken)).statusCode)
+            .isEqualTo(HttpStatus.NO_CONTENT)
+        assertThat(refresh(next.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+    }
+
+    @Test
+    fun `refresh로 받은 새 access token으로 API를 계속 쓸 수 있다`() {
+        val tokens = login()
+
+        val next = refreshed(tokens.refreshToken)
+
+        assertThat(next.refreshToken).isNotEqualTo(tokens.refreshToken)
+        val response = restTemplate.exchange<String>(
+            "/api/conversations/records", HttpMethod.GET, HttpEntity<Void>(authHeaders(next.accessToken)),
+        )
+        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+    }
+
+    @Test
+    fun `교체된 예전 refresh token이 다시 쓰이면 거부하고 세션 전체를 폐기한다`() {
+        val tokens = login()
+        val next = refreshed(tokens.refreshToken)
+        // 유예 시간(30초)이 지난 것처럼 만든다
+        jdbcTemplate.update(
+            "UPDATE identity.auth_sessions SET rotated_at = rotated_at - interval '1 minute' WHERE id = ?::uuid",
+            tokens.refreshToken.substringBefore('.'),
+        )
+
+        val reused = refresh(tokens.refreshToken)
+        assertThat(reused.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+        assertThat(errorCodeOf(reused)).isEqualTo("IDENTITY_INVALID_REFRESH_TOKEN")
+
+        // 폐기가 커밋됐으므로 최신 토큰도 더는 쓸 수 없다
+        assertThat(refresh(next.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+    }
+
+    @Test
+    fun `같은 refresh token으로 동시에 요청하면 하나만 성공하고 나머지는 이미 교체됐다는 409를 받는다`() {
+        val tokens = login()
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(4)
+
+        val statuses = executor.invokeAll(
+            (1..4).map {
+                Callable {
+                    start.await()
+                    refresh(tokens.refreshToken).statusCode
+                }
+            }.also { start.countDown() },
+        ).map { it.get() }
+        executor.shutdown()
+
+        assertThat(statuses.count { it == HttpStatus.OK }).isEqualTo(1)
+        assertThat(statuses.filter { it != HttpStatus.OK }).allMatch { it == HttpStatus.CONFLICT }
+    }
+
+    @Test
+    fun `로그아웃한 세션의 refresh token은 거부된다`() {
+        val tokens = login()
+
+        val logout = restTemplate.postForEntity<Void>("/api/auth/logout", RefreshTokenRequest(tokens.refreshToken))
+
+        assertThat(logout.statusCode).isEqualTo(HttpStatus.NO_CONTENT)
+        assertThat(refresh(tokens.refreshToken).statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+    }
+
+}

@@ -1,7 +1,7 @@
 # Gradle
 .gradle/
+.kotlin/
 build/
-!gradle/wrapper/gradle-wrapper.jar
 
 # IntelliJ IDEA
 .idea/
@@ -16,7 +16,8 @@ Thumbs.db
 
 # Spring Boot
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
+# Gradle wrapper jar는 빌드에 필요하므로 커밋한다 (*.jar 규칙보다 뒤에 있어야 예외가 적용됨)
+!apps/backend/gradle/wrapper/gradle-wrapper.jar
 
 # Logs
 *.log

@@ -1,25 +1,47 @@
 [versions]
-kotlin = "2.1.20"
-spring-boot = "3.4.3"
+kotlin = "2.4.0"
+spring-boot = "4.1.0"
 spring-dependency-management = "1.1.7"
 archunit = "1.4.2"
 jjwt = "0.13.0"
+google-api-client = "2.8.0"
+java-uuid-generator = "5.2.0"
+junit-jupiter = "6.0.3"
+junit-platform = "6.0.3"
+assertj = "3.27.7"
+testcontainers = "2.0.5"
+#noinspection UnusedVersionCatalogEntry
+spring-cloud-dependencies = "2025.1.2"
 
 [libraries]
+spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+micrometer-core = { module = "io.micrometer:micrometer-core" }
+logback-classic = { module = "ch.qos.logback:logback-classic" }
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-web = { module = "org.springframework:spring-web" }
+spring-cloud-starter-circuitbreaker-resilience4j = { module = "org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j" }
 spring-boot-starter-data-jpa = { module = "org.springframework.boot:spring-boot-starter-data-jpa" }
 spring-boot-starter-security = { module = "org.springframework.boot:spring-boot-starter-security" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
-spring-security-test = { module = "org.springframework.security:spring-security-test" }
+spring-boot-starter-flyway = { module = "org.springframework.boot:spring-boot-starter-flyway" }
+spring-boot-testcontainers = { module = "org.springframework.boot:spring-boot-testcontainers" }
+spring-boot-resttestclient = { module = "org.springframework.boot:spring-boot-resttestclient" }
+spring-boot-restclient = { module = "org.springframework.boot:spring-boot-restclient" }
+testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect" }
 postgresql = { module = "org.postgresql:postgresql" }
-flyway-core = { module = "org.flywaydb:flyway-core" }
 flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql" }
 archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
 jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
 jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
 jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
 jakarta-servlet-api = { module = "jakarta.servlet:jakarta.servlet-api" }
+jackson-databind = { module = "tools.jackson.core:jackson-databind" }
+google-api-client = { module = "com.google.api-client:google-api-client", version.ref = "google-api-client" }
+java-uuid-generator = { module = "com.fasterxml.uuid:java-uuid-generator", version.ref = "java-uuid-generator" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

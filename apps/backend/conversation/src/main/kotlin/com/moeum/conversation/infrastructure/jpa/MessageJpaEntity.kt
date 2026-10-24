@@ -1,0 +1,37 @@
+package com.moeum.conversation.infrastructure.jpa
+
+import com.moeum.conversation.domain.model.MessageRole
+import jakarta.persistence.Column
+import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
+import jakarta.persistence.Id
+import jakarta.persistence.Table
+import java.time.Instant
+import java.util.UUID
+
+@Entity
+@Table(name = "messages", schema = "conversation")
+class MessageJpaEntity(
+    @Id
+    val id: UUID,
+    @Column(name = "user_id", nullable = false)
+    val userId: UUID,
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    val role: MessageRole,
+    @Column(nullable = false)
+    val content: String,
+    @Column(name = "occurred_at", nullable = false)
+    val occurredAt: Instant,
+    @Column(name = "record_day_id", nullable = false)
+    val recordDayId: UUID,
+    @Column(name = "source_sequence", nullable = false)
+    val sourceSequence: Long,
+    @Column(name = "client_message_id")
+    val clientMessageId: UUID?,
+    @Column(name = "created_at", nullable = false)
+    val createdAt: Instant,
+    @Column(name = "stream_sequence", nullable = false)
+    val streamSequence: Long = 0,
+)

@@ -1,0 +1,13 @@
+# 로컬 개발/통합 테스트 전용. 운영에서는 실행 역할마다 별도 프로세스를 사용한다.
+spring:
+  main:
+    web-application-type: servlet
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      pool-name: local-all-db
+
+moeum:
+  runtime:
+    roles: api, conversation-worker, journal-worker

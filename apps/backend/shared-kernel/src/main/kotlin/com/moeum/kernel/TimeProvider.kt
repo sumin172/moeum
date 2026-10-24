@@ -1,10 +1,8 @@
 package com.moeum.kernel
 
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
 
+// 기록 날짜와 마감 시각은 Conversation의 RecordDay가 소유하므로 여기서는 현재 Instant만 제공한다.
 interface TimeProvider {
     fun now(): Instant
-    fun today(zoneId: ZoneId): LocalDate
 }

@@ -1,0 +1,12 @@
+spring:
+  main:
+    web-application-type: servlet
+  datasource:
+    hikari:
+      maximum-pool-size: ${API_DB_POOL_SIZE:10}
+      minimum-idle: 2
+      pool-name: api-db
+
+moeum:
+  runtime:
+    roles: api

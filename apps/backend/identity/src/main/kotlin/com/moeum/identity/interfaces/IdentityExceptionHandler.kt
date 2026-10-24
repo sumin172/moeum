@@ -1,0 +1,43 @@
+package com.moeum.identity.interfaces
+
+import com.moeum.platform.runtime.ConditionalOnRole
+import com.moeum.platform.runtime.ExecutionRole
+
+import com.moeum.identity.domain.InvalidGoogleTokenException
+import com.moeum.identity.domain.InvalidRefreshTokenException
+import com.moeum.identity.domain.RefreshTokenAlreadyRotatedException
+import com.moeum.platform.web.ErrorResponse
+import com.moeum.platform.observability.SafeFailure
+import org.slf4j.LoggerFactory
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.RestControllerAdvice
+
+@ConditionalOnRole(ExecutionRole.API)
+@RestControllerAdvice(basePackages = ["com.moeum.identity.interfaces"])
+class IdentityExceptionHandler {
+
+    private val log = LoggerFactory.getLogger(IdentityExceptionHandler::class.java)
+
+    @ExceptionHandler(InvalidGoogleTokenException::class)
+    fun handleInvalidGoogleToken(e: InvalidGoogleTokenException): ResponseEntity<ErrorResponse> {
+        log.warn("Google 로그인 실패: {}", SafeFailure.code(e))
+        return error(HttpStatus.UNAUTHORIZED, IdentityErrorCode.INVALID_GOOGLE_TOKEN)
+    }
+
+    @ExceptionHandler(InvalidRefreshTokenException::class)
+    fun handleInvalidRefreshToken(e: InvalidRefreshTokenException): ResponseEntity<ErrorResponse> {
+        log.info("refresh 거부: {}", SafeFailure.code(e))
+        return error(HttpStatus.UNAUTHORIZED, IdentityErrorCode.INVALID_REFRESH_TOKEN)
+    }
+
+    @ExceptionHandler(RefreshTokenAlreadyRotatedException::class)
+    fun handleAlreadyRotated(e: RefreshTokenAlreadyRotatedException): ResponseEntity<ErrorResponse> {
+        log.info("동시 refresh: {}", SafeFailure.code(e))
+        return error(HttpStatus.CONFLICT, IdentityErrorCode.REFRESH_TOKEN_ROTATED)
+    }
+
+    private fun error(status: HttpStatus, code: IdentityErrorCode): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(status).body(ErrorResponse(code = code.code, message = code.description))
+}
