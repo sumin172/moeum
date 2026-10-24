@@ -134,7 +134,7 @@ SQL calls/rows/실행 시간/shared hit/read는 pg_stat_statements 전후 차이
 ```
 
 GEMINI_API_KEY가 없으면 명시적으로 생략된다.
-기본 gemini-3.6-flash(또는 CAPACITY_SMOKE_GEMINI_MODEL)에 최대 두 건의 합성 요청을 보낸다.
+기본 gemini-3.1-flash-lite(또는 CAPACITY_SMOKE_GEMINI_MODEL)에 최대 두 건의 합성 요청을 보낸다.
 일반 응답과 일기 JSON 계약만 확인하며 실제 일기 원문을 보내지 않는다.
 스모크 성공은 공급자 동시 호출·RPM·TPM·비용 예산 승인이 아니다.
 
@@ -159,8 +159,19 @@ IntelliJ 실행 구성에만 지정한 환경변수는 터미널 실행에 전�
 
 각 경로는 같은 합성 사례를 사용한다. 진단용 변경은 시험에만 적용하며 운영 설정을 수정하지 않는다.
 예를 들어 `'-PjournalValidation.variant=conversation'`을 추가하면 대화 응답만 실행한다.
-`'-PjournalValidation.model=gemini-3.6-flash'`처럼 모델을 명시하면 해당 실행에만 적용한다.
+`'-PjournalValidation.model=gemini-3.1-flash-lite'`처럼 모델을 명시하면 해당 실행에만 적용한다.
 결과의 configuredModel은 YAML의 경로 설정, requestedModel은 시험에서 요청한 모델이며 observedModel은 관측값이다.
+생성기의 JSON 파싱·공백·길이 검사 실패 메시지는 journalValidationFailure로 기록한다. 공급자 오류 본문과 인증 값은 기록하지 않는다.
+
+확정 모델 Gemini 3.1 Flash Lite의 대표 입력 검증 명령은 다음과 같다.
+
+```powershell
+.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=representative' '-PjournalValidation.variant=compare' '-PjournalValidation.model=gemini-3.1-flash-lite' --console=plain --offline --no-daemon
+```
+
+이 명령은 대화·일기 각 1회, 총 2회를 호출한다. 대표·품질 사례 확인 후 최대 USER 입력으로 범위를 넓힌다.
+각 단계에서 프로젝트의 잔여 RPM·TPM·RPD와 호출 예산을 확인하며, 대용량 요청은 같은 분의 누적 입력 토큰을 고려해 간격을 둔다.
+대화 출력 150토큰·일기 출력 2,000토큰과 thinking 설정의 호환성·출력 잘림도 실제 응답으로 확인한다. 모델 검증 상태는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
 
 | journalValidation.case | 합성 입력                                                         |
 |------------------------|-------------------------------------------------------------------|
