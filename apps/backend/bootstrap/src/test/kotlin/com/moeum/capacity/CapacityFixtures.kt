@@ -10,6 +10,44 @@ import java.util.UUID
 
 /** 모든 fixture는 이 시험의 disposable DB에만 들어간다. 오래된 업무 데이터 이전 코드가 아니다. */
 class CapacityFixtures(private val jdbc: JdbcTemplate) {
+    /** 30일 경과 작업의 지속 유입을 압축 재현한다. 원본과 기록은 정리 후에도 남는다. */
+    fun terminalArrivals(records: Int) {
+        val prefix = UUID.randomUUID().toString()
+        TransactionTemplate(DataSourceTransactionManager(jdbc.dataSource!!)).executeWithoutResult {
+            jdbc.execute("""
+                INSERT INTO identity.users(id,google_id,email,created_at)
+                SELECT md5('$prefix-user'||i)::uuid,'$prefix-'||i,'retention@example.invalid',now()-interval '31 days'
+                FROM generate_series(1,$records) i;
+                INSERT INTO conversation.record_days
+                    (id,user_id,display_date,start_at,close_date,close_time,timezone,close_at,
+                     stream_sequence,source_revision,closed_at,delivery_acknowledged)
+                SELECT md5('$prefix-r'||i)::uuid,md5('$prefix-user'||i)::uuid,current_date-32,
+                    now()-interval '32 days',current_date-31,'02:00','UTC',now()-interval '31 days',
+                    39,20,now()-interval '31 days',true FROM generate_series(1,$records) i;
+                INSERT INTO conversation.messages
+                    (id,user_id,role,content,occurred_at,record_day_id,source_sequence,stream_sequence,client_message_id,created_at)
+                SELECT md5('$prefix-m'||i||':'||s||':'||r)::uuid,md5('$prefix-user'||i)::uuid,
+                    CASE WHEN r=0 THEN 'USER' ELSE 'ASSISTANT' END,repeat('synthetic ',100),
+                    now()-interval '32 days',md5('$prefix-r'||i)::uuid,s,2*s-1+r-CASE WHEN s>1 THEN 1 ELSE 0 END,
+                    CASE WHEN r=0 THEN md5('$prefix-c'||i||':'||s)::uuid END,now()-interval '32 days'
+                FROM generate_series(1,$records) i CROSS JOIN generate_series(1,20) s CROSS JOIN generate_series(0,1) r
+                WHERE NOT (s=1 AND r=1);
+                INSERT INTO conversation.response_jobs
+                    (id,user_message_id,user_id,record_day_id,input_source_revision,status,attempt_count,next_attempt_at,version,created_at,updated_at)
+                SELECT md5('$prefix-j'||i||':'||s)::uuid,md5('$prefix-m'||i||':'||s||':0')::uuid,
+                    md5('$prefix-user'||i)::uuid,md5('$prefix-r'||i)::uuid,s,
+                    CASE WHEN s=1 THEN 'FAILED' ELSE 'COMPLETED' END,1,now()-interval '31 days',1,
+                    now()-interval '32 days',now()-interval '31 days'
+                FROM generate_series(1,$records) i CROSS JOIN generate_series(1,20) s;
+                INSERT INTO journal.generation_jobs
+                    (id,user_id,record_day_id,status,attempt_count,next_attempt_at,version,created_at,updated_at)
+                SELECT md5('$prefix-g'||i)::uuid,md5('$prefix-user'||i)::uuid,md5('$prefix-r'||i)::uuid,
+                    CASE WHEN i%2=0 THEN 'FAILED' ELSE 'COMPLETED' END,1,now()-interval '31 days',1,
+                    now()-interval '32 days',CASE WHEN i%2=0 THEN now() ELSE now()-interval '31 days' END
+                FROM generate_series(1,$records) i;
+            """.trimIndent())
+        }
+    }
     fun users(count: Int): List<UserId> {
         val users = List(count) { UserId.generate() }
         jdbc.batchUpdate("INSERT INTO identity.users(id,google_id,email,created_at) VALUES (?,?,?,?)",

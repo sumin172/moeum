@@ -47,6 +47,7 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
         val futures = mutableListOf<CompletableFuture<*>>()
         val started = System.nanoTime()
         for (i in 0 until offered) {
+            check(!Thread.currentThread().isInterrupted) { "부하 주입이 중단됐습니다" }
             val planned = started + i * 1000000000L / rps
             while (System.nanoTime() < planned) LockSupport.parkNanos(minOf(planned - System.nanoTime(), 10000000))
             if (!permits.tryAcquire()) { rejected.incrementAndGet(); continue }
@@ -150,7 +151,8 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
         return response.statusCode() to mapper.readTree(response.body())
     }
 
-    fun waitingTimes(requests: Collection<CapacityRequest>, processes: List<CapacityProcess>): List<Double> {
+    fun waitingTimes(requests: Collection<CapacityRequest>, processes: List<CapacityProcess>,
+        observe: (Instant, Double) -> Unit = { _, _ -> }): List<Double> {
         val ids = requests.mapNotNull { it.jobId }.distinct()
         if (ids.isEmpty()) return emptyList()
         val created = withIds(ids) { connection, array ->
@@ -160,7 +162,11 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
             }
         }
         return processes.flatMap { process -> process.samples().mapNotNull { sample ->
-            created[sample["jobId"].asString()]?.let { Duration.between(it,Instant.parse(sample["startedAt"].asString())).toNanos()/1000000.0 }
+                created[sample["jobId"].asString()]?.let {
+                    val wait=Duration.between(it,Instant.parse(sample["startedAt"].asString())).toNanos()/1000000.0
+                    observe(it,wait)
+                    wait
+                }
         } }
     }
 
