@@ -40,7 +40,7 @@ dependencies {
 }
 
 tasks.named<Test>("test") {
-    useJUnitPlatform { excludeTags("capacity", "provider-smoke") }
+    useJUnitPlatform { excludeTags("capacity", "provider-smoke", "provider-validation") }
 }
 
 tasks.register<Test>("capacityTest") {
@@ -67,6 +67,19 @@ tasks.register<Test>("providerSmokeTest") {
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform { includeTags("provider-smoke") }
+    outputs.upToDateWhen { false }
+}
+
+tasks.register<Test>("journalProviderTest") {
+    description = "Synthetic Gemini validation; cases x repeats x variants requests, without retries"
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("provider-validation") }
+    systemProperty("journalValidation.case", providers.gradleProperty("journalValidation.case").orElse("representative").get())
+    systemProperty("journalValidation.variant", providers.gradleProperty("journalValidation.variant").orElse("baseline").get())
+    providers.gradleProperty("journalValidation.model").orNull?.let { systemProperty("journalValidation.model", it) }
+    systemProperty("journalValidation.repeats", providers.gradleProperty("journalValidation.repeats").orElse("1").get())
     outputs.upToDateWhen { false }
 }
 

@@ -119,17 +119,17 @@ moeum:
       poll-interval: PT1S
   llm:
     # 용도별 provider·모델·토큰 상한. 모델 교체나 provider 전환(예: 일기를 Claude Haiku로)은 이 설정만 바꾼다.
-    # 현재 두 용도 모두 Gemini latest alias를 사용한다.
+    # 대화·일기 모두 검증한 명시적 모델을 사용한다.
     routes:
       conversation-response:
         provider: gemini
-        model: gemini-flash-latest
+        model: gemini-3.6-flash
         # 일상 반응은 짧게(비용 제어). Gemini 2.5+는 thinking 토큰도 이 상한에 포함되므로 thinking을 끈다.
         max-output-tokens: 150
         thinking-budget: 0
       journal-generation:
         provider: gemini
-        model: gemini-flash-latest
+        model: gemini-3.6-flash
         max-output-tokens: 2000
     # provider별 동시 호출 상한(bulkhead)
     max-concurrent-calls:

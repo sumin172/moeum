@@ -19,6 +19,7 @@ class CapacityProcess(
     private val jdbcUrl: String,
     private val directory: Path,
     private val pauseDelivery: Boolean = false,
+    private val retentionEnabled: Boolean = false,
 ) : AutoCloseable {
     private val mapper = JsonMapper.builder().build()
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
@@ -61,8 +62,8 @@ class CapacityProcess(
             "--moeum.journal.delivery.initial-delay=${if (pauseDelivery) "PT24H" else "PT0S"}",
             // 전달 경계 시험에서는 등록 직후 generation 선점이 먼저 일어나지 않게 격리한다.
             "--moeum.journal.generation-job.initial-delay=${if (pauseDelivery) "PT24H" else "PT0S"}",
-            "--moeum.jobs.retention.initial-delay=PT24H",
-            "--moeum.jobs.retention.interval=PT24H",
+            "--moeum.jobs.retention.initial-delay=${if (retentionEnabled) "PT1M" else "PT24H"}",
+            "--moeum.jobs.retention.interval=${if (retentionEnabled) "PT10S" else "PT24H"}",
             "--logging.level.org.springframework=WARN",
             "--logging.level.org.hibernate=WARN",
             "--logging.level.com.moeum=INFO",
