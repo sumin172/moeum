@@ -20,7 +20,7 @@ class ProviderSmokeTest {
     @Test fun `configured Gemini route accepts text and journal JSON synthetic requests`() {
         val properties = GeminiProperties(apiKey=System.getenv("GEMINI_API_KEY"))
         val provider = GeminiProvider(GeminiClientConfig().geminiRestClient(properties),properties)
-        val model = System.getenv("CAPACITY_SMOKE_GEMINI_MODEL") ?: "gemini-3.6-flash"
+        val model = System.getenv("CAPACITY_SMOKE_GEMINI_MODEL") ?: "gemini-3.1-flash-lite"
         val observations = mutableListOf<Map<String,Any?>>()
         val client = RoutingLlmClient(listOf(provider),LlmProperties(routes=mapOf(
             "smoke" to LlmRoute("gemini",model,300,thinkingBudget=0),
