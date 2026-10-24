@@ -134,8 +134,81 @@ SQL calls/rows/실행 시간/shared hit/read는 pg_stat_statements 전후 차이
 ```
 
 GEMINI_API_KEY가 없으면 명시적으로 생략된다.
-설정된 gemini-flash-latest(또는 CAPACITY_SMOKE_GEMINI_MODEL)에 최대 두 건의 합성 요청을 보낸다.
+기본 gemini-3.6-flash(또는 CAPACITY_SMOKE_GEMINI_MODEL)에 최대 두 건의 합성 요청을 보낸다.
 일반 응답과 일기 JSON 계약만 확인하며 실제 일기 원문을 보내지 않는다.
 스모크 성공은 공급자 동시 호출·RPM·TPM·비용 예산 승인이 아니다.
+
+## 실제 일기 생성기 검증
+
+```powershell
+.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=representative' --console=plain --offline --no-daemon
+```
+
+기본 실행은 지정한 합성 사례로 일기 생성 요청 한 건만 보낸다. 자동 재시도와 DB·스케줄러는 실행하지 않는다.
+일반 test·capacityTest·providerSmokeTest에서는 이 시험을 실행하지 않는다.
+환경변수·JVM 속성 다음으로 application-local.yml, application-journal-worker.yml, application.yml 순으로 설정을 읽는다.
+기본 실행은 설정된 journal-generation Gemini 경로와 실제 LlmJournalGenerator의 프롬프트·JSON 검증을 사용한다. 모델·출력·thinking·타임아웃은 해당 경로의 설정을 따른다.
+인증 키는 환경변수 GEMINI_API_KEY 또는 로컬 설정의 moeum.gemini.api-key로 제공하며 출력하지 않는다.
+IntelliJ 실행 구성에만 지정한 환경변수는 터미널 실행에 전달되지 않는다.
+
+| journalValidation.variant | 실행 경로                                                                          |
+|---------------------------|------------------------------------------------------------------------------------|
+| baseline (기본값)         | 실제 일기 생성기 한 번                                                             |
+| conversation              | 실제 대화 응답기 한 번. conversation-response 설정 사용                            |
+| compare                   | 대화 응답기와 일기 생성기를 순서대로 각각 한 번. 앞 요청이 실패해도 다음 요청 실행 |
+
+각 경로는 같은 합성 사례를 사용한다. 진단용 변경은 시험에만 적용하며 운영 설정을 수정하지 않는다.
+예를 들어 `'-PjournalValidation.variant=conversation'`을 추가하면 대화 응답만 실행한다.
+`'-PjournalValidation.model=gemini-3.6-flash'`처럼 모델을 명시하면 해당 실행에만 적용한다.
+결과의 configuredModel은 YAML의 경로 설정, requestedModel은 시험에서 요청한 모델이며 observedModel은 관측값이다.
+
+| journalValidation.case | 합성 입력                                                         |
+|------------------------|-------------------------------------------------------------------|
+| representative         | 산책·발표·저녁의 대표 대화. 장소 정정과 짧은 부정 포함            |
+| free-max               | 설정된 무료 횟수 × 메시지 최대 길이의 USER 입력 + ASSISTANT 문맥  |
+| premium-max            | 설정된 구독 횟수 × 메시지 최대 길이의 USER 입력 + ASSISTANT 문맥  |
+| negation               | 면접·미확정 결과·동생과의 식사. AI의 잘못된 해석에 대한 부정 포함 |
+| changed-plans          | 취소한 등산·영화와 실제 도서관 방문·지갑 회수                     |
+| quality                | representative, negation, changed-plans를 차례로 실행             |
+
+`journalValidation.repeats`는 사례별 반복 횟수이며 기본 1, 상한 3이다.
+호출 수는 사례 수 × 반복 횟수 × variant 수다. quality·compare·repeats=2는 12회 호출한다.
+429·503도 결과에 남기며 자동 재호출하지 않는다. 이때 생성 품질과 공급자 가용성 판정을 구분한다.
+
+최대 사례도 마지막 USER까지만 포함한다. AI 문맥은 합성 가정이며 전체 토큰 수의 최악 조건을 보장하지 않는다.
+대표 대화의 반복 검증은 같은 representative 사례로 별도 실행한다.
+결과는 build/capacity/journal-provider 아래에 입력 해시·문자 수·관측 모델·프롬프트 버전·토큰 수·종료 사유·지연과 합성 일기를 기록한다.
+공급자 응답이 없으면 observedModel과 토큰 수는 null이다. 요청 모델은 requestedModel에 남긴다.
+요청 실패도 안전한 오류 코드와 관측 정보를 남긴다. 결과 파일에는 키나 실제 사용자 원문을 기록하지 않는다.
+HTTP 오류는 기존 Spring 오류 처리기로 변환하고, JSON API 상태·Content-Type·초 단위 Retry-After와 제한된 원인 분류만 httpFailure에 기록한다.
+모델 수용량 부족·무료 등급 제약·모델 미지원·비활성화와 JSON API 오류가 아닌 응답을 구분한다. 오류 본문과 인증 정보는 기록하지 않는다.
+시험 통과는 생성기의 형식·길이 검증 통과를 의미한다. 품질은 expectedFacts와 본문을 비교해 수동으로 검토하고 [검증 현황](CAPACITY_RESULTS.md)에 기록한다.
+기대 사실은 사례별 expectedFacts를 따른다. 대표 사례는 서울숲 산책, 칭찬받지 않은 발표 완료, 민지와 버섯 파스타를 먹으며 느낀 안도감이다.
+한도 초과·타임아웃·잘림은 각각 구분하고, 실패한 요청을 같은 실행에서 반복하지 않는다.
+
+## 운영 주기의 지속 정리 검증
+
+```powershell
+.\gradlew.bat :bootstrap:capacityTest --tests com.moeum.capacity.RetentionCapacityTest '-Pcapacity.retention=true' '-Pcapacity.durationSeconds=1800' '-Pcapacity.warmupSeconds=30' '-Pcapacity.rps=25' '-Pcapacity.historyRecords=10000' '-Pcapacity.journalBurst=100' '-Pcapacity.drainSeconds=180' --console=plain --offline --no-daemon
+```
+
+명시적인 capacity.retention=true에서만 실행한다. 일반 부하 시험에 자동으로 추가되지 않는다.
+API·대화·일기 JVM은 각각 한 개이며 conversationReplicas는 1만 허용한다.
+시험 전용 PostgreSQL(CPU 4, 메모리 4GiB)과 API·대화·일기 JVM(heap 각 512MiB)을 사용한다.
+DB 풀·슬롯·fake 지연은 CapacitySettings에 지정한 값을 보고서에 남긴다. 별도 설정이 없으면 풀 10/4/2, 슬롯 8/2, fake 지연 100/200ms다.
+정리 워커는 운영의 최초 1분 대기·10초 간격·실행당 최대 10배치/2초 예산으로 동작한다. /clean 수동 호출은 사용하지 않는다.
+워밍업 접수·응답을 완료한 후 측정하며 워밍업 요청은 지연 통계에서 제외한다.
+30일 경과 작업의 유입을 압축 재현하기 위해 10초마다 닫힌 기록 13개·USER 260개·ASSISTANT 247개·종료 응답 작업 260개·종료 일기 작업 13개를 직접 저장한다.
+FAILED 응답과 FAILED 일기 작업을 포함하며 실패 일기는 created_at만 30일 경과하고 updated_at은 최근인 사례도 포함한다.
+이는 실제 30일 대기를 검증하는 시험이 아니며 API 부하와 별도의 만료 작업 처리 부하다.
+중간에 일기 워커를 min(60초, durationSeconds/6) 동안 중단한 후 재기동하며, 종료 후 최대 drainSeconds 동안 정리와 대화 완료를 기다린다.
+30분 시험의 중단 시간은 60초다. 3분 이하의 도구 확인 시험은 초기 3분 이후의 안정 구간 적체 상한 판정을 포함하지 않는다.
+최종 만료 작업 0건, 모든 접수·응답 완료, 원본 보존, 보존 기간 전 응답 작업 유지와 기존 API·응답 대기 목표를 검사한다.
+report.json과 samples.ndjson은 build/capacity/retention-* 아래에 생성한다. 시험 실행 중 클래스패스를 다시 빌드하지 않는다.
+재기동 대기는 별도 시험 스레드에서 수행하며 API·만료 작업 주입은 계속한다.
+대화·일기 선점 poll은 기존 부하 도구의 50/100ms 설정이며 운영 기본 1초와 다르다.
+전체 응답 대기와 30초 구간별 대기를 함께 보고하고, 표본에 활성 응답 작업 수·DB 대기 유형을 기록한다.
+워밍업의 DB 대기는 warmup-waits.ndjson에 초 단위로 남긴다. 접수 실패는 즉시 실패로 판정하며 실패 요청의 응답 완료를 기다리지 않는다.
+30분 결과는 그 데이터 규모·유입량에서의 검증이며 장기 물리 저장 공간이나 실제 공급자 처리량의 승인이 아니다.
 
 측정 상태와 승인 범위는 [부하 기준](CAPACITY.md)과 실행 결과 보고서를 따른다.
