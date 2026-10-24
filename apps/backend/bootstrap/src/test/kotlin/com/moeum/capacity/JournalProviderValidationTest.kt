@@ -8,6 +8,7 @@ import com.moeum.conversation.infrastructure.ai.LlmConversationResponder
 import com.moeum.identity.infrastructure.config.ConversationPlanProperties
 import com.moeum.journal.infrastructure.ai.JOURNAL_GENERATION_PURPOSE
 import com.moeum.journal.infrastructure.ai.LlmJournalGenerator
+import com.moeum.journal.infrastructure.ai.JournalGenerationException
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.llm.LlmProperties
@@ -130,6 +131,8 @@ class JournalProviderValidationTest {
             "assistantChars" to messages.filter { it.role == "ASSISTANT" }.sumOf { it.content.length },
             "generationCalls" to events.size, "generated" to generated.isSuccess, "latencyMs" to elapsedMs,
             "finishReason" to event?.finishReason, "errorCode" to error?.let(SafeFailure::code),
+            // 생성기가 작성한 고정 진단만 보존한다. 공급자 예외 본문·원문은 포함하지 않는다.
+            "journalValidationFailure" to (error as? JournalGenerationException)?.message,
             "httpFailure" to httpFailure,
             "inputTokens" to event?.inputTokens?.takeIf { hasProviderResult },
             "outputTokens" to event?.outputTokens?.takeIf { hasProviderResult },
