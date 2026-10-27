@@ -108,6 +108,8 @@ FAILED 대화 작업은 최근 실패부터, FAILED 일기 작업은 작업 생�
 ## 검증
 
 GeminiProviderTest와 ClaudeProviderTest는 정상 종료·잘림·차단·종료 사유 누락·생략된 사용량의 응답 해석을 검사한다.
+
+CloudflareProviderTest는 인증·역할·출력 상한·소프트 추론 제어의 요청 매핑과 정상 종료·잘림·차단·종료 사유 누락·사용량·추론 블록의 응답 해석을 검사한다. 실제 공급자 성능 검증과는 별개다.
 RoutingLlmClientTest는 미완료 출력 거절·오류 분류·실제 모델과 토큰 수의 실패 관측 보존을 검사한다.
 GeminiProviderTest는 라우터의 출력 판정 실패가 공급자 서킷의 실패 횟수에 반영되지 않는지도 검사한다.
 LlmTelemetryTest와 NonBlockingConsoleAppenderTest는 수집 실패·포화·종료·유실을 검사한다.

@@ -71,7 +71,7 @@ tasks.register<Test>("providerSmokeTest") {
 }
 
 tasks.register<Test>("journalProviderTest") {
-    description = "Synthetic Gemini validation; cases x repeats x variants requests, without retries"
+    description = "Synthetic configured-provider validation; cases x repeats x variants requests, without retries"
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath

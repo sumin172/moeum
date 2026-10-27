@@ -146,9 +146,24 @@ GEMINI_API_KEY가 없으면 명시적으로 생략된다.
 
 기본 실행은 지정한 합성 사례로 일기 생성 요청 한 건만 보낸다. 자동 재시도와 DB·스케줄러는 실행하지 않는다.
 일반 test·capacityTest·providerSmokeTest에서는 이 시험을 실행하지 않는다.
-환경변수·JVM 속성 다음으로 application-local.yml, application-journal-worker.yml, application.yml 순으로 설정을 읽는다.
+환경변수·JVM 속성 다음으로 application-local.yml, 해당 경로의 worker 설정, application.yml 순으로 설정을 읽는다.
 기본 실행은 설정된 journal-generation Gemini 경로와 실제 LlmJournalGenerator의 프롬프트·JSON 검증을 사용한다. 모델·출력·thinking·타임아웃은 해당 경로의 설정을 따른다.
 인증 키는 환경변수 GEMINI_API_KEY 또는 로컬 설정의 moeum.gemini.api-key로 제공하며 출력하지 않는다.
+대화 경로는 Cloudflare도 지원하며 로컬 `moeum.cloudflare` 또는 `CLOUDFLARE_ACCOUNT_ID`·`CLOUDFLARE_API_TOKEN`을 사용한다.
+대화 품질 합성 사례 3건을 각각 한 번 실행하는 명령은 다음과 같다. DB·스케줄러·자동 재시도는 실행하지 않는다.
+
+```powershell
+.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=quality' '-PjournalValidation.variant=conversation' --console=plain --offline --no-daemon
+```
+
+분리 경로의 확장 검증은 다음 명령으로 실행한다. 품질 3사례×3회, 긴 문맥 2회, 범위 이탈·추론 유도 각 1회, 실제 응답 누적 10턴과 일기 1회, 동시 대화 8회를 포함해 총 32회다. 이 모드에서는 case·repeats 대신 고정된 검증 구성을 사용한다.
+
+```powershell
+.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.variant=extended' --console=plain --offline --no-daemon
+```
+
+동시 8회는 개별 클라이언트로 공급자를 호출하므로 서버·DB 부하 시험이나 장시간 처리량 보장은 아니다.
+수집한 합성 응답의 사실·감정 충실도와 말투는 수동으로 검토한다. 자동 성공은 정상 종료·응답 생성·일기 JSON 계약까지의 판정이다.
 IntelliJ 실행 구성에만 지정한 환경변수는 터미널 실행에 전달되지 않는다.
 
 | journalValidation.variant | 실행 경로                                                                          |
@@ -157,16 +172,16 @@ IntelliJ 실행 구성에만 지정한 환경변수는 터미널 실행에 전�
 | conversation              | 실제 대화 응답기 한 번. conversation-response 설정 사용                            |
 | compare                   | 대화 응답기와 일기 생성기를 순서대로 각각 한 번. 앞 요청이 실패해도 다음 요청 실행 |
 
-각 경로는 같은 합성 사례를 사용한다. 진단용 변경은 시험에만 적용하며 운영 설정을 수정하지 않는다.
+baseline·conversation·compare는 같은 합성 사례를 사용한다. 진단용 변경은 시험에만 적용하며 운영 설정을 수정하지 않는다.
 예를 들어 `'-PjournalValidation.variant=conversation'`을 추가하면 대화 응답만 실행한다.
-`'-PjournalValidation.model=gemini-3.1-flash-lite'`처럼 모델을 명시하면 해당 실행에만 적용한다.
+`'-PjournalValidation.variant=baseline' '-PjournalValidation.model=gemini-3.1-flash-lite'`처럼 일기 경로의 모델을 명시하면 해당 실행에만 적용한다. 모델 override는 공급자를 바꾸지 않으므로 선택한 경로의 공급자가 지원하는 모델이어야 한다.
 결과의 configuredModel은 YAML의 경로 설정, requestedModel은 시험에서 요청한 모델이며 observedModel은 관측값이다.
 생성기의 JSON 파싱·공백·길이 검사 실패 메시지는 journalValidationFailure로 기록한다. 공급자 오류 본문과 인증 값은 기록하지 않는다.
 
-확정 모델 Gemini 3.1 Flash Lite의 대표 입력 검증 명령은 다음과 같다.
+설정된 대화·일기 경로의 대표 입력 검증 명령은 다음과 같다.
 
 ```powershell
-.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=representative' '-PjournalValidation.variant=compare' '-PjournalValidation.model=gemini-3.1-flash-lite' --console=plain --offline --no-daemon
+.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=representative' '-PjournalValidation.variant=compare' --console=plain --offline --no-daemon
 ```
 
 이 명령은 대화·일기 각 1회, 총 2회를 호출한다. 대표·품질 사례 확인 후 최대 USER 입력으로 범위를 넓힌다.
