@@ -98,7 +98,7 @@ class RoutingLlmClient(
                 inputTokens = result?.inputTokens ?: 0,
                 outputTokens = result?.outputTokens ?: 0,
                 cachedInputTokens = result?.cachedInputTokens ?: 0,
-                finishReason = result?.finishReason?.let { if (it in setOf("STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "end_turn", "max_tokens", "stop_sequence", "refusal", "model_context_window_exceeded")) it else "OTHER" },
+                finishReason = result?.finishReason?.let { if (it in setOf("stop", "length", "content_filter", "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "end_turn", "max_tokens", "stop_sequence", "refusal", "model_context_window_exceeded")) it else "OTHER" },
             ))
         }
     }

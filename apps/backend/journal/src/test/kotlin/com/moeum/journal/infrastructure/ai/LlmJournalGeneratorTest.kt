@@ -66,7 +66,7 @@ class LlmJournalGeneratorTest {
             MessageSnapshot(role, content, Instant.parse("2026-08-02T10:00:00Z").plusSeconds(i.toLong()))
         })
         val request = client.request!!
-        assertThat(request.promptVersion).isEqualTo("v3")
+        assertThat(request.promptVersion).isEqualTo("v4")
         assertThat(request.systemPrompt).contains("USER 발화만", "ASSISTANT 발화는", "추측이나 제안 자체를 사실로 쓰지", "정정")
         val transcript = request.messages.single().content
         val positions = dialogue.map { (role, content) -> transcript.indexOf("$role: $content") }
