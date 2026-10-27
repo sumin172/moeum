@@ -2,6 +2,27 @@
 
 같은 backend jar를 API·대화 워커·일기 워커로 각각 실행한다.
 
+## Cloudflare 대화 연결
+
+대화 기본 경로는 `@cf/qwen/qwen3-30b-a3b-fp8`, 일기는 Gemini다. 자동 공급자 폴백은 없다.
+대화 워커를 실행하는 PowerShell 또는 배포 환경에 다음 값을 지정한다. API Token은 해당 계정의 Workers AI 실행 권한이 필요하다.
+
+```powershell
+$env:CLOUDFLARE_ACCOUNT_ID = "계정 ID"
+$env:CLOUDFLARE_API_TOKEN = "API Token"
+```
+
+설정 경로는 `moeum.cloudflare.account-id`, `moeum.cloudflare.api-token`이다.
+로컬에서는 `application-local.yml`의 `moeum.cloudflare`에 입력할 수 있다. `${CLOUDFLARE_ACCOUNT_ID:}`와 `${CLOUDFLARE_API_TOKEN:}`의 콜론 뒤에 기본값을 넣으면 환경변수가 없을 때 사용한다.
+키를 저장소에 기록하지 않는다. 누락된 인증은 호출 시 영구 인증 실패로 처리한다.
+연결·읽기 제한은 각각 기본 3초·60초이며 `moeum.cloudflare.connection-timeout-ms`, `read-timeout-ms`로 조정한다.
+`CONVERSATION_LLM_CONCURRENCY`는 Cloudflare 동시 호출 상한에도 적용한다.
+`thinking-budget: 0`은 마지막 사용자 메시지에 `/no_think`를 추가하는 소프트 제어다. 강제 비활성화를 보장하지 않는다.
+완결된 선두 추론 블록은 응답에서 제거하고, 미완결 추론·출력 잘림·비정상 종료는 저장하지 않는다.
+토큰 수는 공급자의 전체 completion 사용량을 기록하므로 숨긴 추론도 사용량에서 제외하지 않는다.
+일시적인 HTTP 오류는 기존 작업 정책의 제한된 재시도를 따른다. 일일 무료량 소진을 별도로 저장하거나 초기화까지 자동 중단하는 기능은 없다.
+실제 키를 사용한 합성 대화·일기 연결·8개 동시 호출의 검증 범위와 무료량 계산은 [검증 현황](CAPACITY_RESULTS.md)을 따른다. 무료 티어의 가용성이나 실제 사용자의 입력 분포를 보장하지 않는다.
+
 ## 실행
 
 로컬 DB가 준비된 상태에서 각 명령을 별도 터미널에서 실행한다.
