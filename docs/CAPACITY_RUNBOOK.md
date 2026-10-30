@@ -237,4 +237,4 @@ report.json과 samples.ndjson은 build/capacity/retention-* 아래에 생성한�
 워밍업의 DB 대기는 warmup-waits.ndjson에 초 단위로 남긴다. 접수 실패는 즉시 실패로 판정하며 실패 요청의 응답 완료를 기다리지 않는다.
 30분 결과는 그 데이터 규모·유입량에서의 검증이며 장기 물리 저장 공간이나 실제 공급자 처리량의 승인이 아니다.
 
-측정 상태와 승인 범위는 [부하 기준](CAPACITY.md)과 실행 결과 보고서를 따른다.
+합격 기준은 [시험 기준](CAPACITY.md), 측정 상태와 승인 범위는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
