@@ -1,28 +1,54 @@
 package com.moeum.integration
 
 import com.moeum.MoeumApplication
+import com.moeum.conversation.application.command.ResponseJobExecutor
+import com.moeum.conversation.infrastructure.ai.LlmConversationResponder
+import com.moeum.conversation.infrastructure.scheduling.ResponseJobScheduler
+import com.moeum.conversation.infrastructure.scheduling.TerminalResponseJobCleaner
+import com.moeum.conversation.interfaces.ConversationController
+import com.moeum.identity.domain.GoogleIdTokenVerifierPort
+import com.moeum.identity.infrastructure.config.GoogleClientProperties
+import com.moeum.identity.infrastructure.security.RefreshTokenCodec
+import com.moeum.identity.interfaces.AuthController
+import com.moeum.journal.application.command.GenerationExecutor
+import com.moeum.journal.application.command.RecordDeliveryWorker
 import com.moeum.journal.domain.GenerationJobRepository
+import com.moeum.journal.infrastructure.ai.LlmJournalGenerator
+import com.moeum.journal.infrastructure.scheduling.GenerationScheduler
+import com.moeum.journal.infrastructure.scheduling.TerminalGenerationJobCleaner
+import com.moeum.journal.interfaces.JournalController
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
 import com.moeum.platform.llm.LlmClient
 import com.moeum.platform.llm.LlmMessage
+import com.moeum.platform.llm.LlmProperties
 import com.moeum.platform.llm.LlmRequest
 import com.moeum.platform.llm.LlmRoute
 import com.moeum.platform.llm.provider.LlmProvider
 import com.moeum.platform.llm.provider.LlmProviderResult
+import com.moeum.platform.llm.provider.claude.ClaudeProperties
+import com.moeum.platform.llm.provider.cloudflare.CloudflareProperties
+import com.moeum.platform.llm.provider.gemini.GeminiProperties
+import com.moeum.platform.observability.LlmTelemetry
+import com.moeum.platform.runtime.WorkerPool
+import com.moeum.platform.security.config.JwtProperties
 import com.moeum.platform.security.jwt.JwtProvider
 import com.zaxxer.hikari.HikariDataSource
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.getBean
 import org.springframework.beans.factory.getBeansWithAnnotation
 import org.springframework.boot.WebApplicationType
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.context.ConfigurableApplicationContext
+import org.springframework.core.env.StandardEnvironment
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.queryForObject
 import org.springframework.scheduling.config.TaskManagementConfigUtils
+import org.springframework.security.web.SecurityFilterChain
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.context.support.StandardServletEnvironment
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 import java.net.URI
@@ -36,7 +62,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-/** 별도 ApplicationContext/DB pool/LLM limiter로 실제 배포 역할 구성을 검증한다. */
+/**
+ * 별도 ApplicationContext/DB pool/LLM limiter로 실제 배포 역할 구성을 검증한다.
+ * local 프로필·OS 환경변수·시스템 속성을 제외하고 역할 프로필과 명시한 설정만으로 기동한다.
+ */
 class WorkerRoleIsolationIntegrationTest {
     @Test
     fun `일기 워커 지연과 종료 중에도 API와 대화가 진행되고 재기동 후 만료 리스를 회수한다`() {
@@ -44,25 +73,18 @@ class WorkerRoleIsolationIntegrationTest {
             postgres.start()
             val provider = BlockingJournalProvider()
             val contexts = mutableListOf<ConfigurableApplicationContext>()
-            fun start(role: String): ConfigurableApplicationContext = SpringApplicationBuilder(MoeumApplication::class.java)
-                .profiles("local", role)
-                .web(if (role == "api") WebApplicationType.SERVLET else WebApplicationType.NONE)
-                .initializers({ context -> context.beanFactory.registerSingleton("isolationProvider", provider) })
-                .run(
-                    "--spring.datasource.url=${postgres.jdbcUrl}",
-                    "--spring.datasource.username=${postgres.username}",
-                    "--spring.datasource.password=${postgres.password}",
-                    "--server.port=0",
+            fun start(role: String): ConfigurableApplicationContext = launch(
+                postgres, role, provider.takeIf { role != "api" },
+                requiredSettings.getValue(role) + listOf(
                     "--moeum.llm.routes.conversation-response.provider=isolation",
                     "--moeum.llm.routes.journal-generation.provider=isolation",
                     "--moeum.llm.max-concurrent-calls.isolation=${if (role == "journal-worker") 2 else 8}",
                     "--moeum.conversation.response-job.poll-interval=PT0.1S",
                     "--moeum.journal.generation-job.poll-interval=PT0.1S",
                     "--moeum.journal.generation-job.backoff=1h",
-                    "--moeum.journal.delivery.initial-delay=PT1H",
                     "--moeum.runtime.shutdown-timeout=0s",
-                    "--logging.level.com.moeum=INFO",
-                ).also { contexts += it }
+                ),
+            ).also { contexts += it }
 
             try {
                 val api = start("api")
@@ -85,15 +107,15 @@ class WorkerRoleIsolationIntegrationTest {
                     userId.value,
                 )!!
 
-                assertThat(api.getBeansOfType(LlmClient::class.java)).isEmpty()
-                assertThat(api.containsBean(TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME)).isFalse()
+                assertRole(api, "api")
                 assertThat(api.getBean<HikariDataSource>().maximumPoolSize).isEqualTo(10)
                 assertThat(send().statusCode()).isEqualTo(200)
                 assertThat(provider.conversationCalls.get()).isZero()
                 assertThat(completedResponses()).isZero()
 
                 val conversation = start("conversation-worker")
-                assertWorker(conversation, "responseJobExecutor", "generationExecutor", 4)
+                assertRole(conversation, "conversation-worker")
+                assertThat(conversation.getBean<HikariDataSource>().maximumPoolSize).isEqualTo(4)
                 await { completedResponses() == 1 }
 
                 val recordId = jdbc.queryForObject<java.util.UUID>("SELECT id FROM conversation.record_days WHERE user_id = ?",
@@ -103,7 +125,8 @@ class WorkerRoleIsolationIntegrationTest {
                     com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, RecordDayId(recordId), Instant.now().minusSeconds(1), Instant.now()),
                 )
                 val journal = start("journal-worker")
-                assertWorker(journal, "generationExecutor", "responseJobExecutor", 2)
+                assertRole(journal, "journal-worker")
+                assertThat(journal.getBean<HikariDataSource>().maximumPoolSize).isEqualTo(2)
                 assertThat(provider.journalStarted.await(5, TimeUnit.SECONDS)).isTrue()
 
                 assertThat(send().statusCode()).isEqualTo(200)
@@ -142,12 +165,105 @@ class WorkerRoleIsolationIntegrationTest {
         }
     }
 
-    private fun assertWorker(context: ConfigurableApplicationContext, executor: String, excluded: String, pool: Int) {
-        assertThat(context.getBeansWithAnnotation<RestController>()).isEmpty()
-        assertThat(context.getBeansOfType(JwtProvider::class.java)).isEmpty()
-        assertThat(context.containsBean(executor)).isTrue()
-        assertThat(context.containsBean(excluded)).isFalse()
-        assertThat(context.getBean<HikariDataSource>().maximumPoolSize).isEqualTo(pool)
+    @Test
+    fun `각 역할은 다른 역할의 설정 없이 기동하고 그 역할의 빈과 설정 검증을 활성화하지 않는다`() {
+        PostgreSQLContainer(DockerImageName.parse("postgres:17-alpine")).use { postgres ->
+            postgres.start()
+            // 아래 무효 값이 해당 역할에서는 실제로 기동을 거부함을 먼저 확인해 미등록 검증이 공허하지 않게 한다.
+            assertThatThrownBy { launch(postgres, "api", null, requiredSettings.getValue("api") - JWT_SECRET).close() }
+                .hasStackTraceContaining("moeum.jwt")
+            assertThatThrownBy { launch(postgres, "journal-worker", null, requiredSettings.getValue("journal-worker") + invalidLlmSettings).close() }
+                .hasStackTraceContaining("LLM 동시 호출 상한은 양수여야 합니다")
+            assertThatThrownBy { launch(postgres, "api", null, requiredSettings.getValue("api") - SIGNING_SECRET + invalidApiSettings).close() }
+                .hasStackTraceContaining("refresh token signing secret")
+
+            // API: LLM 키 없이, 무효한 LLM 설정이 있어도 기동한다.
+            launch(postgres, "api", null, requiredSettings.getValue("api") + invalidLlmSettings).use { assertRole(it, "api") }
+            // 워커: JWT·Google 설정 없이, 무효한 refresh token 서명 키가 있어도 기동한다.
+            listOf("conversation-worker", "journal-worker").forEach { role ->
+                launch(postgres, role, null, requiredSettings.getValue(role) + invalidApiSettings).use { assertRole(it, role) }
+            }
+        }
+    }
+
+    private fun launch(
+        postgres: PostgreSQLContainer,
+        role: String,
+        provider: LlmProvider?,
+        settings: List<String>,
+    ): ConfigurableApplicationContext {
+        val api = role == "api"
+        val environment = (if (api) StandardServletEnvironment() else StandardEnvironment()).apply {
+            propertySources.remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME)
+            propertySources.remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME)
+        }
+        return SpringApplicationBuilder(MoeumApplication::class.java)
+            .environment(environment)
+            .profiles(role)
+            .web(if (api) WebApplicationType.SERVLET else WebApplicationType.NONE)
+            .initializers({ context -> provider?.let { context.beanFactory.registerSingleton("isolationProvider", it) } })
+            .run(
+                "--spring.datasource.url=${postgres.jdbcUrl}",
+                "--spring.datasource.username=${postgres.username}",
+                "--spring.datasource.password=${postgres.password}",
+                "--server.port=0",
+                "--moeum.journal.delivery.initial-delay=PT1H",
+                "--logging.level.com.moeum=INFO",
+                *settings.toTypedArray(),
+            )
+    }
+
+    /** 역할이 기동에 필요로 하는 설정만 명시한다. */
+    private val requiredSettings = mapOf(
+        "api" to listOf(
+            JWT_SECRET,
+            SIGNING_SECRET,
+            "--moeum.google.client-ids=isolation-client",
+        ),
+        "conversation-worker" to LLM_KEYS,
+        "journal-worker" to LLM_KEYS,
+    )
+    private val invalidLlmSettings = listOf("--moeum.llm.max-concurrent-calls.gemini=0")
+    private val invalidApiSettings = listOf("--moeum.auth.session.signing-secret=short")
+
+    private val apiBeans = listOf(
+        AuthController::class.java, ConversationController::class.java, JournalController::class.java,
+        SecurityFilterChain::class.java, JwtProvider::class.java, JwtProperties::class.java,
+        RefreshTokenCodec::class.java, GoogleIdTokenVerifierPort::class.java, GoogleClientProperties::class.java,
+    )
+    private val workerBeans = listOf(
+        LlmClient::class.java, LlmProvider::class.java, LlmProperties::class.java, LlmTelemetry::class.java,
+        GeminiProperties::class.java, ClaudeProperties::class.java, CloudflareProperties::class.java,
+        WorkerPool::class.java,
+    )
+    private val conversationWorkerBeans = listOf(
+        ResponseJobScheduler::class.java, ResponseJobExecutor::class.java,
+        LlmConversationResponder::class.java, TerminalResponseJobCleaner::class.java,
+    )
+    private val journalWorkerBeans = listOf(
+        GenerationScheduler::class.java, GenerationExecutor::class.java, RecordDeliveryWorker::class.java,
+        LlmJournalGenerator::class.java, TerminalGenerationJobCleaner::class.java,
+    )
+
+    private fun assertRole(context: ConfigurableApplicationContext, role: String) {
+        val expected = when (role) {
+            "api" -> apiBeans
+            "conversation-worker" -> workerBeans + conversationWorkerBeans
+            else -> workerBeans + journalWorkerBeans
+        }
+        (apiBeans + workerBeans + conversationWorkerBeans + journalWorkerBeans).forEach { type ->
+            val names = context.getBeanNamesForType(type)
+            if (type in expected) assertThat(names).describedAs("$role: ${type.simpleName}").isNotEmpty()
+            else assertThat(names).describedAs("$role: ${type.simpleName}").isEmpty()
+        }
+        assertThat(context.containsBean(TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME)).isEqualTo(role != "api")
+        if (role != "api") assertThat(context.getBeansWithAnnotation<RestController>()).isEmpty()
+    }
+
+    private companion object {
+        const val JWT_SECRET = "--moeum.jwt.secret=isolation-jwt-secret-must-be-32-bytes-min"
+        const val SIGNING_SECRET = "--moeum.auth.session.signing-secret=isolation-refresh-signing-secret-32-bytes"
+        val LLM_KEYS = listOf("--moeum.gemini.api-key=isolation", "--moeum.claude.api-key=isolation")
     }
 
     private fun await(condition: () -> Boolean) {

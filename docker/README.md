@@ -17,7 +17,7 @@ docker compose up -d
 로컬 데이터 삭제나 volume 초기화는 사용자가 명시적으로 요청한 경우에만 수행한다.
 
 Redis·Kafka·Object Storage는 현재 필수 인프라가 아니다.
-필요성과 부하 측정에 따라 도입을 판단한다.
-목표 실행 역할과 자원 격리는 [아키텍처](../docs/ARCHITECTURE.md),
-부하 검증 계획은 [부하 기준](../docs/CAPACITY.md)을 참고한다.
+작업 전달에 메시지 브로커를 쓰지 않는 근거와 재검토 조건은 [DB 작업 큐](../docs/engineering/job-queue.md)에 있다.
+실행 역할과 자원 격리는 [아키텍처](../docs/ARCHITECTURE.md),
+부하 시험 기준은 [시험 기준](../docs/CAPACITY.md)을 참고한다.
 현재 API·대화 워커·일기 워커 실행 방법은 [실행 역할](../docs/WORKER_ROLES.md)을 따른다.

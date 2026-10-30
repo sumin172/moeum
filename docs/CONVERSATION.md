@@ -5,9 +5,8 @@
 
 ## 책임과 순번
 
-Identity는 현재 유효 구독에 따른 일일 대화 한도를 publicapi로 제공한다.
+Identity는 현재 유효 구독에 따른 기록당 대화 한도를 publicapi로 제공한다. 구독 조회는 [인증·구독](AUTH.md)을 따른다.
 Conversation은 접수 사용량, 메시지, 응답 작업과 기록별 순서를 소유한다.
-구독 상태는 JWT에 넣지 않으며 현재 유효 구독만 DB에서 조회한다.
 
 대화 스트림의 단위는 recordDayId다. 서로 다른 기록은 독립적으로 처리한다.
 사용자 원본 추가 시 sourceRevision이 증가하며 USER 메시지의 sourceSequence는 그 값이다.
@@ -18,7 +17,7 @@ streamSequence는 USER·ASSISTANT를 합친 메시지 증분 순번이다.
 메시지 추가 시 RecordDay의 카운터를 UPDATE하고 잠금을 커밋까지 유지한다.
 UUID 생성 시각이나 occurredAt으로 커밋 순서를 추정하지 않는다.
 화면은 occurredAt으로 정렬할 수 있지만 다음 조회 커서는 최대 streamSequence를 사용한다.
-메시지는 발생 시각을 반환하고 기록은 표시 날짜와 마지막 장소 타임존을 반환한다.
+메시지는 발생 시각을 반환한다. 기록 응답은 recordDayId, displayDate, startAt, closeAt, closedAt이며 마지막 장소 타임존은 포함하지 않는다.
 
 ## 접수와 한도
 
@@ -43,7 +42,12 @@ GET /api/conversations/quota는 limit, used, remaining, resetAt을 반환한다.
 구독 변경은 같은 기록의 used를 유지하며 새 limit을 적용한다.
 하향 변경으로 used가 limit보다 크면 remaining은 0이다.
 클라이언트는 잔여 횟수를 사전 표시하고 0이면 전송을 막는다. 서버 검사는 별도로 유지한다.
-클라이언트 화면은 미구현이다.
+
+## 마감 설정
+
+GET /api/conversations/preferences는 사용자의 closeTime을 반환한다. 설정 전이면 서버 기본값 02:00이다.
+PUT /api/conversations/preferences는 closeTime을 바꾸고 바뀐 값을 반환한다. 허용 범위 밖이면 400이다.
+변경은 다음에 만드는 기록부터 적용한다. 범위와 적용 규칙은 [하루 기록](RECORD_DAY.md)을 따른다.
 
 ## 응답 실행과 복구
 
@@ -75,7 +79,10 @@ HTTP 409 RESPONSE_SUPERSEDED로 과거 응답 삽입을 거절하고 새 메시�
 수동 재시도는 실패 시각부터 기본 1분을 기다리고, 자동·수동·리스 복구를 합친 누적 호출 상한을 넘지 않는다.
 대기 중 요청은 429, 상한 소진은 409다. 시도 횟수는 수동 재시도에도 초기화하지 않는다.
 
-## 메시지와 작업 상태 조회
+## 기록·메시지·작업 상태 조회
+
+GET /api/conversations/records?date=&limit=은 사용자의 기록 요약을 시작 시각 내림차순으로 반환한다.
+date를 주면 해당 표시 날짜의 기록만 반환한다. 같은 표시 날짜의 기록이 여러 개일 수 있다. limit은 1~200, 기본 50이다.
 
 GET /api/conversations/records/{recordDayId}?after=&limit=은 record, messages, nextCursor를 반환한다.
 after는 0 이상의 정수 streamSequence다. after=0은 처음부터 조회하며 생략하면 최근 페이지를 읽는다.
@@ -115,15 +122,11 @@ AI 문맥의 100개 메시지·20,000자는 사용자에게 보장하는 기억�
 접수 횟수, 자동 재시도 횟수, 실행 슬롯/공급자 호출 예산은 서로 다른 제한이다.
 
 기능·동시성 검증은 실제 PostgreSQL과 fake 공급자를 사용한다.
-재시도 시험의 실패 주입은 요청의 clientMessageId별로 격리한다. 다른 메시지의 작업은 지정된 실패 횟수를 소비하지 않으며, 재시도 시험은 대상 작업의 실제 시도 횟수도 확인한다.
 독립 JVM 부하·복구와 실제 공급자 검증 범위는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
 
 ## 종료 작업 보존
 
 완료 상태를 확인한 클라이언트는 해당 작업을 미완료 polling 목록에서 제거한다.
-기록이 마감되면 같은 기록에 미완료·실패 작업이 있어도 오래된 완료 작업은 정리될 수 있다.
-후속 완료 판단은 보관된 ASSISTANT 메시지로 유지한다.
-정리된 작업 ID 상태 조회·재시도는 404이며 메시지와 AI 응답은 계속 조회할 수 있다.
+마감된 기록의 오래된 종료 작업은 정리될 수 있다. 정리된 작업 ID 상태 조회·재시도는 404이며 메시지와 AI 응답은 계속 조회할 수 있다.
 기존 메시지의 중복 전송은 quota나 작업을 새로 만들지 않고 원본을 반환하되 responseJob은 null일 수 있다.
-최종 실패 작업도 실패 후 30일이 지나면 정리한다. 정리 전 만료된 작업도 다시 실행할 수 없다.
-세부 조건과 기간은 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.
+보존 기간이 지난 실패 작업은 정리 전이라도 다시 실행할 수 없다. 정리 조건과 기간은 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.

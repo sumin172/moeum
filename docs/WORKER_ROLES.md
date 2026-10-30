@@ -55,7 +55,10 @@ API는 servlet, 워커는 none web application type이다.
 
 API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등록된다.
 설정 바인딩도 역할별 JWT/Google 또는 LLM 사용 범위를 따른다. refresh token HMAC 검증 빈은 API 역할에서만 등록된다.
-역할별 등록 계약은 WorkerRoleIsolationIntegrationTest가 검사한다.
+각 역할은 다른 역할의 설정(API의 JWT·Google·refresh token 서명 키, 워커의 LLM 키·호출 설정) 없이 기동하며 그 설정을 검증하지 않는다.
+역할별 등록 계약과 설정 격리는 WorkerRoleIsolationIntegrationTest가 local 프로필·OS 환경변수·시스템 속성 없이 검사한다.
+HTTP 진입점·스케줄 작업·LLM 호출 빈의 역할 지정은 ExecutionRoleRulesTest가 강제한다. 역할을 지정하지 않은 빈은 모든 역할에 등록된다.
+등록 방식의 대안과 선택 근거는 [실행 역할별 빈 등록](engineering/execution-role-registration.md)을 따른다.
 
 ## 작업 실행
 
@@ -81,7 +84,6 @@ API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등
 | 환경변수                         | 의미                                                                                    |
 |----------------------------------|-----------------------------------------------------------------------------------------|
 | API_DB_POOL_SIZE                 | API 인스턴스 최대 DB 연결                                                               |
-| MOEUM_AUTH_SESSION_SIGNINGSECRET | API의 refresh token 전용 HMAC 키. 최소 32바이트이며 모든 API 인스턴스에서 동일하게 유지 |
 | CONVERSATION_DB_POOL_SIZE        | 대화 인스턴스 최대 DB 연결                                                              |
 | JOURNAL_DB_POOL_SIZE             | 일기 인스턴스 최대 DB 연결                                                              |
 | CONVERSATION_WORKER_CONCURRENCY  | 대화 실행 슬롯                                                                          |
@@ -92,8 +94,7 @@ API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등
 
 기동 시 역할별 슬롯 합계와 provider 호출 상한을 검증한다.
 DB pool의 minimum-idle은 maximum-pool-size 이하여야 한다.
-운영 refresh 키는 access token 키와 분리한다. 교체 시 기존 refresh token은 무효화되어 재로그인이 필요하다.
-키 설정과 인증 동작의 상세는 [서비스 기획의 인증 설명](PRODUCT.md#개발-범위)을 따른다.
+API 역할의 인증 키 주입은 [인증·구독](AUTH.md)을 따른다.
 
 ```text
 DB 최대 연결 = Σ(역할별 최대 replica × 해당 pool)
@@ -112,18 +113,3 @@ JPA 종료 전에 실행 풀의 완료 대기가 수행된다.
 저장하지 못한 PROCESSING 작업은 리스 만료 후 회수한다.
 version이 다른 이전 워커의 결과는 저장 시 거절한다.
 오류별 재시도 계약은 [대화](CONVERSATION.md)와 [일기](JOURNAL.md)에 있다.
-
-## 검증과 빌드
-
-일반 회귀는 apps/backend에서 다음 명령으로 실행한다.
-
-```powershell
-.\gradlew.bat test --console=plain --offline --no-daemon
-```
-
-일반 회귀는 단위·실제 PostgreSQL 통합·모듈 의존성 검사를 포함한다.
-독립 JVM 강제 종료·부하 시험은 capacityTest, 실제 공급자 스모크는 providerSmokeTest로 실행한다.
-절차는 [시험 실행](CAPACITY_RUNBOOK.md)을 따른다.
-
-Gradle wrapper 기본 사용자 캐시는 apps/backend/.gradle/user-home이다.
-GRADLE_USER_HOME이 지정되면 해당 경로를 우선한다.
