@@ -71,6 +71,15 @@ class CloudflareProviderTest {
     }
 
     @Test
+    fun `라우트로 쓸 때 필요한 계정 ID와 API Token 중 비어 있는 설정 이름만 알린다`() {
+        assertThat(provider.missingSettings()).isEmpty()
+        assertThat(CloudflareProvider(builder.build(), CloudflareProperties()).missingSettings())
+            .containsExactly("moeum.cloudflare.account-id", "moeum.cloudflare.api-token")
+        assertThat(CloudflareProvider(builder.build(), CloudflareProperties(accountId = "account")).missingSettings())
+            .containsExactly("moeum.cloudflare.api-token")
+    }
+
+    @Test
     fun `키 누락은 네트워크 호출 없이 인증 실패로 판정한다`() {
         assertThatThrownBy { CloudflareProvider(builder.build(), CloudflareProperties()).generate(route, request) }
             .isInstanceOf(LlmException::class.java)

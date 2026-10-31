@@ -16,6 +16,7 @@ class FakeLlmProvider : LlmProvider {
     fun reset() { journalFailures.clear(); journalInputs.clear() }
     override val name = "fake"
     override val vendor = "fake-vendor"
+    override fun missingSettings() = emptyList<String>()
 
     override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
         if (request.purpose == "journal-generation") {

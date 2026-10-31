@@ -38,7 +38,9 @@ import java.util.concurrent.*
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties=[
     "moeum.conversation.response-job.initial-delay=PT1H",
     "moeum.conversation.response-job.manual-retry-cooldown=0s",
-    "moeum.journal.generation-job.initial-delay=PT1H","moeum.journal.delivery.initial-delay=PT1H"
+    "moeum.journal.generation-job.initial-delay=PT1H","moeum.journal.delivery.initial-delay=PT1H",
+    // 기동 시 라우트 검사를 실제 공급자 인증이 아니라 시험용 fake 공급자 기준으로 한다
+    "moeum.llm.routes.conversation-response.provider=fake","moeum.llm.routes.journal-generation.provider=fake"
 ])
 class ConversationOrderingIntegrationTest {
     companion object {

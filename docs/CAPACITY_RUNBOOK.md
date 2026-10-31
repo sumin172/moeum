@@ -127,90 +127,100 @@ SQL calls/rows/실행 시간/shared hit/read는 pg_stat_statements 전후 차이
 페이지 hit는 디스크 I/O 보장이나 전송 바이트 수와 같지 않다.
 실측한 DB 크기 이상 또는 다른 운영 사양으로 결과를 선형 확장하지 않는다.
 
+## 실제 공급자 검증의 공통 기반
+
+`providerSmokeTest`와 `providerValidationTest`는 같은 실행 기반을 쓰고 판정만 다르다.
+운영과 같은 Boot 설정 로딩(local → 해당 워커 프로필 순서, 명령행·환경변수 우선)과 공급자 등록·용도별 라우팅을 DB·스케줄러 없이 실행한다.
+일반 test·capacityTest에서는 실행하지 않는다. 실제 공급자를 호출하므로 실행 전 잔여 무료량과 호출 예산을 확인한다.
+선택한 경로의 라우트와 선택된 공급자의 필수 설정만 기동 시 검사하며, 설정이 없으면 호출 없이 설정 이름을 보고하고 실패한다. 인증 값은 출력하지 않는다.
+검증 범위는 실제 공급자 호출과 생성 계약이다. 서킷브레이커는 적용하지 않고, 동시 호출 상한(bulkhead)은 해당 워커 설정대로 적용한다. 단일 프로세스의 단기 표본이므로 운영 장애 격리를 검증한 것으로 보지 않는다.
+설정 우선순위가 운영 기동과 같도록 맞춘 도구이므로, 과거 결과는 [검증 현황](CAPACITY_RESULTS.md)에 기록된 당시 조건의 결과로 해석한다.
+
+| 속성                        | 의미                                                                                      |
+|-----------------------------|-------------------------------------------------------------------------------------------|
+| providerValidation.path     | journal, conversation, both. 스모크 기본 both, 생성 검증 기본 journal                     |
+| providerValidation.provider | 선택한 경로의 공급자를 이 실행에만 바꾼다(예: claude). 해당 공급자의 필수 설정이 필요하다 |
+| providerValidation.model    | 선택한 경로의 모델을 이 실행에만 바꾼다. 경로의 공급자가 지원하는 모델이어야 한다         |
+| providerValidation.case     | 생성 검증의 합성 입력. 아래 표                                                            |
+| providerValidation.repeats  | 생성 검증의 사례별 반복 횟수. 기본 1, 상한 3                                              |
+| providerValidation.suite    | conversation-extended이면 고정된 대화 확장 세트를 실행하고 path·case·repeats를 무시한다   |
+
+IntelliJ 실행 구성에만 지정한 환경변수는 터미널 실행에 전달되지 않는다.
+
 ## 실제 공급자 스모크
 
 ```powershell
 .\gradlew.bat :bootstrap:providerSmokeTest --console=plain --no-daemon
 ```
 
-GEMINI_API_KEY가 없으면 명시적으로 생략된다.
-기본 gemini-3.1-flash-lite(또는 CAPACITY_SMOKE_GEMINI_MODEL)에 최대 두 건의 합성 요청을 보낸다.
-일반 응답과 일기 JSON 계약만 확인하며 실제 일기 원문을 보내지 않는다.
-스모크 성공은 공급자 동시 호출·RPM·TPM·비용 예산 승인이 아니다.
+선택한 라우트마다 짧은 합성 요청 한 건을 보낸다. 대화 경로는 텍스트, 일기 경로는 운영과 같이 JSON 응답 형식으로 요청한다.
+정상 종료와 응답 형식(텍스트 비어 있지 않음, 일기 title·body 문자열)만 판정하며 업무 프롬프트와 실제 일기 원문을 사용하지 않는다.
+결과는 build/capacity/provider-smoke.json에 경로별로 남는다. 스모크 성공은 공급자 동시 호출·RPM·TPM·비용 예산 승인이 아니다.
 
-## 실제 일기 생성기 검증
-
-```powershell
-.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=representative' --console=plain --offline --no-daemon
-```
-
-기본 실행은 지정한 합성 사례로 일기 생성 요청 한 건만 보낸다. 자동 재시도와 DB·스케줄러는 실행하지 않는다.
-일반 test·capacityTest·providerSmokeTest에서는 이 시험을 실행하지 않는다.
-환경변수·JVM 속성 다음으로 application-local.yml, 해당 경로의 worker 설정, application.yml 순으로 설정을 읽는다.
-기본 실행은 설정된 journal-generation Gemini 경로와 실제 LlmJournalGenerator의 프롬프트·JSON 검증을 사용한다. 모델·출력·thinking·타임아웃은 해당 경로의 설정을 따른다.
-인증 키는 환경변수 GEMINI_API_KEY 또는 로컬 설정의 moeum.gemini.api-key로 제공하며 출력하지 않는다.
-대화 경로는 Cloudflare도 지원하며 로컬 `moeum.cloudflare` 또는 `CLOUDFLARE_ACCOUNT_ID`·`CLOUDFLARE_API_TOKEN`을 사용한다.
-대화 품질 합성 사례 3건을 각각 한 번 실행하는 명령은 다음과 같다. DB·스케줄러·자동 재시도는 실행하지 않는다.
+## 실제 생성 경로 검증
 
 ```powershell
-.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=quality' '-PjournalValidation.variant=conversation' --console=plain --offline --no-daemon
+.\gradlew.bat :bootstrap:providerValidationTest '-PproviderValidation.case=representative' --console=plain --offline --no-daemon
 ```
 
-분리 경로의 확장 검증은 다음 명령으로 실행한다. 품질 3사례×3회, 긴 문맥 2회, 범위 이탈·추론 유도 각 1회, 실제 응답 누적 10턴과 일기 1회, 동시 대화 8회를 포함해 총 32회다. 이 모드에서는 case·repeats 대신 고정된 검증 구성을 사용한다.
+기본 실행은 지정한 합성 사례로 일기 생성 요청 한 건만 보낸다. 실제 LlmJournalGenerator·LlmConversationResponder의 프롬프트와 출력 검사를 사용한다. 자동 재시도는 실행하지 않는다.
+모델·출력·thinking·타임아웃은 해당 경로의 설정을 따르고, 결과의 providerSettings에 인증·계정 값을 제외한 연결 조건을 남긴다.
+
+| providerValidation.path | 실행 경로                                                                          |
+|-------------------------|------------------------------------------------------------------------------------|
+| journal (기본값)        | 실제 일기 생성기 한 번                                                             |
+| conversation            | 실제 대화 응답기 한 번. 마지막 ASSISTANT 뒤의 USER를 답변 대상으로 전달            |
+| both                    | 대화 응답기와 일기 생성기를 각각 한 번. 앞 요청이 실패해도 다음 요청 실행          |
+
+대화 품질 합성 사례 3건을 각각 한 번 실행하는 명령은 다음과 같다.
 
 ```powershell
-.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.variant=extended' --console=plain --offline --no-daemon
+.\gradlew.bat :bootstrap:providerValidationTest '-PproviderValidation.case=quality' '-PproviderValidation.path=conversation' --console=plain --offline --no-daemon
 ```
 
-동시 8회는 개별 클라이언트로 공급자를 호출하므로 서버·DB 부하 시험이나 장시간 처리량 보장은 아니다.
+일기 경로를 다른 공급자·모델로 바꿔 같은 입력으로 검증하려면 다음처럼 지정한다. 운영 설정 파일은 수정하지 않는다.
+
+```powershell
+.\gradlew.bat :bootstrap:providerValidationTest '-PproviderValidation.path=journal' '-PproviderValidation.provider=claude' '-PproviderValidation.model=모델명' --console=plain --offline --no-daemon
+```
+
+대화 확장 세트는 다음 명령으로 실행한다. 품질 3사례×3회, 긴 문맥 2회, 범위 이탈·추론 유도 각 1회, 실제 응답 누적 10턴과 그 기록의 일기 1회, 동시 대화 8회를 포함해 총 32회다.
+
+```powershell
+.\gradlew.bat :bootstrap:providerValidationTest '-PproviderValidation.suite=conversation-extended' --console=plain --offline --no-daemon
+```
+
+동시 8회는 8개 스레드가 대화 워커 설정으로 띄운 라우터 하나를 공유해 공급자를 호출한다. 동시 호출 상한(`CONVERSATION_LLM_CONCURRENCY`, 기본 8)이 실제로 적용되므로 상한을 8보다 낮추면 대기하거나 `BULKHEAD_FULL`로 실패할 수 있다.
+[검증 현황](CAPACITY_RESULTS.md)의 과거 동시 8회는 호출마다 별도 클라이언트와 상한으로 실행한 결과이므로 현재 실행과 조건이 같지 않다. 워커 실행 경로·DB를 거치지 않으므로 서버·DB 부하 시험이나 장시간 처리량 보장은 아니다.
 수집한 합성 응답의 사실·감정 충실도와 말투는 수동으로 검토한다. 자동 성공은 정상 종료·응답 생성·일기 JSON 계약까지의 판정이다.
-IntelliJ 실행 구성에만 지정한 환경변수는 터미널 실행에 전달되지 않는다.
-
-| journalValidation.variant | 실행 경로                                                                          |
-|---------------------------|------------------------------------------------------------------------------------|
-| baseline (기본값)         | 실제 일기 생성기 한 번                                                             |
-| conversation              | 실제 대화 응답기 한 번. conversation-response 설정 사용                            |
-| compare                   | 대화 응답기와 일기 생성기를 순서대로 각각 한 번. 앞 요청이 실패해도 다음 요청 실행 |
-
-baseline·conversation·compare는 같은 합성 사례를 사용한다. 진단용 변경은 시험에만 적용하며 운영 설정을 수정하지 않는다.
-예를 들어 `'-PjournalValidation.variant=conversation'`을 추가하면 대화 응답만 실행한다.
-`'-PjournalValidation.variant=baseline' '-PjournalValidation.model=gemini-3.1-flash-lite'`처럼 일기 경로의 모델을 명시하면 해당 실행에만 적용한다. 모델 override는 공급자를 바꾸지 않으므로 선택한 경로의 공급자가 지원하는 모델이어야 한다.
-결과의 configuredModel은 YAML의 경로 설정, requestedModel은 시험에서 요청한 모델이며 observedModel은 관측값이다.
-생성기의 JSON 파싱·공백·길이 검사 실패 메시지는 journalValidationFailure로 기록한다. 공급자 오류 본문과 인증 값은 기록하지 않는다.
+결과의 requestedModel은 요청한 모델, observedModel은 공급자 응답의 관측값이다.
+생성기의 JSON 파싱·공백·길이 검사 실패 메시지는 journalValidationFailure로 기록한다. 공급자 오류는 상태·분류만 httpFailure로 남기고 본문과 인증 값은 기록하지 않는다.
+결과 파일은 build/capacity/provider-validation에 남는다.
 
 설정된 대화·일기 경로의 대표 입력 검증 명령은 다음과 같다.
 
 ```powershell
-.\gradlew.bat :bootstrap:journalProviderTest '-PjournalValidation.case=representative' '-PjournalValidation.variant=compare' --console=plain --offline --no-daemon
+.\gradlew.bat :bootstrap:providerValidationTest '-PproviderValidation.case=representative' '-PproviderValidation.path=both' --console=plain --offline --no-daemon
 ```
 
 이 명령은 대화·일기 각 1회, 총 2회를 호출한다. 대표·품질 사례 확인 후 최대 USER 입력으로 범위를 넓힌다.
 각 단계에서 프로젝트의 잔여 RPM·TPM·RPD와 호출 예산을 확인하며, 대용량 요청은 같은 분의 누적 입력 토큰을 고려해 간격을 둔다.
 대화 출력 150토큰·일기 출력 2,000토큰과 thinking 설정의 호환성·출력 잘림도 실제 응답으로 확인한다. 모델 검증 상태는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
 
-| journalValidation.case | 합성 입력                                                         |
-|------------------------|-------------------------------------------------------------------|
-| representative         | 산책·발표·저녁의 대표 대화. 장소 정정과 짧은 부정 포함            |
-| free-max               | 설정된 무료 횟수 × 메시지 최대 길이의 USER 입력 + ASSISTANT 문맥  |
-| premium-max            | 설정된 구독 횟수 × 메시지 최대 길이의 USER 입력 + ASSISTANT 문맥  |
-| negation               | 면접·미확정 결과·동생과의 식사. AI의 잘못된 해석에 대한 부정 포함 |
-| changed-plans          | 취소한 등산·영화와 실제 도서관 방문·지갑 회수                     |
-| quality                | representative, negation, changed-plans를 차례로 실행             |
+| providerValidation.case | 합성 입력                                                         |
+|-------------------------|-------------------------------------------------------------------|
+| representative          | 산책·발표·저녁의 대표 대화. 장소 정정과 짧은 부정 포함            |
+| free-max                | 설정된 무료 횟수 × 메시지 최대 길이의 USER 입력 + ASSISTANT 문맥  |
+| premium-max             | 설정된 구독 횟수 × 메시지 최대 길이의 USER 입력 + ASSISTANT 문맥  |
+| negation                | 면접·미확정 결과·동생과의 식사. AI의 잘못된 해석에 대한 부정 포함 |
+| changed-plans           | 취소한 등산·영화와 실제 도서관 방문·지갑 회수                     |
+| quality                 | representative, negation, changed-plans를 차례로 실행             |
 
-`journalValidation.repeats`는 사례별 반복 횟수이며 기본 1, 상한 3이다.
-호출 수는 사례 수 × 반복 횟수 × variant 수다. quality·compare·repeats=2는 12회 호출한다.
+호출 수는 사례 수 × 반복 횟수 × 경로 수다. quality·both·repeats=2는 12회 호출한다.
 429·503도 결과에 남기며 자동 재호출하지 않는다. 이때 생성 품질과 공급자 가용성 판정을 구분한다.
 
 최대 사례도 마지막 USER까지만 포함한다. AI 문맥은 합성 가정이며 전체 토큰 수의 최악 조건을 보장하지 않는다.
 대표 대화의 반복 검증은 같은 representative 사례로 별도 실행한다.
-결과는 build/capacity/journal-provider 아래에 입력 해시·문자 수·관측 모델·프롬프트 버전·토큰 수·종료 사유·지연과 합성 일기를 기록한다.
-공급자 응답이 없으면 observedModel과 토큰 수는 null이다. 요청 모델은 requestedModel에 남긴다.
-요청 실패도 안전한 오류 코드와 관측 정보를 남긴다. 결과 파일에는 키나 실제 사용자 원문을 기록하지 않는다.
-HTTP 오류는 기존 Spring 오류 처리기로 변환하고, JSON API 상태·Content-Type·초 단위 Retry-After와 제한된 원인 분류만 httpFailure에 기록한다.
-모델 수용량 부족·무료 등급 제약·모델 미지원·비활성화와 JSON API 오류가 아닌 응답을 구분한다. 오류 본문과 인증 정보는 기록하지 않는다.
-시험 통과는 생성기의 형식·길이 검증 통과를 의미한다. 품질은 expectedFacts와 본문을 비교해 수동으로 검토하고 [검증 현황](CAPACITY_RESULTS.md)에 기록한다.
-기대 사실은 사례별 expectedFacts를 따른다. 대표 사례는 서울숲 산책, 칭찬받지 않은 발표 완료, 민지와 버섯 파스타를 먹으며 느낀 안도감이다.
-한도 초과·타임아웃·잘림은 각각 구분하고, 실패한 요청을 같은 실행에서 반복하지 않는다.
 
 ## 운영 주기의 지속 정리 검증
 
