@@ -58,7 +58,20 @@ API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등
 각 역할은 다른 역할의 설정(API의 JWT·Google·refresh token 서명 키, 워커의 LLM 키·호출 설정) 없이 기동하며 그 설정을 검증하지 않는다.
 워커도 자기 용도의 라우트가 선택한 공급자 인증만 요구한다. 쓰지 않는 공급자와 다른 워커 용도의 인증은 필요 없다.
 역할별 등록 계약과 설정 격리는 WorkerRoleIsolationIntegrationTest가 local 프로필·OS 환경변수·시스템 속성 없이 검사한다.
-HTTP 진입점·스케줄 작업·LLM 호출 빈의 역할 지정은 ExecutionRoleRulesTest가 강제한다. 역할을 지정하지 않은 빈은 모든 역할에 등록된다.
+
+## 역할 등록 검사
+
+빈은 `@ConditionalOnRole`로 등록 역할을 지정하며, 지정하지 않은 빈은 모든 역할에 등록된다.
+ExecutionRoleRulesTest는 다음 빈의 등록 역할을 강제한다.
+
+- HTTP 진입점·서블릿 Filter는 API 역할로, `@Scheduled` 클래스와 LlmClient·LlmProvider 구현은 워커 역할로만 지정한다.
+- 스스로 실행되는 빈은 공통이어도 등록 역할을 명시한다. 모든 역할이면 세 역할을 모두 적는다.
+  대상은 스케줄·비동기·이벤트·`@PostConstruct`·이름이 `Listener`로 끝나는 어노테이션의 메서드, Runner·Lifecycle·ApplicationListener·HandlerInterceptor·Filter 구현, 이 타입을 반환하는 `@Bean` 메서드다.
+
+이 규칙은 실행 동작으로 대상을 정하므로 빈을 추가해도 바뀌지 않는다. 위 실행 동작에 해당하지 않는 새 진입 장치는 규칙에 추가한다.
+WorkerRoleIsolationIntegrationTest는 각 역할을 기동해 역할별 필수 빈의 등록과 다른 역할 빈의 미등록을 검사한다. 필수 빈은 테스트에 나열하므로 역할 전용 빈을 추가하면 목록도 갱신한다.
+모든 역할을 한 프로세스에서 켜는 조합은 local-all 기반 통합 테스트가 기동한다.
+역할 전용 빈에 의존하는 빈의 지정 누락은 해당 역할이 아닌 역할의 기동 실패로 드러난다.
 등록 방식의 대안과 선택 근거는 [실행 역할별 빈 등록](engineering/execution-role-registration.md)을 따른다.
 
 ## 작업 실행
