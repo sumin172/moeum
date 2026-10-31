@@ -10,6 +10,7 @@ import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import java.net.URI
 import java.net.http.*
+import java.sql.PreparedStatement
 import java.time.*
 import java.util.UUID
 import java.util.concurrent.*
@@ -24,6 +25,17 @@ data class CapacityRequest(
     // 공급자 표본의 답변 대상과 연결하는 본문 키. 부하 본문은 무작위 UUID를 포함해 메시지마다 다르다.
     val contentKey: String,
 )
+
+private const val ATTEMPT_COUNTS_SQL =
+    "SELECT attempt_count,count(*) FROM conversation.response_jobs WHERE record_day_id=ANY(?) GROUP BY attempt_count"
+private const val ASSISTANT_RESPONSES_SQL =
+    "SELECT count(*) FROM conversation.messages WHERE role='ASSISTANT' AND record_day_id=ANY(?)"
+private const val DUPLICATE_RESPONSES_SQL =
+    "SELECT count(*) FROM (SELECT record_day_id,source_sequence FROM conversation.messages " +
+        "WHERE role='ASSISTANT' AND record_day_id=ANY(?) GROUP BY record_day_id,source_sequence HAVING count(*)>1) d"
+private const val UNANSWERED_RECORDS_SQL =
+    "SELECT count(*) FROM conversation.record_days r WHERE r.id=ANY(?) AND r.source_revision > coalesce(" +
+        "(SELECT max(m.source_sequence) FROM conversation.messages m WHERE m.record_day_id=r.id AND m.role='ASSISTANT'),0)"
 
 internal fun capacityContentKey(content: String): String =
     java.security.MessageDigest.getInstance("SHA-256").digest(content.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
@@ -182,6 +194,26 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
             observe(at, wait)
             wait
         }
+    }
+
+    data class ResponseSummary(val assistantResponses: Long, val duplicateResponses: Long, val unansweredRecords: Long,
+                               val attemptCounts: Map<Int, Long>)
+
+    // 기록별 응답 결과를 DB에서 직접 센다. 답변 경계(ASSISTANT 최대 원본 순번)가 접수 순번에 못 미치면 미응답이다.
+    fun responseSummary(records: Collection<UUID>): ResponseSummary = withIds(records.distinct()) { connection, array ->
+        fun count(statement: PreparedStatement): Long = statement.use {
+            it.setArray(1, array); it.executeQuery().use { rows -> rows.next(); rows.getLong(1) }
+        }
+        val attempts = connection.prepareStatement(ATTEMPT_COUNTS_SQL).use {
+            it.setArray(1, array)
+            it.executeQuery().use { rows -> buildMap { while (rows.next()) put(rows.getInt(1), rows.getLong(2)) } }
+        }
+        ResponseSummary(
+            assistantResponses = count(connection.prepareStatement(ASSISTANT_RESPONSES_SQL)),
+            duplicateResponses = count(connection.prepareStatement(DUPLICATE_RESPONSES_SQL)),
+            unansweredRecords = count(connection.prepareStatement(UNANSWERED_RECORDS_SQL)),
+            attemptCounts = attempts,
+        )
     }
 
     // 어느 워커든 0보다 크면 대기 시간은 관측된 최초 호출까지의 값이므로 성능 판정에 쓰지 않는다.

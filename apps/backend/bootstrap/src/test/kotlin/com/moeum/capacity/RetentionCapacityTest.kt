@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.queryForList
 import org.springframework.jdbc.core.queryForObject
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
@@ -29,6 +30,7 @@ class RetentionCapacityTest {
         val settings = CapacitySettings()
         require(settings.durationSeconds >= 120)
         require(settings.conversationReplicas == 1) { "정리 시험은 대화 워커 한 개를 사용합니다" }
+        require(settings.warmupSeconds >= 30) { "정리 시험은 지연 목표를 판정하므로 capacity.warmupSeconds가 30 이상이어야 합니다" }
         val directory = Path.of("build", "capacity", "retention-" + Instant.now().toString().replace(':', '-')).toAbsolutePath()
         Files.createDirectories(directory)
         System.setProperty("capacity.childClasspath", Files.readString(Path.of(System.getProperty("capacity.classpathFile"))))
@@ -55,39 +57,43 @@ class RetentionCapacityTest {
                 val api = start("api")
                 val fixture = CapacityFixtures(jdbc)
                 fixture.history(settings.historyRecords)
+                // 워커 기동 전에 넣어 시험 내내 정리 조건 밖에 있어야 하는 작업
+                val protectedJobs = fixture.protectedJobs()
                 val originalSources = jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.messages")!!
                 val conversation = start("conversation-worker")
                 var journal = start("journal-worker")
-                val initialJournalJobs=jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs")!!
+                // 이후 생성량은 같은 DB 시각 이후로 센다. 보존용 fixture처럼 이미 있는 최근 작업을 두 번 세지 않는다
+                val (initialJournalJobs, journalCountedAt) = jdbc.queryForObject("SELECT count(*),now() FROM journal.generation_jobs") { rows, _ ->
+                    rows.getLong(1) to rows.getTimestamp(2)
+                }
                 val burst = fixture.journalBurst(settings.journalBurst)
                 val requests = ConcurrentLinkedQueue<CapacityRequest>()
                 CapacityLoad(fixture,jdbc).use { load ->
                     val warm = ConcurrentLinkedQueue<CapacityRequest>()
-                    if(settings.warmupSeconds>0) {
-                        val warming=executor.submit<Map<String,Any>> { load.run(api.apiPort,settings.rps,settings.warmupSeconds,warm) }
-                        try { while(!warming.isDone) {
-                            val observation=mapOf("at" to Instant.now().toString(),"waits" to databaseWaits(jdbc))
-                            Files.writeString(directory.resolve("warmup-waits.ndjson"),mapper.writeValueAsString(observation)+"\n",StandardOpenOption.CREATE,StandardOpenOption.APPEND)
-                            Thread.sleep(1000)
-                        } } catch(error:Throwable) { warming.cancel(true); throw error }
-                        report["warmupInjection"]=warming.get()
-                        report["warmupHttpStatuses"]=warm.groupingBy { it.status }.eachCount()
-                        report["warmupResponseStates"]=load.responseStatus(warm)
-                        save()
-                        check(warm.all { it.status==200 }) { "워밍업 접수 실패" }
-                        val warmEnd=System.nanoTime()+TimeUnit.SECONDS.toNanos(settings.drainSeconds.toLong())
-                        while(System.nanoTime()<warmEnd && load.responseStatus(warm)["COMPLETED"]!=jobCount(warm)) Thread.sleep(100)
-                        val warmStates=load.responseStatus(warm)
-                        report["warmupResponseStates"]=warmStates
-                        save()
-                        check(warmStates["COMPLETED"]==jobCount(warm)) { "워밍업 실패" }
-                    }
+                    val warming=executor.submit<Map<String,Any>> { load.run(api.apiPort,settings.rps,settings.warmupSeconds,warm) }
+                    try { while(!warming.isDone) {
+                        val observation=mapOf("at" to Instant.now().toString(),"waits" to databaseWaits(jdbc))
+                        Files.writeString(directory.resolve("warmup-waits.ndjson"),mapper.writeValueAsString(observation)+"\n",StandardOpenOption.CREATE,StandardOpenOption.APPEND)
+                        Thread.sleep(1000)
+                    } } catch(error:Throwable) { warming.cancel(true); throw error }
+                    report["warmupInjection"]=warming.get()
+                    report["warmupHttpStatuses"]=warm.groupingBy { it.status }.eachCount()
+                    report["warmupResponseStates"]=load.responseStatus(warm)
+                    save()
+                    check(warm.all { it.status==200 }) { "워밍업 접수 실패" }
+                    val warmEnd=System.nanoTime()+TimeUnit.SECONDS.toNanos(settings.drainSeconds.toLong())
+                    while(System.nanoTime()<warmEnd && load.responseStatus(warm)["COMPLETED"]!=jobCount(warm)) Thread.sleep(100)
+                    val warmStates=load.responseStatus(warm)
+                    report["warmupResponseStates"]=warmStates
+                    save()
+                    check(warmStates["COMPLETED"]==jobCount(warm)) { "워밍업 실패" }
                     val initialResponseJobs=jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs")!!
                     val measurementStartedAt=Instant.now()
                     report["measurementStartedAt"]=measurementStartedAt.toString()
                     val begun = System.nanoTime()
                     val injection = executor.submit<Map<String,Any>> { load.run(api.apiPort,settings.rps,settings.durationSeconds,requests) }
                     var batches = 0
+                    val arrivals = mutableListOf<CapacityFixtures.TerminalArrivals>()
                     var interrupted = false
                     var restarted = false
                     var restart: Future<CapacityProcess>? = null
@@ -96,7 +102,7 @@ class RetentionCapacityTest {
                     try { while (!injection.isDone) {
                         val seconds = TimeUnit.NANOSECONDS.toSeconds(System.nanoTime()-begun)
                         val dueBatches=minOf((seconds/10+1).toInt(),(settings.durationSeconds+9)/10)
-                        while(batches<dueBatches) { fixture.terminalArrivals(13); batches++ }
+                        while(batches<dueBatches) { arrivals += fixture.terminalArrivals(13); batches++ }
                         if (!interrupted && seconds >= outageAt) {
                             journal.kill()
                             interrupted=true
@@ -129,7 +135,7 @@ class RetentionCapacityTest {
                         Thread.sleep(10_000)
                     } } catch(error:Throwable) { injection.cancel(true); throw error }
                     report["injection"]=injection.get()
-                    while(batches<(settings.durationSeconds+9)/10) { fixture.terminalArrivals(13); batches++ }
+                    while(batches<(settings.durationSeconds+9)/10) { arrivals += fixture.terminalArrivals(13); batches++ }
                     report["terminalBatches"]=batches
                     val end = System.nanoTime()+TimeUnit.SECONDS.toNanos(settings.drainSeconds.toLong())
                     while (System.nanoTime()<end && (eligible(jdbc,"conversation")>0 || eligible(jdbc,"journal")>0 ||
@@ -149,9 +155,9 @@ class RetentionCapacityTest {
                     report["responseEligibleRemaining"]=eligible(jdbc,"conversation")
                     report["journalEligibleRemaining"]=eligible(jdbc,"journal")
                     report["responseJobsDeleted"]=initialResponseJobs+batches*13L+jobCount(requests)-jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs")!!
-                    val recentJournalJobs=jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs WHERE created_at>now()-interval '1 day'")!!
-                    report["recentJournalJobs"]=recentJournalJobs
-                    report["journalJobsDeleted"]=initialJournalJobs+recentJournalJobs+batches*13L-jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs")!!
+                    val journalJobsCreated=jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs WHERE created_at>?",journalCountedAt)!!
+                    report["journalJobsCreated"]=journalJobsCreated
+                    report["journalJobsDeleted"]=initialJournalJobs+journalJobsCreated+batches*13L-jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs")!!
                     report["journalsCompleted"]=jdbc.queryForObject<Long>("SELECT count(*) FROM journal.journals WHERE title='synthetic journal'")
                     report["originalSources"]=originalSources
                     report["sourceRowsFinal"]=jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.messages")
@@ -170,7 +176,31 @@ class RetentionCapacityTest {
                     }
                     check(restarted) { "정리 중단·재시작 미검증" }
                     check((report["journalsCompleted"] as Long)>=burst.size) { "일기 생성 미완료" }
-                    check(report["sourceRowsFinal"]==originalSources+batches*507L+burst.size*20L+2L*(requests.size+warm.size)) { "보관 원본 수 불일치" }
+                    // 운영 정리 조건을 복제한 eligible()과 별개로, 주입한 만료 작업 ID가 실제로 삭제됐는지 확인한다.
+                    val expiredResponsesLeft = countIn(jdbc, arrivals.flatMap { it.responseRecordIds }) {
+                        it.prepareStatement(RESPONSE_JOBS_BY_RECORD_SQL)
+                    }
+                    val expiredGenerationsLeft = countIn(jdbc, arrivals.flatMap { it.generationJobIds }) {
+                        it.prepareStatement(GENERATION_JOBS_BY_ID_SQL)
+                    }
+                    report["expiredJobsLeft"]=mapOf("response" to expiredResponsesLeft,"generation" to expiredGenerationsLeft)
+                    check(expiredResponsesLeft==0L && expiredGenerationsLeft==0L) { "주입한 만료 작업이 정리되지 않았습니다: ${report["expiredJobsLeft"]}" }
+                    // 오래됐지만 정리 조건 밖인 작업은 같은 상태로 남아야 한다
+                    val protectedState = protectedJobs.responseStatuses.mapValues { (id, _) ->
+                        jdbc.queryForList<String>("SELECT status FROM conversation.response_jobs WHERE record_day_id=?",
+                            id).singleOrNull()
+                    } + protectedJobs.generationStatuses.mapValues { (id, _) ->
+                        jdbc.queryForList<String>("SELECT status FROM journal.generation_jobs WHERE id=?", id).singleOrNull()
+                    }
+                    report["protectedJobs"]=protectedState.mapKeys { it.key.toString() }
+                    check(protectedState == protectedJobs.responseStatuses + protectedJobs.generationStatuses) { "보존 대상 작업이 삭제되거나 바뀌었습니다: $protectedState" }
+                    // 마지막 답변 경계와 중복 응답을 검사한다. 중간 ASSISTANT의 개별 유실은 검출하지 않는다.
+                    val replies = load.responseSummary((requests+warm).mapNotNull { it.jobId })
+                    report["replies"]=replies
+                    check(replies.unansweredRecords==0L && replies.duplicateResponses==0L) { "응답 경계 불일치: $replies" }
+                    // 응답은 연속 입력을 묶어 답할 수 있으므로 USER 접수 수와 실제 ASSISTANT 수를 따로 더한다
+                    check(report["sourceRowsFinal"]==originalSources+arrivals.sumOf { it.messages }+burst.size*20L+
+                        (requests.size+warm.size)+replies.assistantResponses) { "보관 원본 수 불일치" }
                     report["state"]="passed"
                     report["completedAt"]=Instant.now().toString()
                 }
@@ -194,6 +224,19 @@ class RetentionCapacityTest {
         FROM pg_stat_activity WHERE datname=current_database() AND state<>'idle' AND pid<>pg_backend_pid()
         GROUP BY application_name,state,wait_event_type,wait_event
     """.trimIndent())
+
+    // SQL 문자열이 아니라 상수로 만든 문장을 받는다. 문자열 인자는 IDE가 상수 여부를 추적하지 못한다
+    private fun countIn(jdbc: JdbcTemplate, ids: List<java.util.UUID>, prepare: (java.sql.Connection) -> java.sql.PreparedStatement): Long =
+        if (ids.isEmpty()) 0 else jdbc.dataSource!!.connection.use { connection ->
+            val array = connection.createArrayOf("uuid", ids.toTypedArray())
+            try { prepare(connection).use { it.setArray(1, array); it.executeQuery().use { rows -> rows.next(); rows.getLong(1) } } }
+            finally { array.free() }
+        }
+
+    private companion object {
+        const val RESPONSE_JOBS_BY_RECORD_SQL = "SELECT count(*) FROM conversation.response_jobs WHERE record_day_id=ANY(?)"
+        const val GENERATION_JOBS_BY_ID_SQL = "SELECT count(*) FROM journal.generation_jobs WHERE id=ANY(?)"
+    }
 
     // 응답 작업은 기록당 하나이므로 요청 수가 아니라 서로 다른 기록 수와 비교한다.
     private fun jobCount(requests: Collection<CapacityRequest>) = requests.mapNotNull { it.jobId }.distinct().size.toLong()
