@@ -177,10 +177,16 @@ class WorkerRoleIsolationIntegrationTest {
                 .hasStackTraceContaining("LLM 동시 호출 상한은 양수여야 합니다")
             assertThatThrownBy { launch(postgres, "api", null, requiredSettings.getValue("api") - SIGNING_SECRET + invalidApiSettings).close() }
                 .hasStackTraceContaining("refresh token signing secret")
+            // 역할이 쓰는 용도의 공급자 인증이 없으면 첫 업무 실패가 아니라 기동에서 거부한다.
+            assertThatThrownBy { launch(postgres, "conversation-worker", null, listOf(CLOUDFLARE_SETTINGS.first())).close() }
+                .hasStackTraceContaining("moeum.cloudflare.api-token")
+            assertThatThrownBy { launch(postgres, "journal-worker", null, emptyList()).close() }
+                .hasStackTraceContaining("moeum.gemini.api-key")
 
             // API: LLM 키 없이, 무효한 LLM 설정이 있어도 기동한다.
             launch(postgres, "api", null, requiredSettings.getValue("api") + invalidLlmSettings).use { assertRole(it, "api") }
-            // 워커: JWT·Google 설정 없이, 무효한 refresh token 서명 키가 있어도 기동한다.
+            // 워커: JWT·Google 설정과 쓰지 않는 공급자(Claude, 다른 워커의 공급자) 인증 없이,
+            // 무효한 refresh token 서명 키가 있어도 기동한다.
             listOf("conversation-worker", "journal-worker").forEach { role ->
                 launch(postgres, role, null, requiredSettings.getValue(role) + invalidApiSettings).use { assertRole(it, role) }
             }
@@ -221,8 +227,9 @@ class WorkerRoleIsolationIntegrationTest {
             SIGNING_SECRET,
             "--moeum.google.client-ids=isolation-client",
         ),
-        "conversation-worker" to LLM_KEYS,
-        "journal-worker" to LLM_KEYS,
+        // 워커는 자기 용도의 라우트가 선택한 공급자 인증만 필요하다.
+        "conversation-worker" to CLOUDFLARE_SETTINGS,
+        "journal-worker" to listOf(GEMINI_KEY),
     )
     private val invalidLlmSettings = listOf("--moeum.llm.max-concurrent-calls.gemini=0")
     private val invalidApiSettings = listOf("--moeum.auth.session.signing-secret=short")
@@ -264,7 +271,8 @@ class WorkerRoleIsolationIntegrationTest {
     private companion object {
         const val JWT_SECRET = "--moeum.jwt.secret=isolation-jwt-secret-must-be-32-bytes-min"
         const val SIGNING_SECRET = "--moeum.auth.session.signing-secret=isolation-refresh-signing-secret-32-bytes"
-        val LLM_KEYS = listOf("--moeum.gemini.api-key=isolation", "--moeum.claude.api-key=isolation")
+        const val GEMINI_KEY = "--moeum.gemini.api-key=isolation"
+        val CLOUDFLARE_SETTINGS = listOf("--moeum.cloudflare.account-id=isolation", "--moeum.cloudflare.api-token=isolation")
     }
 
     private fun await(condition: () -> Boolean) {
@@ -276,6 +284,7 @@ class WorkerRoleIsolationIntegrationTest {
     private class BlockingJournalProvider : LlmProvider {
         override val name = "isolation"
         override val vendor = "test"
+        override fun missingSettings() = emptyList<String>()
         val journalInputs = java.util.concurrent.CopyOnWriteArrayList<List<LlmMessage>>()
         val blockJournal = AtomicBoolean(true)
         val journalStarted = CountDownLatch(1)

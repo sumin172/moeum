@@ -33,11 +33,19 @@ class RoutingLlmClient(
     }
 
     init {
-        // 잘못된 라우팅 설정은 첫 호출이 아니라 기동 시점에 드러나야 한다.
+        // 잘못된 라우팅 설정은 첫 호출이 아니라 기동 시점에 드러나야 한다. 인증은 이 역할이 쓰는 용도만 requireRoute로 검사한다.
         properties.routes.forEach { (purpose, route) ->
             require(route.provider in providersByName) {
                 "moeum.llm.routes.$purpose.provider=${route.provider}: 없는 provider입니다(가능: ${providersByName.keys})"
             }
+        }
+    }
+
+    override fun requireRoute(purpose: String) {
+        val route = checkNotNull(properties.routes[purpose]) { "moeum.llm.routes.$purpose 설정이 없습니다" }
+        val missing = providersByName.getValue(route.provider).missingSettings()
+        check(missing.isEmpty()) {
+            "moeum.llm.routes.$purpose(provider=${route.provider})에 필요한 설정이 없습니다: ${missing.joinToString()}"
         }
     }
 

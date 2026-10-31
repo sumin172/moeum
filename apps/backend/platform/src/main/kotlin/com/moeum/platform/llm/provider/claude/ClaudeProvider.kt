@@ -28,6 +28,8 @@ class ClaudeProvider(
     override val name = "claude"
     override val vendor = "anthropic"
 
+    override fun missingSettings(): List<String> = listOfNotNull("moeum.claude.api-key".takeIf { properties.apiKey.isBlank() })
+
     @CircuitBreaker(name = "llm-claude")
     override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
         val body = ClaudeMessageRequest(

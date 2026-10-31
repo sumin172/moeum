@@ -26,7 +26,7 @@
 ```
 
 일반 회귀는 단위·실제 PostgreSQL 통합·모듈 의존성 검사를 포함한다.
-독립 JVM 강제 종료·부하 시험은 capacityTest, 실제 공급자 검증은 providerSmokeTest·journalProviderTest로 실행한다.
+독립 JVM 강제 종료·부하 시험은 capacityTest, 실제 공급자 검증은 providerSmokeTest·providerValidationTest로 실행한다.
 절차는 [실행 절차](CAPACITY_RUNBOOK.md)를 따른다. 로컬 DB는 [로컬 개발 인프라](../docker/README.md)를 따른다.
 
 Gradle wrapper 기본 사용자 캐시는 apps/backend/.gradle/user-home이다.

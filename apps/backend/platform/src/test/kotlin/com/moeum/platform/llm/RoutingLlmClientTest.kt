@@ -22,6 +22,8 @@ import org.springframework.web.client.HttpClientErrorException
 class RoutingLlmClientTest {
 
     private class FakeProvider(override val name: String, private val behavior: (LlmRoute) -> LlmProviderResult) : LlmProvider {
+        var missing: List<String> = emptyList()
+        override fun missingSettings() = missing
         override val vendor = "$name-vendor"
         val calls = mutableListOf<LlmRoute>()
         override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
@@ -170,5 +172,25 @@ class RoutingLlmClientTest {
         assertThat(error.retryAfter).isEqualTo(Duration.ofSeconds(180))
         assertThat(error.message).doesNotContain("PRIVATE_BODY")
         assertThat(error.cause).isNull()
+    }
+
+    @Test
+    fun `사용하는 용도의 공급자 필수 설정만 검사하고 쓰지 않는 공급자의 누락은 허용한다`() {
+        val cloudflare = FakeProvider("cloudflare", ::ok).apply { missing = listOf("moeum.cloudflare.account-id", "moeum.cloudflare.api-token") }
+        val gemini = FakeProvider("gemini", ::ok)
+        val claude = FakeProvider("claude", ::ok).apply { missing = listOf("moeum.claude.api-key") }
+        // 모든 라우트의 공급자 존재만 생성 시 확인하므로 미사용 공급자의 설정 누락은 생성을 막지 않는다
+        val client = RoutingLlmClient(listOf(cloudflare, gemini, claude),
+            properties("chat" to LlmRoute("cloudflare", "qwen", 150), "diary" to LlmRoute("gemini", "flash", 2000)), telemetry)
+
+        client.requireRoute("diary")
+        assertThatThrownBy { client.requireRoute("chat") }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("moeum.cloudflare.account-id")
+            .hasMessageContaining("moeum.cloudflare.api-token")
+        assertThatThrownBy { client.requireRoute("missing") }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("moeum.llm.routes.missing")
+        assertThat(cloudflare.calls + gemini.calls + claude.calls).isEmpty()
     }
 }

@@ -48,6 +48,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     private fun input(user: UserId, close: Boolean = true): SaveMessageResult {
         val saved = save.save(user, SaveMessageCommand(UUID.randomUUID(), "원본",
             now.minus(Duration.ofDays(1)), "Asia/Seoul"))
+        awaitResponded(saved)
         if (close) {
             val boundary = Timestamp.from(Instant.now())
             jdbc.update("UPDATE conversation.record_days SET close_at=?,closed_at=?,delivery_acknowledged=true WHERE id=?",
@@ -55,10 +56,23 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
         }
         return saved
     }
+    // 공유 DB의 대화 워커가 이 작업을 실행하는 동안에는 기록 잠금 때문에 정리 SQL이 행을 건너뛴다(SKIP LOCKED).
+    // 워커가 응답을 끝낸 뒤에 시험이 원하는 상태를 SQL로 지정한다.
+    private fun awaitResponded(saved: SaveMessageResult) {
+        repeat(200) {
+            if (jdbc.queryForObject<String>("SELECT status FROM conversation.response_jobs WHERE record_day_id=?",
+                    saved.record.id.value) == "COMPLETED") return
+            Thread.sleep(50)
+        }
+        error("시험 준비 중 응답 작업이 완료되지 않았습니다")
+    }
     private fun response(saved: SaveMessageResult, complete: Boolean = true): ResponseJob {
         val pending = saved.responseJob!!
         if (complete) jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=?,version=version+1 WHERE record_day_id=?",
             Timestamp.from(old), pending.recordDayId.value)
+        // 대기 상태는 워커가 선점하지 않도록 먼 미래로 예약한다
+        else jdbc.update("UPDATE conversation.response_jobs SET status='PENDING',next_attempt_at=?,version=version+1 WHERE record_day_id=?",
+            Timestamp.from(now.plus(Duration.ofDays(10))), pending.recordDayId.value)
         return responses.findByRecord(pending.userId, pending.recordDayId)!!
     }
     private fun responseCleaner() = TerminalResponseJobCleaner(jdbc, time, props)

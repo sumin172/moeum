@@ -58,6 +58,8 @@ import java.util.UUID
         "moeum.llm.routes.integration-test.max-output-tokens=100",
         // 일기 생성도 실제 provider 대신 FakeLlmProvider로(생성 흐름을 끝까지 검증하기 위함)
         "moeum.llm.routes.journal-generation.provider=fake",
+        // 대화 응답은 ControllableConversationResponder가 대신하지만, 대화 어댑터의 기동 시 라우트 검사도 fake 기준으로 한다
+        "moeum.llm.routes.conversation-response.provider=fake",
     ],
 )
 abstract class AbstractIntegrationTest {

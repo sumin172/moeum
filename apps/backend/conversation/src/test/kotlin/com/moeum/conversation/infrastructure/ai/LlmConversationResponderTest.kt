@@ -17,11 +17,20 @@ import java.time.Instant
 class LlmConversationResponderTest {
 
     private class CapturingLlmClient : LlmClient {
+        val requiredPurposes = mutableListOf<String>()
+        override fun requireRoute(purpose: String) { requiredPurposes += purpose }
         var request: LlmRequest? = null
         override fun generate(request: LlmRequest): LlmResult {
             this.request = request
             return LlmResult("많이 힘드셨겠어요.", "gemini-2.5-flash")
         }
+    }
+
+    @Test
+    fun `생성 시 대화 응답 용도의 라우트와 인증만 요구한다`() {
+        val llmClient = CapturingLlmClient()
+        LlmConversationResponder(llmClient, ConversationLimitProperties())
+        assertThat(llmClient.requiredPurposes).containsExactly(CONVERSATION_RESPONSE_PURPOSE)
     }
 
     @Test

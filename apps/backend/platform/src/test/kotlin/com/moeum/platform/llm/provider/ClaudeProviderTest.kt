@@ -26,6 +26,12 @@ class ClaudeProviderTest {
     private val provider = ClaudeProvider(builder.build(), ClaudeProperties(apiKey = "test-key"))
 
     @Test
+    fun `API 키가 없으면 필수 설정 이름만 알리고 기동용 바인딩은 막지 않는다`() {
+        assertThat(provider.missingSettings()).isEmpty()
+        assertThat(ClaudeProvider(builder.build(), ClaudeProperties()).missingSettings()).containsExactly("moeum.claude.api-key")
+    }
+
+    @Test
     fun `Messages API 형식으로 보내고 텍스트 블록과 사용량을 해석한다`() {
         server.expect(requestTo("https://claude.test/v1/messages"))
             .andExpect(header("x-api-key", "test-key"))

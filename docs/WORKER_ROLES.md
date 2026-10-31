@@ -13,8 +13,8 @@ $env:CLOUDFLARE_API_TOKEN = "API Token"
 ```
 
 설정 경로는 `moeum.cloudflare.account-id`, `moeum.cloudflare.api-token`이다.
-로컬에서는 `application-local.yml`의 `moeum.cloudflare`에 입력할 수 있다. `${CLOUDFLARE_ACCOUNT_ID:}`와 `${CLOUDFLARE_API_TOKEN:}`의 콜론 뒤에 기본값을 넣으면 환경변수가 없을 때 사용한다.
-키를 저장소에 기록하지 않는다. 누락된 인증은 호출 시 영구 인증 실패로 처리한다.
+로컬에서도 환경변수로 주입한다. `application-local.yml`은 저장소가 추적하는 파일이므로 `${CLOUDFLARE_ACCOUNT_ID:}`·`${CLOUDFLARE_API_TOKEN:}`의 콜론 뒤 기본값에 실제 값을 넣지 않는다.
+키를 저장소에 기록하지 않는다. 대화 워커는 대화 라우트가 선택한 공급자의 필수 설정이 없으면 기동하지 않는다. 규칙은 [AI 공급자](LLM.md#공급자-설정과-기동-검사)를 따른다.
 연결·읽기 제한은 각각 기본 3초·60초이며 `moeum.cloudflare.connection-timeout-ms`, `read-timeout-ms`로 조정한다.
 `CONVERSATION_LLM_CONCURRENCY`는 Cloudflare 동시 호출 상한에도 적용한다.
 `thinking-budget: 0`은 마지막 사용자 메시지에 `/no_think`를 추가하는 소프트 제어다. 강제 비활성화를 보장하지 않는다.
@@ -56,6 +56,7 @@ API는 servlet, 워커는 none web application type이다.
 API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등록된다.
 설정 바인딩도 역할별 JWT/Google 또는 LLM 사용 범위를 따른다. refresh token HMAC 검증 빈은 API 역할에서만 등록된다.
 각 역할은 다른 역할의 설정(API의 JWT·Google·refresh token 서명 키, 워커의 LLM 키·호출 설정) 없이 기동하며 그 설정을 검증하지 않는다.
+워커도 자기 용도의 라우트가 선택한 공급자 인증만 요구한다. 쓰지 않는 공급자와 다른 워커 용도의 인증은 필요 없다.
 역할별 등록 계약과 설정 격리는 WorkerRoleIsolationIntegrationTest가 local 프로필·OS 환경변수·시스템 속성 없이 검사한다.
 HTTP 진입점·스케줄 작업·LLM 호출 빈의 역할 지정은 ExecutionRoleRulesTest가 강제한다. 역할을 지정하지 않은 빈은 모든 역할에 등록된다.
 등록 방식의 대안과 선택 근거는 [실행 역할별 빈 등록](engineering/execution-role-registration.md)을 따른다.
