@@ -93,7 +93,6 @@ CREATE TABLE conversation.messages (
     CONSTRAINT uq_conversation_messages_user_client_message_id UNIQUE (user_id, client_message_id)
 );
 
-CREATE INDEX idx_messages_record_page ON conversation.messages (user_id,record_day_id,stream_sequence);
 CREATE UNIQUE INDEX uq_messages_stream_sequence ON conversation.messages(record_day_id,stream_sequence);
 CREATE INDEX idx_messages_context ON conversation.messages(user_id,record_day_id,source_sequence DESC,role ASC);
 CREATE UNIQUE INDEX uq_messages_source_sequence ON conversation.messages (record_day_id,source_sequence) WHERE role = 'USER';
