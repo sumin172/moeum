@@ -46,8 +46,17 @@ data class JobPolicy(
     // 리스 만료로 다시 claim되면서 시도 횟수가 상한을 넘은 경우 — 실행하지 않고 최종 실패로 끝낸다.
     fun isExhausted(attemptCount: Int): Boolean = attemptCount > maxTotalAttempts
 
-    fun manualRetryAt(attemptCount: Int, failedAt: Instant): Instant? =
-        if (attemptCount >= maxTotalAttempts) null else failedAt.plus(manualRetryCooldown)
+    // 최종 실패한 작업을 다시 시작할 수 있는 가장 이른 시각. 자동 재개와 사용자 재요청이 같은 하한을 지킨다.
+    // failure가 없으면(리스 소진) 일반 backoff와 수동 대기만 적용한다.
+    fun reopenAt(attemptCount: Int, failedAt: Instant, failure: JobFailure?): Instant {
+        val ordinary = failedAt.plus(backoff[(attemptCount - 1).coerceIn(0, backoff.lastIndex)])
+        val earliest = maxOf(ordinary, failedAt.plus(manualRetryCooldown))
+        if (failure?.kind != JobFailureKind.RATE_LIMITED) return earliest
+        val providerDelay = failure.retryAfter?.takeIf { !it.isNegative } ?: Duration.ZERO
+        return maxOf(earliest, failedAt.plus(rateLimitBackoff), failedAt.plus(providerDelay))
+    }
+
+    fun manualRetryExhausted(attemptCount: Int): Boolean = attemptCount >= maxTotalAttempts
 
     fun leaseExpiresAt(now: Instant): Instant = now.plus(lease)
 }

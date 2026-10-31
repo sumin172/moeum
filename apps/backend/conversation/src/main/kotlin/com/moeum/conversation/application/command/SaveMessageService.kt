@@ -51,8 +51,7 @@ class SaveMessageService(
         // 사용자 상태 잠금으로 동시 중복을 직렬화한다. 유니크 제약 예외를 포괄적으로 삼키지 않는다.
         messageRepository.findByUserIdAndClientMessageId(userId, command.clientMessageId)?.let { existing ->
             val record = recordDayRepository.find(userId, existing.recordDayId) ?: error("메시지의 기록이 없습니다")
-            return SaveMessageResult(existing,
-                responseJobRepository.findByUserIdAndUserMessageId(userId, existing.id), record)
+            return SaveMessageResult(existing, responseJobRepository.findByRecord(userId, record.id), record)
         }
         val now = timeProvider.now().truncatedTo(ChronoUnit.MICROS)
         val occurredAt = command.occurredAt.truncatedTo(ChronoUnit.MICROS)
@@ -79,7 +78,12 @@ class SaveMessageService(
             clientMessageId = command.clientMessageId, now = now,
         )
         val saved = messageRepository.append(message)
-        val job = ResponseJob.pending(saved, now).also(responseJobRepository::insert)
+        // 기록 잠금 아래에서 응답 실행 상태를 갱신한다. 대기·실행 중이면 그 실행이 끝난 뒤 이 입력까지 이어서 답한다.
+        val current = if (created) null else responseJobRepository.findByRecord(userId, record.id)
+        val job = when {
+            current == null -> ResponseJob.pending(userId, record.id, now).also(responseJobRepository::insert)
+            else -> current.inputAccepted(now)?.let(responseJobRepository::save) ?: current
+        }
         return SaveMessageResult(saved, job, record)
     }
 }

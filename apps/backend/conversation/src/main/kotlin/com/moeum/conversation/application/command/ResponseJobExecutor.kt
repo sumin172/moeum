@@ -5,6 +5,7 @@ import com.moeum.conversation.domain.ConversationResponder
 import com.moeum.conversation.domain.MessageRepository
 import com.moeum.conversation.domain.ResponseJobRepository
 import com.moeum.conversation.domain.model.ResponseJob
+import com.moeum.conversation.domain.model.selectResponseTargets
 import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.conversation.infrastructure.config.ResponseJobProperties
@@ -49,24 +50,31 @@ class ResponseJobExecutor(
         }
     }
 
-    fun execute(job: ResponseJob) = WorkTrace.run(job.id.value, job.recordDayId.value, job.state.attemptCount) { process(job) }
+    // 응답 작업은 기록당 하나이므로 기록 ID가 작업 ID다.
+    fun execute(job: ResponseJob) = WorkTrace.run(job.recordDayId.value, job.recordDayId.value, job.state.attemptCount) { process(job) }
 
     private fun process(job: ResponseJob) {
         if (policy.isExhausted(job.state.attemptCount)) {
-            log.warn("리스 만료로 재시도 횟수를 넘긴 응답 작업을 최종 실패 처리: jobId={}", job.id.value)
+            log.warn("리스 만료로 재시도 횟수를 넘긴 응답 작업을 최종 실패 처리: recordDayId={}", job.recordDayId.value)
             recordFailure(job) { markResponseFailedService.markExhausted(job) }
             return
         }
 
         try {
-            val userMessage = messageRepository.findByUserIdAndId(job.userId, job.userMessageId)
-                ?: error("응답 작업의 유저 메시지가 없습니다: messageId=${job.userMessageId.value}")
-            val context = messageRepository.findContext(job.userId, job.recordDayId, job.inputSourceRevision, limits.contextMessageLimit)
-            val response = conversationResponder.respond(context)
-            saveGeneratedResponseService.save(job, userMessage, response)
+            // 이 기록의 ASSISTANT는 version을 가진 현재 소유자만 저장하므로 실행 중 답변 경계가 바뀌지 않는다.
+            val answered = messageRepository.answeredSourceRevision(job.userId, job.recordDayId)
+            val unanswered = messageRepository.findUnanswered(job.userId, job.recordDayId, answered, job.observedSourceRevision,
+                limits.contextMessageLimit)
+            check(unanswered.isNotEmpty()) { "답할 입력이 없는 응답 작업입니다" }
+            val targets = selectResponseTargets(unanswered, limits.contextCharBudget, limits.contextMessageLimit)
+            val historyLimit = limits.contextMessageLimit - targets.size
+            val history = if (historyLimit > 0) messageRepository.findContext(job.userId, job.recordDayId, answered, historyLimit) else emptyList()
+            val response = conversationResponder.respond(history, targets)
+            // 호출에 쓴 범위를 그대로 저장한다. 남은 입력은 저장 시 다음 실행 주기로 넘긴다.
+            saveGeneratedResponseService.save(job, targets.last().sourceSequence, response)
             log.atInfo().addKeyValue("event", "job.completed").log("Worker job completed")
         } catch (_: OptimisticLockingFailureException) {
-            log.warn("리스를 잃은 응답 작업이라 결과를 버림(다른 워커가 처리 중): jobId={}", job.id.value)
+            log.warn("리스를 잃은 응답 작업이라 결과를 버림(다른 워커가 처리 중): recordDayId={}", job.recordDayId.value)
         } catch (e: Exception) {
             val failure = JobFailure.classify(e)
             log.atError().addKeyValue("event", "job.failed")
@@ -81,7 +89,7 @@ class ResponseJobExecutor(
     // 실패 기록 자체가 실패해도(리스를 뺏긴 경우 포함) 로그는 남아야 한다.
     private fun recordFailure(job: ResponseJob, record: () -> Unit) {
         runCatching(record).onFailure { e ->
-            log.warn("응답 작업 실패 기록을 남기지 못함: jobId={}, error={}", job.id.value, SafeFailure.code(e))
+            log.warn("응답 작업 실패 기록을 남기지 못함: recordDayId={}, error={}", job.recordDayId.value, SafeFailure.code(e))
         }
     }
 }

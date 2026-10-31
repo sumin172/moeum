@@ -88,12 +88,36 @@ class JobStateTest {
     }
 
     @Test
-    fun `출력 오류는 한 번만 자동 재시도하고 수동 재시도는 간격과 누적 횟수로 제한한다`() {
+    fun `출력 오류는 한 번만 자동 재시도하고 수동 재시도는 누적 횟수로 제한한다`() {
         val invalid = JobFailure(JobFailureKind.INVALID_OUTPUT)
         val first = JobState.pending(now).claimed().failed(policy, now, invalid)
         assertThat(first.status).isEqualTo(JobStatus.PENDING)
         assertThat(first.claimed().failed(policy, now, invalid).status).isEqualTo(JobStatus.FAILED)
-        assertThat(policy.manualRetryAt(3, now)).isEqualTo(now.plus(Duration.ofMinutes(1)))
-        assertThat(policy.manualRetryAt(5, now)).isNull()
+        assertThat(policy.manualRetryExhausted(4)).isFalse()
+        assertThat(policy.manualRetryExhausted(5)).isTrue()
+    }
+
+    @Test
+    fun `재개 가능 시각은 일반 backoff·수동 대기·공급자 대기 중 가장 늦은 시각이다`() {
+        val slowBackoff = policy.copy(backoff = listOf(Duration.ofMinutes(3)))
+        assertThat(policy.reopenAt(1, now, JobFailure(JobFailureKind.PERMANENT))).isEqualTo(now.plus(Duration.ofMinutes(1)))
+        assertThat(slowBackoff.reopenAt(1, now, JobFailure(JobFailureKind.TRANSIENT))).isEqualTo(now.plus(Duration.ofMinutes(3)))
+        assertThat(policy.reopenAt(3, now, null)).isEqualTo(now.plus(Duration.ofMinutes(1)))
+        val rateLimited = policy.copy(rateLimitBackoff = Duration.ofMinutes(2))
+        assertThat(rateLimited.reopenAt(1, now, JobFailure(JobFailureKind.RATE_LIMITED))).isEqualTo(now.plus(Duration.ofMinutes(2)))
+        assertThat(rateLimited.reopenAt(1, now, JobFailure(JobFailureKind.RATE_LIMITED, Duration.ofMinutes(10))))
+            .isEqualTo(now.plus(Duration.ofMinutes(10)))
+    }
+
+    @Test
+    fun `재개는 새 실행 주기라 시도 횟수를 0으로, 최종 실패는 재개 가능 시각을 남긴다`() {
+        val failed = JobState.pending(now).claimed().failedUntil(now.plusSeconds(60))
+        assertThat(failed.status).isEqualTo(JobStatus.FAILED)
+        assertThat(failed.nextAttemptAt).isEqualTo(now.plusSeconds(60))
+        val reopened = failed.reopened(now.plusSeconds(90))
+        assertThat(reopened.status).isEqualTo(JobStatus.PENDING)
+        assertThat(reopened.attemptCount).isZero()
+        assertThat(reopened.nextAttemptAt).isEqualTo(now.plusSeconds(90))
+        assertThat(failed.restarted(now).attemptCount).isEqualTo(1)
     }
 }

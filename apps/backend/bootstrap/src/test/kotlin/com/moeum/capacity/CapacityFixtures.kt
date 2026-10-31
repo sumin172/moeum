@@ -33,12 +33,11 @@ class CapacityFixtures(private val jdbc: JdbcTemplate) {
                 FROM generate_series(1,$records) i CROSS JOIN generate_series(1,20) s CROSS JOIN generate_series(0,1) r
                 WHERE NOT (s=1 AND r=1);
                 INSERT INTO conversation.response_jobs
-                    (id,user_message_id,user_id,record_day_id,input_source_revision,status,attempt_count,next_attempt_at,version,created_at,updated_at)
-                SELECT md5('$prefix-j'||i||':'||s)::uuid,md5('$prefix-m'||i||':'||s||':0')::uuid,
-                    md5('$prefix-user'||i)::uuid,md5('$prefix-r'||i)::uuid,s,
-                    CASE WHEN s=1 THEN 'FAILED' ELSE 'COMPLETED' END,1,now()-interval '31 days',1,
+                    (record_day_id,user_id,observed_source_revision,status,attempt_count,next_attempt_at,version,created_at,updated_at)
+                SELECT md5('$prefix-r'||i)::uuid,md5('$prefix-user'||i)::uuid,20,
+                    CASE WHEN i%2=0 THEN 'FAILED' ELSE 'COMPLETED' END,1,now()-interval '31 days',1,
                     now()-interval '32 days',now()-interval '31 days'
-                FROM generate_series(1,$records) i CROSS JOIN generate_series(1,20) s;
+                FROM generate_series(1,$records) i;
                 INSERT INTO journal.generation_jobs
                     (id,user_id,record_day_id,status,attempt_count,next_attempt_at,version,created_at,updated_at)
                 SELECT md5('$prefix-g'||i)::uuid,md5('$prefix-user'||i)::uuid,md5('$prefix-r'||i)::uuid,
@@ -96,14 +95,14 @@ class CapacityFixtures(private val jdbc: JdbcTemplate) {
                 FROM generate_series($offset,$end) i CROSS JOIN generate_series(1,20) s CROSS JOIN generate_series(0,1) r
                 WHERE NOT (i%100=0 AND s=1 AND r=1);
                 INSERT INTO conversation.response_jobs
-                (id,user_message_id,user_id,record_day_id,input_source_revision,status,attempt_count,
+                (record_day_id,user_id,observed_source_revision,status,attempt_count,
                     next_attempt_at,version,created_at,updated_at)
-                SELECT md5('hj'||i||':'||s)::uuid,md5('hm'||i||':'||s||':0')::uuid,md5('hu'||(i%$users))::uuid,md5('hr'||i)::uuid,s,
-                    CASE WHEN i%100=0 AND s=1 THEN 'FAILED' ELSE 'COMPLETED' END,
+                SELECT md5('hr'||i)::uuid,md5('hu'||(i%$users))::uuid,20,
+                    CASE WHEN i%100=0 THEN 'FAILED' ELSE 'COMPLETED' END,
                     1,
                     (current_date-(i/$users))::timestamptz,1,(current_date-(i/$users+1))::timestamptz,
                     (current_date-(i/$users))::timestamptz
-                FROM generate_series($offset,$end) i CROSS JOIN generate_series(1,20) s
+                FROM generate_series($offset,$end) i
                 WHERE i/$users<=35 OR i%100=0;
                 INSERT INTO journal.journals
                 (id,user_id,record_day_id,display_date,title,body,version)

@@ -26,7 +26,7 @@ class SaveMessageServiceTest {
     private val now = Instant.parse("2026-08-02T10:00:00Z")
     private val messageRepository = InMemoryMessageRepository()
     private val recordDayRepository = InMemoryRecordDayRepository()
-    private val responseJobRepository = InMemoryResponseJobRepository(messageRepository)
+    private val responseJobRepository = InMemoryResponseJobRepository(recordDayRepository)
     private val service = newService()
 
     private fun newService(quotaLimit: Int = 20) =
@@ -127,7 +127,7 @@ class SaveMessageServiceTest {
         val retried = service.save(userId, command("2026-08-02T03:00:00Z", clientMessageId = clientMessageId))
 
         assertThat(retried.message.id).isEqualTo(first.message.id)
-        assertThat(retried.responseJob!!.id).isEqualTo(first.responseJob!!.id)
+        assertThat(retried.responseJob!!.recordDayId).isEqualTo(first.responseJob!!.recordDayId)
         assertThat(messageRepository.messages).hasSize(1)
         assertThat(responseJobRepository.jobs).hasSize(1)
     }
@@ -194,14 +194,32 @@ class SaveMessageServiceTest {
     }
 
     @Test
-    fun `메시지와 함께 바로 실행할 수 있는 AI 응답 작업을 만든다`() {
+    fun `기록의 첫 메시지와 함께 바로 실행할 수 있는 기록 단위 응답 작업을 만든다`() {
         val result = service.save(userId, command("2026-08-02T03:00:00Z"))
 
         val job = result.responseJob!!
-        assertThat(job.userMessageId).isEqualTo(result.message.id)
         assertThat(job.recordDayId).isEqualTo(result.record.id)
         assertThat(job.state.status).isEqualTo(JobStatus.PENDING)
+        assertThat(job.state.attemptCount).isZero()
         assertThat(job.state.nextAttemptAt).isEqualTo(now)
+    }
+
+    @Test
+    fun `같은 기록의 연속 입력은 대기·실행 중인 작업을 바꾸지 않고, 완료된 작업은 새 실행 주기로 연다`() {
+        val first = service.save(userId, command("2026-08-02T03:00:00Z")).responseJob!!
+        val second = service.save(userId, command("2026-08-02T03:01:00Z")).responseJob!!
+        assertThat(second).isEqualTo(first)
+        assertThat(responseJobRepository.jobs).hasSize(1)
+
+        responseJobRepository.save(first.copy(state = first.state.copy(status = JobStatus.PROCESSING, attemptCount = 1)))
+        val processing = responseJobRepository.jobs.getValue(first.recordDayId)
+        assertThat(service.save(userId, command("2026-08-02T03:02:00Z")).responseJob).isEqualTo(processing)
+
+        responseJobRepository.save(processing.copy(state = processing.state.completed()))
+        val reopened = service.save(userId, command("2026-08-02T03:03:00Z")).responseJob!!
+        assertThat(reopened.state.status).isEqualTo(JobStatus.PENDING)
+        assertThat(reopened.state.attemptCount).isZero()
+        assertThat(reopened.state.nextAttemptAt).isEqualTo(now)
     }
 
     @Test
