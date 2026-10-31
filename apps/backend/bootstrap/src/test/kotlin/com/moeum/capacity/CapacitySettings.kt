@@ -3,7 +3,7 @@ package com.moeum.capacity
 /** 성능 목표와 실측을 섞지 않는다. 모든 값은 보고서에 그대로 남긴다. */
 data class CapacitySettings(
     val profile: String = System.getProperty("capacity.profile", "P0"),
-    val scenario: String = System.getProperty("capacity.scenario", "smoke"),
+    val scenario: String = System.getProperty("capacity.scenario", "benchmark"),
     val durationSeconds: Int = number("durationSeconds", 20),
     val warmupSeconds: Int = number("warmupSeconds", 5),
     val rps: Int = number("rps", when (System.getProperty("capacity.profile", "P0")) { "P1" -> 250; "P2" -> 2500; else -> 25 }),
@@ -23,7 +23,7 @@ data class CapacitySettings(
 ) {
     init {
         require(profile in setOf("P0", "P1", "P2"))
-        require(scenario in setOf("smoke", "benchmark", "sustained", "failure"))
+        require(scenario in setOf("benchmark", "sustained", "failure")) { "지원하는 capacity.scenario: benchmark, sustained, failure (입력: $scenario)" }
         require(durationSeconds in 5..14400 && warmupSeconds in 0..600)
         require(rps in 1..2500 && conversationReplicas in 1..8)
         require(conversationBatchSize in 1..64)

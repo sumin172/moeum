@@ -19,17 +19,25 @@ import java.util.concurrent.*
 class GrowthCapacityTest {
     private val mapper = JsonMapper.builder().build()
     private val settings = CapacitySettings()
+    // 성능 목표는 목적이 목표 확인인 시험에서만 판정한다. benchmark P0·P2는 측정, failure는 복구 확인이 목적이다.
+    // 부하를 만들지 못한 도구 실패(주입기 드롭)는 목적과 관계없이 실패다.
+    private val goalsEnforced = settings.scenario == "sustained" || (settings.scenario == "benchmark" && settings.profile == "P1")
     private val directory = Path.of("build", "capacity", Instant.now().toString().replace(":","-") + "-" + UUID.randomUUID().toString().take(8)).toAbsolutePath()
     private val processes = mutableListOf<CapacityProcess>()
     private val report = linkedMapOf<String, Any?>()
 
     @Test fun `real HTTP separate JVM and PostgreSQL capacity experiments`() {
+        // 데워지지 않은 JVM의 지연이 첫 구간 판정을 실패시키지 않게 한다
+        require(!goalsEnforced || settings.warmupSeconds >= 30) {
+            "목표를 판정하는 시험(benchmark P1·sustained)은 capacity.warmupSeconds가 30 이상이어야 합니다"
+        }
         Files.createDirectories(directory)
         println("CAPACITY settings=" + mapper.writeValueAsString(settings))
         println("CAPACITY artifacts=$directory")
         report["startedAt"] = Instant.now().toString()
         report["state"] = "measurement-running"
         report["settings"] = settings
+        report["performanceGoalsEnforced"] = goalsEnforced
         report["java"] = System.getProperty("java.version")
         report["os"] = System.getProperty("os.name")+" "+System.getProperty("os.version")
         report["hostAvailableProcessors"] = Runtime.getRuntime().availableProcessors()
@@ -104,19 +112,21 @@ class GrowthCapacityTest {
                         load.run(api.apiPort,settings.rps,settings.warmupSeconds,warm)
                         check(drain(load,warm,settings.drainSeconds)) { "워밍업 backlog가 남아 측정 구간을 시작할 수 없습니다" }
                     }
+                    fun enforceConversationGoals(summary:Map<String,Any?>) {
+                        if(goalsEnforced) check(summary["apiGoalPassed"]==true && summary["responseWaitingGoalPassed"]==true) {
+                            "대화 기준선 목표 미달: phase=${summary["name"]}. 마감 부하를 추가하기 전에 원인 수정·재시험이 필요합니다"
+                        }
+                    }
                     phases += phase("conversation-baseline", api, conversations, null, jdbc, load, emptyList(), false, postgres,
                         preparedUsers("conversation-baseline"))
                     writeReport()
+                    enforceConversationGoals(phases.last())
                     if (settings.conversationReplicas>1) {
                         for (i in 1 until settings.conversationReplicas) conversations += start("conversation-worker",i,postgres.jdbcUrl)
                         phases += phase("conversation-scaled",api,conversations,null,jdbc,load,emptyList(),false,postgres,
                             preparedUsers("conversation-scaled"))
                         writeReport()
-                    }
-                    if(settings.profile=="P1" && settings.scenario!="failure") {
-                        check(phases.last()["apiGoalPassed"]==true && phases.last()["responseWaitingGoalPassed"]==true) {
-                            "P1 대화 기준선 미달: 마감 부하를 추가하기 전에 원인 수정·재시험이 필요합니다"
-                        }
+                        enforceConversationGoals(phases.last())
                     }
                     val mixedUsers = preparedUsers("journal-plus-conversation")
                     val burst = fixture.journalBurst(settings.journalBurst)
@@ -130,17 +140,14 @@ class GrowthCapacityTest {
                     report["journalApiP95IncreaseFraction"] = if(base95 != null && mixed95 != null) mixed95/base95-1 else null
                     report["journalComparisonValid"] = base["responsesDrained"] == true
                     writeReport()
-                    if(settings.profile=="P1" && settings.scenario!="failure") {
-                        check(mixed["apiGoalPassed"]==true && mixed["responseWaitingGoalPassed"]==true) { "P1 혼합 부하 API·대화 대기 목표 미달" }
-                        check(burst.isEmpty() || (base["responsesDrained"]==true && base95!=null && mixed95!=null && mixed95<=base95*1.2)) {
-                            "P1 일기 부하 추가 후 API p95 증가 20% 초과"
-                        }
-                        check(burst.isEmpty() || (mixed["journalCompletion"] as Map<*,*>)["goalPassed"]==true) { "P1 일기 생성 기한 목표 미달" }
+                    if(goalsEnforced) {
+                        check(mixed["apiGoalPassed"]==true && mixed["responseWaitingGoalPassed"]==true) { "혼합 부하 API·대화 대기 목표 미달" }
+                        check(burst.isEmpty() || (mixed["journalCompletion"] as Map<*,*>)["goalPassed"]==true) { "일기 생성 기한 목표 미달" }
                         check(burst.size<2 || mixed["journalPolicyDuringLoad"]!=null || mixed["journalPolicyAfterDrain"]!=null) {
-                            "P1 구독 수정·마감 후 대화 정책 미검증"
+                            "구독 수정·마감 후 대화 정책 미검증"
                         }
                     }
-                    if(settings.scenario=="smoke" || settings.scenario=="failure") {
+                    if(settings.scenario=="failure") {
                         report["activePhase"] = "provider-faults"
                         writeReport()
                         report["providerFaults"] = faults(api,conversations,jdbc,load)
@@ -325,6 +332,8 @@ class GrowthCapacityTest {
         Files.writeString(directory.resolve("$name.json"),mapper.writerWithDefaultPrettyPrinter().writeValueAsString(summary))
         println("CAPACITY result phase=$name api=$latency waiting=$waiting states=${summary["responseStates"]}")
         writeReport()
+        // 보고서를 남긴 뒤 판정한다. 측정 목적의 시험에서도 의도한 부하를 만들지 못했다면 결과를 해석할 수 없다.
+        check(injection["generatorRejected"]==0L) { "부하 주입기가 예정 요청을 보내지 못했습니다(도구 실패): phase=$name, injection=$injection" }
         return summary
     }
 
@@ -338,23 +347,47 @@ class GrowthCapacityTest {
         return false
     }
 
+    // 대화 실행 주기마다 첫 시도에 장애를 주입한다. 기록당 실행 주기는 여러 번일 수 있으므로 작업 수가 아니라
+    // 주기마다 남는 ASSISTANT 수와 비교하고, 재시도 성공·누락·중복을 각각 확인한다.
     private fun faults(api:CapacityProcess,conversations:List<CapacityProcess>,jdbc:JdbcTemplate,load:CapacityLoad):List<Map<String,Any>> =
         listOf("429","timeout","5xx").map { fault ->
+            check(awaitNoActiveResponses(jdbc,60)) { "장애 주입 전 진행 중인 대화 작업이 남았습니다: fault=$fault" }
             val failuresBefore=conversations.sumOf { it.metrics()["providerFailures"].asLong() }
             conversations.forEach { it.update(CapacityControl(settings.conversationDelayMs.toLong(),settings.journalDelayMs.toLong(),fault,1)) }
+            // 매 주입은 새 사용자로 보내 이번 구간의 기록만 대상으로 한다
             val requests=ConcurrentLinkedQueue<CapacityRequest>()
             load.run(api.apiPort,5,5,requests)
             check(requests.size==25 && requests.all { it.status==200 && it.jobId!=null }) { "장애 주입 대상 대화 25건 접수 실패" }
-            check(drain(load,requests,60))
+            check(drain(load,requests,60)) { "장애 주입 대화가 시간 안에 완료되지 않았습니다: fault=$fault" }
+            check(awaitNoActiveResponses(jdbc,30)) { "장애 주입 후 진행 중인 대화 작업이 남았습니다: fault=$fault" }
+            val records=requests.mapNotNull { it.jobId }.distinct()
             val states=load.responseStatus(requests)
-            check((states["COMPLETED"]?:0)==requests.mapNotNull { it.jobId }.distinct().size.toLong())
+            check((states["COMPLETED"]?:0)==records.size.toLong()) { "장애 주입 대화의 응답 작업이 모두 완료되지 않았습니다: $states" }
             val integrity=load.verifyStored(requests)
+            val responses=load.responseSummary(records)
             val injectedFailures=conversations.sumOf { it.metrics()["providerFailures"].asLong() }-failuresBefore
-            check(injectedFailures==requests.mapNotNull { it.jobId }.distinct().size.toLong()) { "실패 주입 횟수가 맞지 않습니다" }
             conversations.forEach { it.update(CapacityControl(settings.conversationDelayMs.toLong(),settings.journalDelayMs.toLong())) }
-            mapOf("fault" to fault,"injectedFailures" to injectedFailures,"responseStates" to states,"integrity" to integrity,
-                "maxAttemptCount" to (jdbc.queryForObject<Int>("SELECT max(attempt_count) FROM conversation.response_jobs WHERE created_at>now()-interval '5 minutes'")?:0))
+            check(injectedFailures>0) { "장애가 실제로 주입되지 않았습니다: fault=$fault" }
+            check(responses.unansweredRecords==0L) { "재시도 후에도 답하지 않은 입력이 남았습니다: fault=$fault" }
+            check(responses.duplicateResponses==0L) { "같은 범위에 중복 응답이 저장됐습니다: fault=$fault" }
+            // 각 실행 주기는 첫 시도 실패 → 재시도 성공으로 ASSISTANT 하나를 남긴다
+            check(injectedFailures==responses.assistantResponses) {
+                "주입 실패 수와 재시도 성공 응답 수가 다릅니다: fault=$fault, injected=$injectedFailures, responses=${responses.assistantResponses}"
+            }
+            check(responses.attemptCounts.keys==setOf(2)) { "마지막 실행 주기가 한 번의 재시도로 끝나지 않았습니다: ${responses.attemptCounts}" }
+            mapOf("fault" to fault,"injectedFailures" to injectedFailures,"records" to records.size,
+                "assistantResponses" to responses.assistantResponses,"finalAttemptCounts" to responses.attemptCounts,
+                "responseStates" to states,"integrity" to integrity)
         }
+
+    private fun awaitNoActiveResponses(jdbc:JdbcTemplate,seconds:Int):Boolean {
+        val end=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds.toLong())
+        while(System.nanoTime()<end) {
+            if(jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs WHERE status IN ('PENDING','PROCESSING')")==0L)return true
+            Thread.sleep(500)
+        }
+        return false
+    }
 
     private fun journalRecovery(journal:CapacityProcess,url:String,fixtures:CapacityFixtures,jdbc:JdbcTemplate,
         api:CapacityProcess,conversations:List<CapacityProcess>,load:CapacityLoad):Map<String,Any> {

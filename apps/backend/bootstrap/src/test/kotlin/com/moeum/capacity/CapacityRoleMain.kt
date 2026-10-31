@@ -15,6 +15,7 @@ import java.lang.management.ManagementFactory
 import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -87,10 +88,14 @@ object CapacityRoleMain {
             respond(exchange, "{}".toByteArray())
         }
         control.start()
-        Files.writeString(Path.of(System.getProperty("capacity.readyFile")), mapper.writeValueAsString(mapOf(
+        // 부모가 준비 파일을 폴링하므로 다 쓴 뒤 옮긴다. 직접 쓰면 비어 있는 순간을 읽을 수 있다.
+        val ready = Path.of(System.getProperty("capacity.readyFile"))
+        val pending = Path.of("$ready.tmp")
+        Files.writeString(pending, mapper.writeValueAsString(mapOf(
             "pid" to ProcessHandle.current().pid(), "controlPort" to control.address.port,
             "apiPort" to context.environment.getProperty("local.server.port"), "role" to role,
         )))
+        Files.move(pending, ready, StandardCopyOption.ATOMIC_MOVE)
         Runtime.getRuntime().addShutdownHook(Thread {
             control.stop(0)
             controlThreads.close()
