@@ -43,39 +43,39 @@ cd apps/backend
 ```
 
 P0/P1/P2 기본 저장 목표는 각각 25/250/2500 RPS다.
-목표 부하를 보내더라도 API/대화 대기 기준을 통과했다고 자동으로 간주하지 않는다.
+sustained는 목표 부하 확인 시험이므로 프로파일과 관계없이 API·대화 대기 목표 미달을 실패로 판정한다.
 기본 대화 8·일기 2 슬롯은 용량 승인값이 아니다.
 워커 수·슬롯·풀을 바꿀 때 호출 예산과 DB 연결 합계를 함께 보고한다.
 
 주요 인자:
 
-| 인자                                              | 의미 / 기본값                                                     |
-|---------------------------------------------------|-------------------------------------------------------------------|
-| capacity.profile                                  | P0 / P1 / P2, 기본 P0                                             |
-| capacity.rps                                      | 직접 지정한 저장 RPS; 미지정 시 프로파일 기본값                   |
-| capacity.scenario                                 | smoke / benchmark / sustained / failure                           |
-| capacity.durationSeconds                          | 측정 구간 20초                                                    |
-| capacity.warmupSeconds                            | 워밍업 5초                                                        |
-| capacity.conversationSlots / journalSlots         | 인스턴스 슬롯 8 / 2                                               |
-| capacity.conversationReplicas                     | 대화 워커 수 1, 2 이상이면 1→N 비교 구간 추가                     |
-| capacity.conversationBatchSize                    | 워커당 배치 선점 상한 32; 예약 실행 슬롯 이내                     |
-| capacity.apiPool / conversationPool / journalPool | DB 풀 10 / 4 / 2                                                  |
-| capacity.conversationDelayMs / journalDelayMs     | fake 호출 지연 100 / 200ms                                        |
-| capacity.historyRecords                           | 180일에 분산할 과거 기록 수 0; 기록당 USER 20개·ASSISTANT 19~20개 |
-| capacity.journalBurst                             | 동시에 마감 대상으로 넣을 기록 수 100; 기록당 원본 20개           |
-| capacity.drainSeconds                             | 대화 backlog 완료 대기 상한 120초                                 |
-| capacity.journalDrainSeconds                      | 주입 종료 후 일기 추가 대기 상한 0초                              |
+| 인자                                              | 의미 / 기본값                                                                                   |
+|---------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| capacity.profile                                  | P0 / P1 / P2, 기본 P0                                                                           |
+| capacity.rps                                      | 직접 지정한 저장 RPS; 미지정 시 프로파일 기본값                                                 |
+| capacity.scenario                                 | benchmark(기본) / sustained / failure. 목적·판정은 [시험 기준](CAPACITY.md#시험별-목적과-판정)  |
+| capacity.durationSeconds                          | 측정 구간 20초                                                                                  |
+| capacity.warmupSeconds                            | 워밍업 5초. 목표를 판정하는 시험(benchmark P1·sustained·정리 시험)은 30초 미만이면 시작 전 거부 |
+| capacity.conversationSlots / journalSlots         | 인스턴스 슬롯 8 / 2                                                                             |
+| capacity.conversationReplicas                     | 대화 워커 수 1, 2 이상이면 1→N 비교 구간 추가                                                   |
+| capacity.conversationBatchSize                    | 워커당 배치 선점 상한 32; 예약 실행 슬롯 이내                                                   |
+| capacity.apiPool / conversationPool / journalPool | DB 풀 10 / 4 / 2                                                                                |
+| capacity.conversationDelayMs / journalDelayMs     | fake 호출 지연 100 / 200ms                                                                      |
+| capacity.historyRecords                           | 180일에 분산할 과거 기록 수 0; 기록당 USER 20개·ASSISTANT 19~20개                               |
+| capacity.journalBurst                             | 동시에 마감 대상으로 넣을 기록 수 100; 기록당 원본 20개                                         |
+| capacity.drainSeconds                             | 대화 backlog 완료 대기 상한 120초                                                               |
+| capacity.journalDrainSeconds                      | 주입 종료 후 일기 추가 대기 상한 0초                                                            |
 
 sustained의 혼합 구간을 7200초로 설정하면 2시간 지속 시험이다.
 sustained 기준선과 1→N 구간은 최대 1800초로 제한한다.
 의도한 워밍업 10분·목표 구간 30분·지속 구간 2시간을 보고서에서 구분한다.
 위 명령은 워밍업·기준선·혼합 구간에 총 2시간 40분이 필요하며 기동·데이터 준비 시간은 추가다.
-P1 기준선이 저장·대화 대기 목표를 충족하지 못하면 마감 부하를 추가하기 전에 시험을 실패로 종료한다.
+목표를 판정하는 시험(benchmark P1·sustained)에서 기준선이 저장·대화 대기 목표를 충족하지 못하면 마감 부하를 추가하기 전에 시험을 실패로 종료한다.
 
 ## 장애 시험
 
-smoke/failure는 429·timeout·5xx를 첫 시도에 주입하고 실제 재시도를 확인한다.
-시험의 backoff는 대화 1/2초, 일기 1/2/4/8초이며 429 최소 대기는 2초다. 운영 기본 backoff를 검증했다는 뜻은 아니다.
+failure는 429·timeout·5xx를 대화 실행 주기마다 첫 시도에 주입하고 실제 재시도를 확인한다. 판정 기준은 [시험 기준](CAPACITY.md#시험별-목적과-판정)을 따른다.
+시험 설정과 운영 기본값의 차이는 [시험 기준](CAPACITY.md#운영-설정과-다른-시험-설정)에 있다. 운영 기본 backoff를 검증했다는 뜻은 아니다.
 일기 JVM은 30초 fake 호출 중 실제 강제 종료한 뒤 새 JVM으로 회수한다.
 운영 기본 5분 generation lease를 사용하며 DB 리스 시각을 인위적으로 당기지 않는다.
 이 때문에 장애 시험은 짧은 부하 구간보다 수 분 오래 걸릴 수 있다.
@@ -99,16 +99,16 @@ smoke/failure는 429·timeout·5xx를 첫 시도에 주입하고 실제 재시�
 데이터를 직접 넣은 마감 fixture는 API 접수/요금제 집행 검증에 포함하지 않는다.
 마감 원본 fixture는 한 트랜잭션으로 넣어 일부 원본만 보고 생성하는 경쟁을 막는다.
 일기가 완료되면 무료 수정 거부·구독 수정·version 충돌·마감 후 다음 기록 귀속과 quota를 확인한다. 주입 중 완료되지 않으면 일기 drain 이후 검사한다.
-업무 스케줄러는 대화 50ms·일기 100ms poll로 시험한다. 운영 기본 1초 poll의 성능 결과로 해석하지 않는다.
+업무 스케줄러는 운영과 다른 짧은 poll로 시험한다([설정 차이](CAPACITY.md#운영-설정과-다른-시험-설정)).
 자동 정리 스케줄러의 최초 실행은 24시간 뒤로 미루고, 혼합 구간에서 각 워커의 실제 100개 정리 함수를 매초 호출한다.
 1초 표본으로 수집한 풀·메모리 최고값은 표본 사이의 순간 최대값을 보장하지 않는다.
 
-benchmark·smoke·failure의 사용자 수는 ceil(예정 요청 수 / 18), 최소 10명으로 정한다. 한 사용자에게 18회 이하를 보내며 같은 사용자에게는 고정 타임존을 사용한다.
+benchmark·failure의 사용자 수는 ceil(예정 요청 수 / 18), 최소 10명으로 정한다. 한 사용자에게 18회 이하를 보내며 같은 사용자에게는 고정 타임존을 사용한다.
 이 시나리오들은 구간마다 새 사용자를 만들고 순번대로 순환시키므로, 첫 기록 생성이 구간 초반 10초에 집중된다. 시험 길이를 늘리면 초반 신규 기록 수도 늘어난다.
 `sustained`는 사용자 수를 ceil(예정 요청 수 / 17)로 정하고 각 사용자에게 첫 메시지를 API로 미리 접수해 응답 작업까지 완료한 뒤 측정한다.
 측정 구간은 사용자당 최대 17회를 보내므로 준비 포함 18회 이하이며, 준비 시간·요청은 지연 통계에 넣지 않고 보고서의 `cohortPreparations`에 기록한다.
 첫 기록 집중 생성의 영향과 기존 기록에 쌓이는 대화의 지속 부하를 별도로 판단한다.
-짧은 구간에서는 동일 기록 입력이 1초 LLM보다 빨리 반복될 수 있어 기록별 순서 대기가 생긴다. 짧은 failure 시험을 P0 용량 승인으로 해석하지 않는다.
+짧은 구간에서는 동일 기록 입력이 1초 LLM보다 빨리 반복될 수 있어, 실행 중 접수된 입력은 그 실행이 끝난 뒤 다음 실행 주기에서 함께 답한다. 짧은 failure 시험을 P0 용량 승인으로 해석하지 않는다.
 
 주입기는 응답을 기다려 요청 수를 줄이는 closed-loop 방식이 아니다.
 512개 in-flight 상한에 막힌 예정 요청을 generatorRejected로 기록한다.
@@ -234,12 +234,13 @@ API·대화·일기 JVM은 각각 한 개이며 conversationReplicas는 1만 허
 DB 풀·슬롯·fake 지연은 CapacitySettings에 지정한 값을 보고서에 남긴다. 별도 설정이 없으면 풀 10/4/2, 슬롯 8/2, fake 지연 100/200ms다.
 정리 워커는 운영의 최초 1분 대기·10초 간격·실행당 최대 10배치/2초 예산으로 동작한다. /clean 수동 호출은 사용하지 않는다.
 워밍업 접수·응답을 완료한 후 측정하며 워밍업 요청은 지연 통계에서 제외한다.
-30일 경과 작업의 유입을 압축 재현하기 위해 10초마다 닫힌 기록 13개·USER 260개·ASSISTANT 247개·기록당 종료 응답 작업 1개·종료 일기 작업 13개를 직접 저장한다.
-FAILED 응답과 FAILED 일기 작업을 포함하며 실패 일기는 created_at만 30일 경과하고 updated_at은 최근인 사례도 포함한다.
+30일 경과 작업의 유입을 압축 재현하기 위해 10초마다 닫힌 기록 13개·USER 260개·ASSISTANT 254개·기록당 종료 응답 작업 1개·종료 일기 작업 13개를 직접 저장한다.
+FAILED 응답(마지막 USER에 답하지 못한 기록)과 FAILED 일기 작업을 포함하며 실패 일기는 created_at만 30일 경과하고 updated_at은 최근인 사례도 포함한다.
 이는 실제 30일 대기를 검증하는 시험이 아니며 API 부하와 별도의 만료 작업 처리 부하다.
 중간에 일기 워커를 min(60초, durationSeconds/6) 동안 중단한 후 재기동하며, 종료 후 최대 drainSeconds 동안 정리와 대화 완료를 기다린다.
 30분 시험의 중단 시간은 60초다. 3분 이하의 도구 확인 시험은 초기 3분 이후의 안정 구간 적체 상한 판정을 포함하지 않는다.
 최종 만료 작업 0건, 모든 접수·응답 완료, 원본 보존, 보존 기간 전 응답 작업 유지와 기존 API·응답 대기 목표를 검사한다.
+주입한 만료 작업은 ID로 삭제를, 시험 시작 전에 넣은 보존 대상 작업은 ID로 같은 상태의 잔존을 확인한다. 기준은 [시험 기준](CAPACITY.md)을 따른다.
 report.json과 samples.ndjson은 build/capacity/retention-* 아래에 생성한다. 시험 실행 중 클래스패스를 다시 빌드하지 않는다.
 재기동 대기는 별도 시험 스레드에서 수행하며 API·만료 작업 주입은 계속한다.
 대화·일기 선점 poll은 기존 부하 도구의 50/100ms 설정이며 운영 기본 1초와 다르다.
