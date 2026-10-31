@@ -4,6 +4,7 @@ import com.moeum.conversation.infrastructure.config.ConversationLimitProperties
 import com.moeum.conversation.application.publicapi.MessageSnapshot
 import com.moeum.conversation.domain.model.Message
 import com.moeum.conversation.domain.model.MessageId
+import com.moeum.conversation.domain.model.MessageRole
 import com.moeum.conversation.infrastructure.ai.CONVERSATION_RESPONSE_PURPOSE
 import com.moeum.conversation.infrastructure.ai.LlmConversationResponder
 import com.moeum.identity.infrastructure.config.ConversationPlanProperties
@@ -167,7 +168,9 @@ class JournalProviderValidationTest {
                             ++source, UUID.randomUUID(), message.occurredAt)
                     } else Message.assistantMessage(MessageId.generate(), user, message.content, message.occurredAt, record, source)
                 }
-                mapOf("content" to LlmConversationResponder(client, limits).respond(context).content)
+                // 마지막 ASSISTANT 뒤의 USER가 이번 답변 대상이다.
+                val targets = context.takeLastWhile { it.role == MessageRole.USER }
+                mapOf("content" to LlmConversationResponder(client, limits).respond(context.dropLast(targets.size), targets).content)
             } else {
                 val displayDate = messages.first().occurredAt.atZone(java.time.ZoneOffset.UTC).toLocalDate()
                 val journal = LlmJournalGenerator(client, mapper).generate(displayDate, messages)

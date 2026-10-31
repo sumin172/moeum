@@ -4,14 +4,8 @@ import com.moeum.journal.domain.model.failedPermanently
 
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.conversation.application.command.*
-import com.moeum.conversation.application.publicapi.RecordDayOperations
 import com.moeum.conversation.application.publicapi.RecordDelivery
 import com.moeum.conversation.domain.ResponseJobRepository
-import com.moeum.conversation.domain.MessageRepository
-import com.moeum.conversation.domain.ResponseSupersededException
-import com.moeum.conversation.domain.model.Message
-import com.moeum.conversation.domain.model.MessageId
-import com.moeum.conversation.application.query.ResponseStatusQueryService
 import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.infrastructure.scheduling.TerminalResponseJobCleaner
 import com.moeum.journal.application.command.RegisterRecordGenerationService
@@ -36,11 +30,8 @@ import java.util.concurrent.*
 
 class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var save: SaveMessageService
-    @Autowired lateinit var records: RecordDayOperations
     @Autowired lateinit var responses: ResponseJobRepository
-    @Autowired lateinit var messages: MessageRepository
     @Autowired lateinit var retryResponse: RetryResponseService
-    @Autowired lateinit var responseStatuses: ResponseStatusQueryService
     @Autowired lateinit var generations: GenerationJobRepository
     @Autowired lateinit var journals: JournalRepository
     @Autowired lateinit var registration: RegisterRecordGenerationService
@@ -66,9 +57,9 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     }
     private fun response(saved: SaveMessageResult, complete: Boolean = true): ResponseJob {
         val pending = saved.responseJob!!
-        if (complete) jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=?,version=version+1 WHERE id=?",
-            Timestamp.from(old), pending.id.value)
-        return responses.findByUserIdAndUserMessageId(pending.userId, pending.userMessageId)!!
+        if (complete) jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=?,version=version+1 WHERE record_day_id=?",
+            Timestamp.from(old), pending.recordDayId.value)
+        return responses.findByRecord(pending.userId, pending.recordDayId)!!
     }
     private fun responseCleaner() = TerminalResponseJobCleaner(jdbc, time, props)
     private fun generationCleaner() = TerminalGenerationJobCleaner(jdbc, time, props)
@@ -83,9 +74,9 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
 
     @Test fun `마감된 기록의 완료 작업만 작은 배치로 지우고 원본 중복 접수는 보존한다`() {
         val saved = (1..3).map { input(user()) }
-        val ids = saved.map { response(it).id.value }
+        val ids = saved.map { response(it).recordDayId.value }
         assertThat(responseCleaner().cleanBatch()).isEqualTo(2)
-        assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE id IN (?,?,?)",
+        assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE record_day_id IN (?,?,?)",
             *ids.toTypedArray())).isEqualTo(1)
         assertThat(responseCleaner().cleanBatch()).isEqualTo(1)
         saved.forEach {
@@ -98,7 +89,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     }
 
     @Test fun `정기 정리는 한 배치보다 큰 완료 작업 backlog를 이어서 처리한다`() {
-        val responseIds = (1..5).map { response(input(user())).id.value }
+        val responseIds = (1..5).map { response(input(user())).recordDayId.value }
         val generationIds = (1..5).map {
             val owner = user()
             generations.save(TestGenerationJobs.pending(owner, RecordDayId.generate(), now, old).completed(old)).id.value
@@ -107,47 +98,36 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
         responseCleaner().scheduledCleanup()
         generationCleaner().scheduledCleanup()
 
-        assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE id IN (?,?,?,?,?)",
+        assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE record_day_id IN (?,?,?,?,?)",
             *responseIds.toTypedArray())).isZero()
         assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM journal.generation_jobs WHERE id IN (?,?,?,?,?)",
             *generationIds.toTypedArray())).isZero()
     }
 
-    @Test fun `실패 작업을 보존하면서 후속 완료 작업은 정리하고 원본 응답으로 재시도를 막는다`() {
+    @Test fun `열린 기록·최근 종료·대기·실행 중 작업은 보존하고 마감된 기록의 실패는 기한 안에 수동 재시도할 수 있다`() {
         val open = input(user(), close = false)
         val openJob = response(open)
         val recent = input(user())
-        jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=? WHERE id=?",
-            Timestamp.from(now), recent.responseJob!!.id.value)
-        val recentJob = responses.findByUserIdAndUserMessageId(recent.message.userId, recent.message.id)!!
-        val pending = input(user())
-        val pendingJob = response(pending, complete=false)
-        val processing = input(user())
-        val processingJob = response(processing, complete=false)
-        jdbc.update("UPDATE conversation.response_jobs SET status='PROCESSING',lease_expires_at=? WHERE id=?",
-            Timestamp.from(now.plus(Duration.ofDays(10))), processingJob.id.value)
-        val failedFirst = input(user(), close=false)
-        val later = input(failedFirst.message.userId, close=false)
-        val boundary = Timestamp.from(Instant.now())
-        jdbc.update("UPDATE conversation.record_days SET close_at=?,closed_at=?,delivery_acknowledged=true WHERE id=?",
-            boundary, boundary, failedFirst.record.id.value)
-        jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',updated_at=? WHERE id=?",
-            Timestamp.from(now), failedFirst.responseJob!!.id.value)
-        val failedJob = responses.findByUserIdAndUserMessageId(failedFirst.message.userId, failedFirst.message.id)!!
-        val laterJob = response(later)
-        TransactionTemplate(transactions).executeWithoutResult {
-            messages.append(Message.assistantMessage(MessageId.generate(),later.message.userId,"후속 답변",now,
-                later.message.recordDayId,later.message.sourceSequence))
-        }
+        jdbc.update("UPDATE conversation.response_jobs SET status='COMPLETED',updated_at=? WHERE record_day_id=?",
+            Timestamp.from(now), recent.record.id.value)
+        val pendingJob = response(input(user()), complete=false)
+        val processingJob = response(input(user()), complete=false)
+        jdbc.update("UPDATE conversation.response_jobs SET status='PROCESSING',lease_expires_at=? WHERE record_day_id=?",
+            Timestamp.from(now.plus(Duration.ofDays(10))), processingJob.recordDayId.value)
+        val failed = input(user())
+        jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',attempt_count=3,updated_at=? WHERE record_day_id=?",
+            Timestamp.from(now), failed.record.id.value)
+        val expired = input(user())
+        response(expired)
+
         assertThat(responseCleaner().cleanBatch()).isEqualTo(1)
-        listOf(openJob, recentJob, pendingJob, processingJob, failedJob).forEach {
-            assertThat(responses.findByUserIdAndUserMessageId(it.userId, it.userMessageId)).isNotNull()
+        listOf(openJob.recordDayId, recent.record.id, pendingJob.recordDayId, processingJob.recordDayId, failed.record.id).forEach {
+            assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE record_day_id=?", it.value)).isEqualTo(1)
         }
-        assertThat(responses.findByUserIdAndUserMessageId(laterJob.userId,laterJob.userMessageId)).isNull()
-        assertThat(responses.hasLaterStarted(failedJob)).isTrue()
-        assertThat(responseStatuses.get(failedFirst.message.userId,listOf(failedJob.id)).single().retryable).isFalse()
-        assertThatThrownBy { retryResponse.retry(failedFirst.message.userId,failedFirst.message.id) }
-            .isInstanceOf(ResponseSupersededException::class.java)
+        assertThat(responses.findByRecord(expired.message.userId, expired.record.id)).isNull()
+        // 마감 뒤 새 메시지는 다음 기록에 속하므로 이전 기록의 실패는 수동 재시도로만 복구한다
+        assertThat(retryResponse.retry(failed.message.userId, failed.record.id).state.status)
+            .isEqualTo(com.moeum.platform.job.JobStatus.PENDING)
     }
 
     @Test fun `정리 작업은 잠긴 기록을 건너뛰고 잠금 해제 이후 정리한다`() {
@@ -197,15 +177,15 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
 
     @Test fun `30일 지난 실패 작업은 원본을 보존하고 정리한다`() {
         val saved = input(user())
-        jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',updated_at=? WHERE id=?",
-            Timestamp.from(old), saved.responseJob!!.id.value)
+        jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',updated_at=? WHERE record_day_id=?",
+            Timestamp.from(old), saved.record.id.value)
         val owner = user()
         val generation = generations.save(TestGenerationJobs.pending(owner, RecordDayId.generate(), now, old).failedPermanently(old))
 
         assertThat(responseCleaner().cleanBatch()).isEqualTo(1)
         assertThat(generationCleaner().cleanBatch()).isEqualTo(1)
-        assertThat(responses.findByUserIdAndUserMessageId(saved.message.userId, saved.message.id)).isNull()
-        assertThat(messages.findByUserIdAndId(saved.message.userId, saved.message.id)).isNotNull()
+        assertThat(responses.findByRecord(saved.message.userId, saved.record.id)).isNull()
+        assertThat(jdbc.queryForObject<String>("SELECT content FROM conversation.messages WHERE id=?", saved.message.id.value)).isEqualTo("원본")
         assertThat(generations.findByUserIdAndRecordDayId(owner, generation.recordDayId)).isNull()
     }
 }

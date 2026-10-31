@@ -102,8 +102,9 @@ class WorkerRoleIsolationIntegrationTest {
                             """{"clientMessageId":"${java.util.UUID.randomUUID()}","content":"오늘 산책했다","occurredAt":"${Instant.now()}","timezone":"Asia/Seoul"}""",
                         )).build(), HttpResponse.BodyHandlers.ofString(),
                 )
+                // 응답 작업은 기록당 한 행을 재사용하므로 완료된 답변은 ASSISTANT 메시지로 센다.
                 fun completedResponses(): Int = jdbc.queryForObject<Int>(
-                    "SELECT count(*) FROM conversation.response_jobs WHERE user_id = ? AND status = 'COMPLETED'",
+                    "SELECT count(*) FROM conversation.messages WHERE user_id = ? AND role = 'ASSISTANT'",
                     userId.value,
                 )!!
 

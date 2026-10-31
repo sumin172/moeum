@@ -17,12 +17,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import java.util.concurrent.Executors
-import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 data class CapacityControl(val conversationDelayMs: Long = 100, val journalDelayMs: Long = 200, val failure: String = "none", val failureAttempts: Int = 0)
-data class ProviderStart(val jobId: String, val startedAt: String)
 
 /** 테스트 classpath에서만 실행한다. 이 제어 HTTP 서버는 운영 jar에 포함되지 않는다. */
 object CapacityRoleMain {
@@ -55,7 +53,7 @@ object CapacityRoleMain {
                 "configuredClaimBatchSize" to if(role=="conversation-worker") context.getBean<com.moeum.conversation.infrastructure.config.ResponseJobProperties>().claimBatchSize else 0,
                 "providerActive" to fake.active.get(), "providerPeak" to fake.peak.get(),
                 "providerCalls" to fake.calls.get(), "providerFailures" to fake.failures.get(),
-                "sampleCount" to fake.sampleCount(), "sampleSeen" to fake.seen.get(),
+                "sampleCount" to fake.sampleCount(), "waitSamplesDropped" to fake.waitSamplesDropped.get(),
                 "telemetryDropped" to registry.find("moeum.telemetry.dropped").counters().sumOf { it.count() },
                 "consoleDropped" to (registry.find("moeum.logging.dropped").functionCounter()?.count() ?: 0.0),
                 "dbAcquire" to registry.find("hikaricp.connections.acquire").timers().map {
@@ -119,8 +117,10 @@ private class CapacityProvider : LlmProvider {
     val failures = AtomicLong()
     val active = AtomicInteger()
     val peak = AtomicInteger()
-    val seen = AtomicLong()
-    private val starts = mutableListOf<ProviderStart>()
+    // 답변 대상 본문 키별 최초 공급자 진입 시각. 재개로 같은 입력이 다시 호출돼도 최초 시각을 덮어쓰지 않는다.
+    // 상한을 넘은 뒤 처음 보인 입력은 기록하지 않고 세기만 하므로 다른 호출에 연결되지 않는다.
+    private val firstStarts = java.util.concurrent.ConcurrentHashMap<String, String>()
+    val waitSamplesDropped = AtomicLong()
 
     override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
         val settings = control
@@ -130,15 +130,13 @@ private class CapacityProvider : LlmProvider {
         val trace = WorkTrace.snapshot()
         val attempt = trace["attempt"]?.toInt() ?: 0
         val chars = request.messages.sumOf { it.content.length }
-        if (request.purpose == "conversation-response" && attempt == 1) {
-            val sample = ProviderStart(trace.getValue("jobId"), Instant.now().toString())
-            synchronized(starts) {
-                val count = seen.incrementAndGet()
-                if (starts.size < 50000) starts += sample
-                else {
-                    val replacement = ThreadLocalRandom.current().nextLong(count)
-                    if (replacement < starts.size) starts[replacement.toInt()] = sample
-                }
+        if (request.purpose == "conversation-response") {
+            val startedAt = Instant.now().toString()
+            // 마지막 ASSISTANT 뒤의 USER가 이 호출의 답변 대상이다.
+            request.messages.takeLastWhile { it.role == LlmRole.USER }.forEach { message ->
+                val key = capacityContentKey(message.content)
+                if (firstStarts.containsKey(key)) return@forEach
+                if (firstStarts.size < MAX_WAIT_SAMPLES) firstStarts.putIfAbsent(key, startedAt) else waitSamplesDropped.incrementAndGet()
             }
         }
         try {
@@ -155,6 +153,11 @@ private class CapacityProvider : LlmProvider {
             return LlmProviderResult(text, "synthetic-v1", (chars / 3).coerceAtLeast(1), 10)
         } finally { active.decrementAndGet() }
     }
-    fun samples(): List<ProviderStart> = synchronized(starts) { starts.toList() }
-    fun sampleCount(): Int = synchronized(starts) { starts.size }
+    fun samples(): Map<String, String> = HashMap(firstStarts)
+    fun sampleCount(): Int = firstStarts.size
+
+    private companion object {
+        // 30분·25 RPS 시험의 약 4.5만 건보다 넉넉하고 워커 heap(512MiB)에 부담이 없는 크기
+        const val MAX_WAIT_SAMPLES = 200_000
+    }
 }
