@@ -15,6 +15,8 @@ import java.time.LocalDate
 class LlmJournalGeneratorTest {
 
     private class ScriptedLlmClient(private val text: String) : LlmClient {
+        val requiredPurposes = mutableListOf<String>()
+        override fun requireRoute(purpose: String) { requiredPurposes += purpose }
         var request: LlmRequest? = null
         override fun generate(request: LlmRequest): LlmResult {
             this.request = request
@@ -28,6 +30,13 @@ class LlmJournalGeneratorTest {
         MessageSnapshot("USER", "오늘 한강에서 산책했어", Instant.parse("2026-08-02T10:00:00Z")),
         MessageSnapshot("ASSISTANT", "좋았겠어요!", Instant.parse("2026-08-02T10:00:05Z")),
     )
+
+    @Test
+    fun `생성 시 일기 생성 용도의 라우트와 인증만 요구한다`() {
+        val llmClient = ScriptedLlmClient("{}")
+        LlmJournalGenerator(llmClient, jsonMapper)
+        assertThat(llmClient.requiredPurposes).containsExactly(JOURNAL_GENERATION_PURPOSE)
+    }
 
     @Test
     fun `하루 원본을 날짜와 함께 JSON 응답 형식으로 요청하고, 제목과 본문을 나눠 돌려준다`() {

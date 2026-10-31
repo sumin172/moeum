@@ -41,6 +41,9 @@ class LlmConversationResponder(
 
     private val log = LoggerFactory.getLogger(LlmConversationResponder::class.java)
 
+    // 대화 워커에만 등록되므로 대화 경로의 라우트와 인증만 기동 시 확인된다.
+    init { llmClient.requireRoute(CONVERSATION_RESPONSE_PURPOSE) }
+
     override fun respond(history: List<Message>, targets: List<Message>): ConversationResponse {
         // 답변 대상은 그대로 보내고 남는 예산으로 과거 문맥만 줄인다.
         val remaining = limits.contextCharBudget - targets.sumOf { it.content.length }

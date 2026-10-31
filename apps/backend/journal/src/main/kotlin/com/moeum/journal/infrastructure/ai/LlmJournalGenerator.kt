@@ -46,6 +46,9 @@ class LlmJournalGenerator(
     private val jsonMapper: JsonMapper,
 ) : JournalGenerator {
 
+    // 일기 워커에만 등록되므로 일기 경로의 라우트와 인증만 기동 시 확인된다.
+    init { llmClient.requireRoute(JOURNAL_GENERATION_PURPOSE) }
+
     override fun generate(displayDate: LocalDate, messages: List<MessageSnapshot>): GeneratedJournal {
         val result = llmClient.generate(
             LlmRequest(

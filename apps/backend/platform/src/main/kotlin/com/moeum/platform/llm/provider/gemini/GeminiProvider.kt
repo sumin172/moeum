@@ -27,6 +27,8 @@ class GeminiProvider(
     override val name = "gemini"
     override val vendor = "google"
 
+    override fun missingSettings(): List<String> = listOfNotNull("moeum.gemini.api-key".takeIf { properties.apiKey.isBlank() })
+
     // 서킷은 provider 단위다(용도와 무관하게 Gemini 자체가 불안정하면 함께 빠르게 실패). 예외는 감싸지 않고 그대로
     // 전파해야 recordExceptions(application.yml)가 실제 예외 타입으로 개폐를 판단한다.
     @CircuitBreaker(name = "llm-gemini")

@@ -9,7 +9,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 @ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @ConfigurationProperties(prefix = "moeum.gemini")
 data class GeminiProperties(
-    val apiKey: String,
+    // 쓰지 않는 역할에서는 비어 있어도 된다. 일기처럼 Gemini를 라우트로 쓰는 역할은 기동 시 검사한다.
+    val apiKey: String = "",
     val baseUrl: String = "https://generativelanguage.googleapis.com",
     val connectionTimeoutMs: Int = 3_000,
     // 일기 생성처럼 출력이 긴 호출도 들어오므로 대화 응답 기준보다 넉넉하게 잡는다

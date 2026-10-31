@@ -4,7 +4,7 @@ import com.moeum.conversation.application.publicapi.MessageSnapshot
 import java.time.Instant
 
 /** 합성 대화만 사용한다. 품질 판정은 기대 사실과 생성 결과를 함께 검토한다. */
-internal object JournalValidationInputs {
+internal object ProviderValidationInputs {
     val qualityCases = listOf("representative", "negation", "changed-plans")
     fun expectedFacts(case: String): List<String> = when (case) {
         "negation" -> listOf("발표가 아니라 면접을 봤다.", "합격 결과는 아직 모른다.", "동생과 김치찌개를 먹었고 긴장이 풀렸다.")

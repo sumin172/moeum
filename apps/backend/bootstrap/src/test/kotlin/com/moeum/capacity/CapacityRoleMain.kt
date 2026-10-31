@@ -109,6 +109,7 @@ object CapacityRoleMain {
 private class CapacityProvider : LlmProvider {
     override val name = "capacity-fake"
     override val vendor = "capacity"
+    override fun missingSettings() = emptyList<String>()
     @Volatile var control = CapacityControl(
         System.getProperty("capacity.conversationDelayMs","100").toLong(),
         System.getProperty("capacity.journalDelayMs","200").toLong(),

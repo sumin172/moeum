@@ -9,7 +9,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 @ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @ConfigurationProperties(prefix = "moeum.claude")
 data class ClaudeProperties(
-    val apiKey: String,
+    // 쓰지 않는 역할에서는 비어 있어도 된다. Claude를 라우트로 쓰는 역할은 기동 시 검사한다.
+    val apiKey: String = "",
     val baseUrl: String = "https://api.anthropic.com",
     val apiVersion: String = "2023-06-01",
     val connectionTimeoutMs: Int = 3_000,

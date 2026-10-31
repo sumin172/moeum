@@ -16,9 +16,24 @@ platform은 공급자·모델·토큰 상한·장애 격리·호출 관측·출�
 
 대화는 thinking-budget 0으로 Qwen에 `/no_think`를 요청한다. 추론 비활성화를 강제하지는 않는다.
 일기는 JSON 응답을 요청한다. Gemini는 응답 형식 옵션으로 강제하고, Claude는 프롬프트 지시에 맡긴다.
-Claude 공급자는 등록돼 있지만 기본 경로에서 사용하지 않으며 실제 호출은 검증하지 않았다.
+Claude 공급자는 등록돼 있고 라우트 설정으로 선택할 수 있지만 기본 경로에서 사용하지 않으며 실제 호출은 검증하지 않았다. 교체 전에는 아래 실제 공급자 검증으로 확인한다.
 한 공급자가 실패해도 다른 공급자로 자동 전환하지 않는다. 모델 선택 배경은 [공급자 분리](engineering/llm-provider-split.md)에 있다.
 프롬프트를 바꾸면 소유 모듈이 프롬프트 버전을 올린다. 버전은 호출 관측에 남는다.
+
+## 공급자 설정과 기동 검사
+
+모든 공급자는 워커 역할에 등록되지만, 쓰지 않는 공급자의 인증 설정은 비어 있어도 기동한다.
+각 용도의 LLM 어댑터(대화 응답기·일기 생성기)가 자기 역할에서 생성될 때 그 용도의 라우트만 검사한다.
+라우트가 없거나 선택된 공급자의 필수 설정이 비어 있으면 기동을 거부하고, 오류에는 설정 이름만 남긴다.
+대화 워커는 대화 라우트, 일기 워커는 일기 라우트를 검사하며 local-all은 둘 다 검사한다.
+
+| 공급자     | 필수 설정                                                   |
+|------------|-------------------------------------------------------------|
+| gemini     | `moeum.gemini.api-key`                                      |
+| cloudflare | `moeum.cloudflare.account-id`, `moeum.cloudflare.api-token` |
+| claude     | `moeum.claude.api-key`                                      |
+
+새 공급자는 `LlmProvider.missingSettings()`로 필수 설정을 선언한다. 시험은 실제 공급자의 더미 키 대신 fake 공급자로 라우트를 지정한다.
 
 ## 장애 격리
 
@@ -72,4 +87,10 @@ GeminiProviderTest·ClaudeProviderTest·CloudflareProviderTest는 요청 매핑�
 CloudflareProviderTest는 인증·역할·출력 상한·소프트 추론 제어와 추론 블록도 검사한다.
 RoutingLlmClientTest는 미완료 출력 거절·오류 분류·실패 관측의 실제 모델과 토큰 수 보존을 검사한다.
 GeminiProviderTest는 출력 판정 실패가 공급자 서킷의 실패 횟수에 반영되지 않는지도 검사한다.
-실제 공급자 검증 범위는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
+RoutingLlmClientTest·LlmRouteStartupTest는 사용 용도의 설정 누락·라우트 누락의 기동 거부와 미사용 공급자 누락의 기동 허용을, WorkerRoleIsolationIntegrationTest는 실제 역할 기동에서 같은 규칙을 검사한다.
+
+실제 공급자 검증(`providerSmokeTest`, `providerValidationTest`)은 운영과 같은 Boot 설정 로딩·공급자 등록·라우팅을 DB·스케줄러 없이 실행한다.
+선택한 경로의 라우트와 인증만 검사하고, `providerValidation.provider`·`model`로 경로의 공급자·모델을 바꿔 같은 입력과 판정으로 검증한다.
+검증 범위는 실제 공급자 호출과 생성 계약이다. 서킷브레이커는 적용하지 않고, 동시 호출 상한(bulkhead)은 해당 워커 설정대로 적용한다. 단일 프로세스의 단기 표본이므로 운영 장애 격리를 검증한 것으로 보지 않는다.
+ProviderValidationContextTest는 로컬 HTTP 응답으로 이 실행 기반의 정상 경로·인증 검사·오류 보존을, ProviderFailureSummaryTest는 진단 수집이 예외 타입·상태·헤더·재시도 분류를 바꾸지 않고 오류 본문을 남기지 않는지를 검사한다.
+실행 절차는 [실행 절차](CAPACITY_RUNBOOK.md), 실제 공급자 검증 범위는 [검증 현황](CAPACITY_RESULTS.md)을 따른다.
