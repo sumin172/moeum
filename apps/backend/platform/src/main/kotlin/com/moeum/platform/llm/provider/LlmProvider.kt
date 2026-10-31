@@ -3,7 +3,7 @@ package com.moeum.platform.llm.provider
 import com.moeum.platform.llm.LlmRequest
 import com.moeum.platform.llm.LlmRoute
 
-// provider 하나(Gemini, Claude)의 API 호출과 종료 사유 해석을 담당한다. 라우팅·동시성 제한·관측은 RoutingLlmClient가 한다.
+// 각 provider의 API 호출과 종료 사유 해석을 담당한다. 라우팅·동시성 제한·관측은 RoutingLlmClient가 한다.
 interface LlmProvider {
     // moeum.llm.routes.*.provider에 쓰는 이름
     val name: String
@@ -12,6 +12,10 @@ interface LlmProvider {
     val vendor: String
 
     fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult
+
+    // 이 공급자를 라우트로 쓸 때 필요한데 비어 있는 설정의 이름. 값은 반환하지 않는다.
+    // 쓰지 않는 공급자는 설정이 없어도 기동하며, 사용하는 용도의 라우트만 기동 시 이 결과로 검사한다.
+    fun missingSettings(): List<String>
 }
 
 data class LlmProviderResult(

@@ -32,6 +32,12 @@ class GeminiProviderTest {
     )
 
     @Test
+    fun `API 키가 없으면 필수 설정 이름만 알리고 기동용 바인딩은 막지 않는다`() {
+        assertThat(provider.missingSettings()).isEmpty()
+        assertThat(GeminiProvider(builder.build(), GeminiProperties()).missingSettings()).containsExactly("moeum.gemini.api-key")
+    }
+
+    @Test
     fun `토큰 상한과 thinking 예산을 generationConfig로 보내고, 역할을 Gemini 형식으로 바꾼다`() {
         server.expect(requestTo("https://gemini.test/v1beta/models/gemini-flash-latest:generateContent"))
             .andExpect(method(HttpMethod.POST))

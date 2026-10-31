@@ -34,6 +34,14 @@ data class JobState(
     fun failedPermanently(): JobState =
         copy(status = JobStatus.FAILED, leaseExpiresAt = null)
 
+    // 최종 실패. nextAttemptAt은 다시 시작할 수 있는 가장 이른 시각이 된다.
+    fun failedUntil(reopenAt: Instant): JobState =
+        copy(status = JobStatus.FAILED, nextAttemptAt = reopenAt, leaseExpiresAt = null)
+
+    // 새 실행 주기를 시작한다. 같은 실행의 재시도가 아니므로 시도 횟수를 0으로 되돌린다.
+    fun reopened(nextAttemptAt: Instant): JobState =
+        copy(status = JobStatus.PENDING, attemptCount = 0, nextAttemptAt = nextAttemptAt, leaseExpiresAt = null)
+
     // 자동 재예약 판단과 대화 작업의 누적 상한에 사용하므로 사용자 재요청에도 횟수를 초기화하지 않는다.
     fun restarted(now: Instant): JobState {
         check(status == JobStatus.FAILED) { "최종 실패한 작업만 다시 시작할 수 있습니다: status=$status" }

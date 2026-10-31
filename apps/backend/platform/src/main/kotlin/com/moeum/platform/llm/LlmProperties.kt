@@ -26,11 +26,12 @@ data class LlmProperties(
 }
 
 data class LlmRoute(
-    // provider 이름(gemini | claude)
+    // provider 이름(gemini | claude | cloudflare)
     val provider: String,
     val model: String,
     val maxOutputTokens: Int,
-    // 모델 내부 추론(thinking)에 쓸 토큰 예산. 0이면 끈다, null이면 provider 기본값.
+    // 모델 내부 추론(thinking)에 쓸 토큰 예산. Cloudflare는 0일 때 /no_think 소프트 제어만 지원한다.
+    // Gemini는 0이면 끄고, Claude는 이 값을 사용하지 않는다. null이면 provider 기본값.
     // Gemini 2.5+는 thinking 토큰이 maxOutputTokens에 포함되므로, 상한이 작은 용도에서는 0으로 꺼야 응답이 잘리지 않는다.
     val thinkingBudget: Int? = null,
 )

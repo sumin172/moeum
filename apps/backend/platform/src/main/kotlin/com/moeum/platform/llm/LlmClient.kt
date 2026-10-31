@@ -5,6 +5,10 @@ package com.moeum.platform.llm
 interface LlmClient {
     // 실패하면 원문을 포함하지 않는 LlmException. 진단은 bounded 관측 경로로 보낸다.
     fun generate(request: LlmRequest): LlmResult
+
+    // 이 용도를 실행하는 빈이 기동할 때 호출한다. 라우트가 없거나 선택된 공급자의 필수 설정이 비어 있으면 실패한다.
+    // 인증 누락은 배포 설정 오류이므로 첫 업무 실패가 아니라 기동 시점에 드러낸다.
+    fun requireRoute(purpose: String)
 }
 
 data class LlmRequest(

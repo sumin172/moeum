@@ -24,9 +24,6 @@ class MessageRepositoryImpl(
     private val jdbc: org.springframework.jdbc.core.JdbcTemplate,
 ) : MessageRepository {
 
-    override fun findByUserIdAndId(userId: UserId, id: MessageId): Message? =
-        jpaRepository.findByUserIdAndId(userId.value, id.value)?.toDomain()
-
     override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
         jpaRepository.findByUserIdAndClientMessageId(userId.value, clientMessageId)?.toDomain()
 
@@ -40,10 +37,19 @@ class MessageRepositoryImpl(
         return entities.map { it.toDomain() }.sortedWith(DISPLAY_ORDER)
     }
 
-    override fun findContext(userId: UserId, recordDayId: RecordDayId, inputSourceRevision: Long, limit: Int): List<Message> =
+    override fun findContext(userId: UserId, recordDayId: RecordDayId, throughSourceRevision: Long, limit: Int): List<Message> =
         jpaRepository.findByUserIdAndRecordDayIdAndSourceSequenceLessThanEqualOrderBySourceSequenceDescRoleAsc(
-            userId.value, recordDayId.value, inputSourceRevision, PageRequest.of(0,limit),
+            userId.value, recordDayId.value, throughSourceRevision, PageRequest.of(0,limit),
         ).asReversed().map { it.toDomain() }
+
+    override fun answeredSourceRevision(userId: UserId, recordDayId: RecordDayId): Long =
+        jpaRepository.findFirstByUserIdAndRecordDayIdAndRoleOrderBySourceSequenceDesc(userId.value, recordDayId.value, MessageRole.ASSISTANT)
+            ?.sourceSequence ?: 0
+
+    override fun findUnanswered(userId: UserId, recordDayId: RecordDayId, answered: Long, observed: Long, limit: Int): List<Message> =
+        jpaRepository.findByUserIdAndRecordDayIdAndRoleAndSourceSequenceGreaterThanAndSourceSequenceLessThanEqualOrderBySourceSequenceAsc(
+            userId.value, recordDayId.value, MessageRole.USER, answered, observed, PageRequest.of(0, limit),
+        ).map { it.toDomain() }
 
 
     override fun findJournalInput(userId: UserId, recordDayId: RecordDayId, sourceRevision: Long, closedAt: Instant): List<Message> {

@@ -40,7 +40,7 @@ dependencies {
 }
 
 tasks.named<Test>("test") {
-    useJUnitPlatform { excludeTags("capacity", "provider-smoke") }
+    useJUnitPlatform { excludeTags("capacity", "provider-smoke", "provider-validation") }
 }
 
 tasks.register<Test>("capacityTest") {
@@ -61,12 +61,24 @@ tasks.register<Test>("capacityTest") {
     testLogging { showStandardStreams = true }
 }
 
+// 실제 공급자 검증은 같은 실행 기반을 쓰고 판정만 다르다. providerValidation.* 속성은 그대로 전달한다.
 tasks.register<Test>("providerSmokeTest") {
-    description = "At most two synthetic Gemini requests; requires GEMINI_API_KEY"
+    description = "One short synthetic request per selected route (providerValidation.path, default both)"
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform { includeTags("provider-smoke") }
+    providers.gradlePropertiesPrefixedBy("providerValidation.").get().forEach { (key, value) -> systemProperty(key, value) }
+    outputs.upToDateWhen { false }
+}
+
+tasks.register<Test>("providerValidationTest") {
+    description = "Synthetic generation validation on configured routes; cases x repeats x paths requests, without retries"
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("provider-validation") }
+    providers.gradlePropertiesPrefixedBy("providerValidation.").get().forEach { (key, value) -> systemProperty(key, value) }
     outputs.upToDateWhen { false }
 }
 

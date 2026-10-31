@@ -10,6 +10,7 @@ import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import java.net.URI
 import java.net.http.*
+import java.sql.PreparedStatement
 import java.time.*
 import java.util.UUID
 import java.util.concurrent.*
@@ -21,7 +22,23 @@ data class CapacityRequest(
     val clientId: UUID, val userId: UUID, val messageId: UUID?, val jobId: UUID?,
     val recordId: UUID?, val status: Int, val errorCode: String?,
     val latencyMs: Double, val endToEndMs: Double, val generatorLagMs: Double,
+    // 공급자 표본의 답변 대상과 연결하는 본문 키. 부하 본문은 무작위 UUID를 포함해 메시지마다 다르다.
+    val contentKey: String,
 )
+
+private const val ATTEMPT_COUNTS_SQL =
+    "SELECT attempt_count,count(*) FROM conversation.response_jobs WHERE record_day_id=ANY(?) GROUP BY attempt_count"
+private const val ASSISTANT_RESPONSES_SQL =
+    "SELECT count(*) FROM conversation.messages WHERE role='ASSISTANT' AND record_day_id=ANY(?)"
+private const val DUPLICATE_RESPONSES_SQL =
+    "SELECT count(*) FROM (SELECT record_day_id,source_sequence FROM conversation.messages " +
+        "WHERE role='ASSISTANT' AND record_day_id=ANY(?) GROUP BY record_day_id,source_sequence HAVING count(*)>1) d"
+private const val UNANSWERED_RECORDS_SQL =
+    "SELECT count(*) FROM conversation.record_days r WHERE r.id=ANY(?) AND r.source_revision > coalesce(" +
+        "(SELECT max(m.source_sequence) FROM conversation.messages m WHERE m.record_day_id=r.id AND m.role='ASSISTANT'),0)"
+
+internal fun capacityContentKey(content: String): String =
+    java.security.MessageDigest.getInstance("SHA-256").digest(content.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
 
 /** open-loop 주입: 느린 응답 때문에 예정 요청 수를 줄이지 않고, 주입기 포화도 명시적으로 실패로 기록한다. */
 class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: JdbcTemplate) : AutoCloseable {
@@ -47,6 +64,7 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
         val futures = mutableListOf<CompletableFuture<*>>()
         val started = System.nanoTime()
         for (i in 0 until offered) {
+            check(!Thread.currentThread().isInterrupted) { "부하 주입이 중단됐습니다" }
             val planned = started + i * 1000000000L / rps
             while (System.nanoTime() < planned) LockSupport.parkNanos(minOf(planned - System.nanoTime(), 10000000))
             if (!permits.tryAcquire()) { rejected.incrementAndGet(); continue }
@@ -71,9 +89,12 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
                 val completed = System.nanoTime()
                 val node = response?.let { runCatching { mapper.readTree(it.body()) }.getOrNull() }
                 val message = node?.get("message")
-                requests.add(CapacityRequest(clientId,user.value,uuid(message,"id"),uuid(message,"responseJobId"),uuid(node,"recordDayId"),
+                // 응답 작업은 기록당 하나라 기록 ID가 작업 ID다. 정리된 작업이면 responseStatus가 null이다.
+                val jobId = uuid(node,"recordDayId").takeIf { node?.get("responseStatus")?.isNull == false }
+                requests.add(CapacityRequest(clientId,user.value,uuid(message,"id"),jobId,uuid(node,"recordDayId"),
                     response?.statusCode() ?: 0, if (error != null) error.javaClass.simpleName else node?.get("code")?.asString(),
-                    (completed-dispatched)/1000000.0,(completed-planned)/1000000.0,(dispatched-planned)/1000000.0))
+                    (completed-dispatched)/1000000.0,(completed-planned)/1000000.0,(dispatched-planned)/1000000.0,
+                    capacityContentKey(content)))
                 permits.release()
             }
             if (i > 0 && i % (rps * 30L) == 0L) println("CAPACITY offered=$i/$offered inflight=${512-permits.availablePermits()} generatorRejected=${rejected.get()}")
@@ -150,25 +171,60 @@ class CapacityLoad(private val fixtures: CapacityFixtures, private val jdbc: Jdb
         return response.statusCode() to mapper.readTree(response.body())
     }
 
-    fun waitingTimes(requests: Collection<CapacityRequest>, processes: List<CapacityProcess>): List<Double> {
-        val ids = requests.mapNotNull { it.jobId }.distinct()
-        if (ids.isEmpty()) return emptyList()
-        val created = withIds(ids) { connection, array ->
-            connection.prepareStatement("SELECT id,created_at FROM conversation.response_jobs WHERE id=ANY(?)").use {
+    fun waitingTimes(requests: Collection<CapacityRequest>, processes: List<CapacityProcess>,
+        observe: (Instant, Double) -> Unit = { _, _ -> }): List<Double> {
+        // 메시지 접수 시각부터 그 메시지를 답변 대상으로 포함한 최초 공급자 진입까지를 대기로 본다.
+        // 공급자가 최초 진입 시각을 기록하지 못한 메시지(표본 상한 초과)는 다른 호출에 연결하지 않고 측정에서 제외한다.
+        val accepted = requests.filter { it.messageId != null && it.jobId != null }
+        if (accepted.isEmpty()) return emptyList()
+        val created = withIds(accepted.mapNotNull { it.messageId }.distinct()) { connection, array ->
+            connection.prepareStatement("SELECT id,created_at FROM conversation.messages WHERE id=ANY(?)").use {
                 it.setArray(1,array)
-                it.executeQuery().use { rows -> buildMap { while(rows.next())put(rows.getObject(1,UUID::class.java).toString(),rows.getTimestamp(2).toInstant()) } }
+                it.executeQuery().use { rows -> buildMap { while(rows.next())put(rows.getObject(1,UUID::class.java),rows.getTimestamp(2).toInstant()) } }
             }
         }
-        return processes.flatMap { process -> process.samples().mapNotNull { sample ->
-            created[sample["jobId"].asString()]?.let { Duration.between(it,Instant.parse(sample["startedAt"].asString())).toNanos()/1000000.0 }
-        } }
+        // 재시도가 다른 워커에서 실행될 수 있으므로 워커별 최초 시각 중 가장 이른 값을 쓴다.
+        val starts = processes.flatMap { process -> process.samples().properties().map { (key, at) -> key to Instant.parse(at.asString()) } }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, values) -> values.min() }
+        return accepted.mapNotNull { request ->
+            val at = created[request.messageId] ?: return@mapNotNull null
+            val started = starts[request.contentKey] ?: return@mapNotNull null
+            val wait = Duration.between(at, started).toNanos()/1000000.0
+            observe(at, wait)
+            wait
+        }
     }
+
+    data class ResponseSummary(val assistantResponses: Long, val duplicateResponses: Long, val unansweredRecords: Long,
+                               val attemptCounts: Map<Int, Long>)
+
+    // 기록별 응답 결과를 DB에서 직접 센다. 답변 경계(ASSISTANT 최대 원본 순번)가 접수 순번에 못 미치면 미응답이다.
+    fun responseSummary(records: Collection<UUID>): ResponseSummary = withIds(records.distinct()) { connection, array ->
+        fun count(statement: PreparedStatement): Long = statement.use {
+            it.setArray(1, array); it.executeQuery().use { rows -> rows.next(); rows.getLong(1) }
+        }
+        val attempts = connection.prepareStatement(ATTEMPT_COUNTS_SQL).use {
+            it.setArray(1, array)
+            it.executeQuery().use { rows -> buildMap { while (rows.next()) put(rows.getInt(1), rows.getLong(2)) } }
+        }
+        ResponseSummary(
+            assistantResponses = count(connection.prepareStatement(ASSISTANT_RESPONSES_SQL)),
+            duplicateResponses = count(connection.prepareStatement(DUPLICATE_RESPONSES_SQL)),
+            unansweredRecords = count(connection.prepareStatement(UNANSWERED_RECORDS_SQL)),
+            attemptCounts = attempts,
+        )
+    }
+
+    // 어느 워커든 0보다 크면 대기 시간은 관측된 최초 호출까지의 값이므로 성능 판정에 쓰지 않는다.
+    fun waitSamplesDropped(processes: List<CapacityProcess>): Long =
+        processes.sumOf { it.metrics()["waitSamplesDropped"]?.asLong() ?: 0L }
 
     fun responseStatus(requests: Collection<CapacityRequest>): Map<String, Long> {
         val ids = requests.mapNotNull { it.jobId }.distinct()
         if (ids.isEmpty()) return emptyMap()
         return withIds(ids) { connection, array ->
-            connection.prepareStatement("SELECT status,count(*) FROM conversation.response_jobs WHERE id=ANY(?) GROUP BY status").use {
+            connection.prepareStatement("SELECT status,count(*) FROM conversation.response_jobs WHERE record_day_id=ANY(?) GROUP BY status").use {
                 it.setArray(1,array)
                 it.executeQuery().use { rows -> buildMap { while(rows.next())put(rows.getString(1),rows.getLong(2)) } }
             }
