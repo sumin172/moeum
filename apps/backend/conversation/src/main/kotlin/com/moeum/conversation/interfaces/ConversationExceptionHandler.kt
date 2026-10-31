@@ -6,8 +6,8 @@ import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.conversation.domain.AiQuotaExceededException
 import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.RecordDayNotFoundException
-import com.moeum.conversation.domain.MessageNotFoundException
 import com.moeum.conversation.domain.ResponseAlreadyCompletedException
+import com.moeum.conversation.domain.ResponseJobNotFoundException
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.observability.SafeFailure
 import com.moeum.platform.job.ManualRetryUnavailableException
@@ -30,10 +30,10 @@ class ConversationExceptionHandler {
             .body(ErrorResponse(code = ConversationErrorCode.INVALID_REQUEST.code, message = ConversationErrorCode.INVALID_REQUEST.description))
     }
 
-    @ExceptionHandler(MessageNotFoundException::class)
-    fun handleMessageNotFound(e: MessageNotFoundException): ResponseEntity<ErrorResponse> {
-        log.warn("응답을 요청할 수 없는 메시지: {}", SafeFailure.code(e))
-        return error(HttpStatus.NOT_FOUND, ConversationErrorCode.MESSAGE_NOT_FOUND)
+    @ExceptionHandler(ResponseJobNotFoundException::class)
+    fun handleResponseNotFound(e: ResponseJobNotFoundException): ResponseEntity<ErrorResponse> {
+        log.warn("재시도할 수 없는 응답 작업: {}", SafeFailure.code(e))
+        return error(HttpStatus.NOT_FOUND, ConversationErrorCode.RESPONSE_NOT_FOUND)
     }
 
     @ExceptionHandler(ResponseAlreadyCompletedException::class)
@@ -51,9 +51,6 @@ class ConversationExceptionHandler {
     @ExceptionHandler(RecordDayNotFoundException::class)
     fun handleRecordMissing(): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse(code = "RECORD_NOT_FOUND", message = "기록이 없습니다"))
-    @ExceptionHandler(com.moeum.conversation.domain.ResponseSupersededException::class)
-    fun superseded(): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse(code="RESPONSE_SUPERSEDED",message="후속 응답이 시작됐습니다. 새 메시지로 이어서 대화해주세요"))
     @ExceptionHandler(com.moeum.conversation.domain.ConversationRateExceededException::class)
     fun rateExceeded(): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ErrorResponse(code="MESSAGE_RATE_EXCEEDED",message="잠시 후 다시 전송해주세요"))

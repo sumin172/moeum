@@ -278,6 +278,7 @@ class GrowthCapacityTest {
         val errors = requests.count { it.status==0 || it.status>=500 }
         val latency = percentiles(requests.filter { it.status==200 }.map { it.latencyMs })
         val waiting = percentiles(waits)
+        val waitSamplesDropped = load.waitSamplesDropped(conversations)
         val oldest = samples.mapNotNull { (it["queues"] as? Map<*,*>)?.get("response_backlog") as? Number }.maxOfOrNull { it.toLong() } ?: 0
         val journalDrainStarted=System.nanoTime()
         if (burst.isNotEmpty() && settings.journalDrainSeconds>0) {
@@ -300,7 +301,7 @@ class GrowthCapacityTest {
             "generatorLag" to percentiles(requests.map { it.generatorLagMs }),
             "httpStatuses" to requests.groupingBy { it.status.toString() }.eachCount(),
             "errorRate" to errors.toDouble()/requests.size.coerceAtLeast(1),
-            "responseWaiting" to waiting,"responseStates" to load.responseStatus(requests),
+            "responseWaiting" to waiting,"waitSamplesDropped" to waitSamplesDropped,"responseStates" to load.responseStatus(requests),
             "responsesDrained" to responsesDrained,"integrity" to integrity,"maxResponseBacklog" to oldest,
             "journalBurst" to burst.size,"journalsCompletedAfterDrains" to burstStored,
             "journalAdditionalDrainSeconds" to (System.nanoTime()-journalDrainStarted)/1000000000.0,
@@ -318,7 +319,8 @@ class GrowthCapacityTest {
             "apiGoalPassed" to (((latency["p95Ms"] as? Double) ?: Double.MAX_VALUE)<=300 &&
                 ((latency["p99Ms"] as? Double) ?: Double.MAX_VALUE)<=1000 && errors.toDouble()/requests.size.coerceAtLeast(1)<0.001 &&
                 injection["generatorRejected"]==0L && requests.isNotEmpty() && requests.all { it.status==200 && it.messageId!=null && it.jobId!=null }),
-            "responseWaitingGoalPassed" to (responsesDrained && ((waiting["p95Ms"] as? Double) ?: Double.MAX_VALUE)<=2000),
+            // 최초 진입 표본이 빠진 워커가 있으면 다른 워커의 나중 시각이 섞일 수 있어 대기 목표를 판정하지 않는다
+            "responseWaitingGoalPassed" to (responsesDrained && waitSamplesDropped==0L && ((waiting["p95Ms"] as? Double) ?: Double.MAX_VALUE)<=2000),
         )
         Files.writeString(directory.resolve("$name.json"),mapper.writerWithDefaultPrettyPrinter().writeValueAsString(summary))
         println("CAPACITY result phase=$name api=$latency waiting=$waiting states=${summary["responseStates"]}")
@@ -373,7 +375,7 @@ class GrowthCapacityTest {
         load.run(api.apiPort,5,5,offlineRequests)
         check(offlineRequests.size==25 && offlineRequests.all { it.status==200 }) { "Journal 종료 중 API 접수 실패" }
         check(drain(load,offlineRequests,60))
-        check(load.responseStatus(offlineRequests)["COMPLETED"]==25L) { "Journal 종료 중 대화 처리 실패" }
+        check(load.responseStatus(offlineRequests)["COMPLETED"]==offlineRequests.mapNotNull { it.jobId }.distinct().size.toLong()) { "Journal 종료 중 대화 처리 실패" }
         val offlineIntegrity=load.verifyStored(offlineRequests)
         val offlineWaiting=percentiles(load.waitingTimes(offlineRequests,conversations))
         val replacement=start("journal-worker",1,url)
@@ -393,7 +395,7 @@ class GrowthCapacityTest {
         check(completed==ids.size) { "강제 종료 후 일기 회수 실패" }
         return mapOf("killedPid" to killed,"replacementPid" to replacement.pid,"interruptedProcessing" to interrupted,
             "whileJournalOffline" to mapOf("requests" to 25,"apiLatency" to percentiles(offlineRequests.map { it.latencyMs }),
-                "responseWaiting" to offlineWaiting,"integrity" to offlineIntegrity),
+                "responseWaiting" to offlineWaiting,"waitSamplesDropped" to load.waitSamplesDropped(conversations),"integrity" to offlineIntegrity),
             "recoveredJournals" to completed,"recoverySeconds" to (System.nanoTime()-recoveryStart)/1000000000.0,
             "leaseNote" to "production five-minute generation lease, no database lease timestamp injection")
     }

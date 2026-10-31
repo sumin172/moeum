@@ -12,8 +12,6 @@ import java.util.*
 class InMemoryMessageRepository : MessageRepository {
     val messages = linkedMapOf<MessageId, Message>()
 
-    override fun findByUserIdAndId(userId: UserId, id: MessageId): Message? = messages[id]?.takeIf { it.userId == userId }
-
     override fun findByUserIdAndClientMessageId(userId: UserId, clientMessageId: UUID): Message? =
         messages.values.find { it.userId == userId && it.clientMessageId == clientMessageId }
 
@@ -23,9 +21,17 @@ class InMemoryMessageRepository : MessageRepository {
         return page.sortedWith(compareBy({ it.occurredAt }, { it.id.value }))
     }
 
-    override fun findContext(userId: UserId, recordDayId: RecordDayId, inputSourceRevision: Long, limit: Int): List<Message> =
-        messages.values.filter { it.userId==userId && it.recordDayId==recordDayId && it.sourceSequence<=inputSourceRevision }
+    override fun findContext(userId: UserId, recordDayId: RecordDayId, throughSourceRevision: Long, limit: Int): List<Message> =
+        messages.values.filter { it.userId==userId && it.recordDayId==recordDayId && it.sourceSequence<=throughSourceRevision }
             .sortedWith(compareBy({ it.sourceSequence }, { if (it.role == MessageRole.USER) 0 else 1 })).takeLast(limit)
+
+    override fun answeredSourceRevision(userId: UserId, recordDayId: RecordDayId): Long =
+        messages.values.filter { it.userId == userId && it.recordDayId == recordDayId && it.role == MessageRole.ASSISTANT }
+            .maxOfOrNull { it.sourceSequence } ?: 0
+
+    override fun findUnanswered(userId: UserId, recordDayId: RecordDayId, answered: Long, observed: Long, limit: Int): List<Message> =
+        messages.values.filter { it.userId == userId && it.recordDayId == recordDayId && it.role == MessageRole.USER &&
+            it.sourceSequence > answered && it.sourceSequence <= observed }.sortedBy { it.sourceSequence }.take(limit)
 
     override fun findJournalInput(userId: UserId, recordDayId: RecordDayId, sourceRevision: Long, closedAt: Instant): List<Message> {
         val lastUserStream = messages.values.single { it.userId == userId && it.recordDayId == recordDayId &&

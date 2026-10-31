@@ -76,11 +76,11 @@ class RetentionCapacityTest {
                         save()
                         check(warm.all { it.status==200 }) { "워밍업 접수 실패" }
                         val warmEnd=System.nanoTime()+TimeUnit.SECONDS.toNanos(settings.drainSeconds.toLong())
-                        while(System.nanoTime()<warmEnd && load.responseStatus(warm)["COMPLETED"]!=warm.size.toLong()) Thread.sleep(100)
+                        while(System.nanoTime()<warmEnd && load.responseStatus(warm)["COMPLETED"]!=jobCount(warm)) Thread.sleep(100)
                         val warmStates=load.responseStatus(warm)
                         report["warmupResponseStates"]=warmStates
                         save()
-                        check(warmStates["COMPLETED"]==warm.size.toLong()) { "워밍업 실패" }
+                        check(warmStates["COMPLETED"]==jobCount(warm)) { "워밍업 실패" }
                     }
                     val initialResponseJobs=jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs")!!
                     val measurementStartedAt=Instant.now()
@@ -145,9 +145,10 @@ class RetentionCapacityTest {
                         waitingWindows.getOrPut(window) { mutableListOf() }.add(wait)
                     })
                     report["responseWaitingBy30Seconds"]=waitingWindows.map { (seconds,values) -> mapOf("fromSeconds" to seconds,"waiting" to percentiles(values)) }
+                    report["waitSamplesDropped"]=load.waitSamplesDropped(listOf(conversation))
                     report["responseEligibleRemaining"]=eligible(jdbc,"conversation")
                     report["journalEligibleRemaining"]=eligible(jdbc,"journal")
-                    report["responseJobsDeleted"]=initialResponseJobs+batches*260L+requests.size-jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs")!!
+                    report["responseJobsDeleted"]=initialResponseJobs+batches*13L+jobCount(requests)-jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs")!!
                     val recentJournalJobs=jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs WHERE created_at>now()-interval '1 day'")!!
                     report["recentJournalJobs"]=recentJournalJobs
                     report["journalJobsDeleted"]=initialJournalJobs+recentJournalJobs+batches*13L-jdbc.queryForObject<Long>("SELECT count(*) FROM journal.generation_jobs")!!
@@ -158,12 +159,14 @@ class RetentionCapacityTest {
                     val injectionResult=report["injection"] as Map<*,*>
                     check(injectionResult["generatorRejected"]==0L && requests.size==settings.rps*settings.durationSeconds && requests.all { it.status==200 }) { "API 접수 실패" }
                     check((latency["p95Ms"] as Double)<=300 && (latency["p99Ms"] as Double)<=1000) { "API 지연 목표 미달" }
-                    check(states["COMPLETED"]==requests.size.toLong()) { "응답 미완료" }
-                    check(jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs WHERE created_at>now()-interval '1 day'")==requests.size.toLong()+warm.size) { "보존 기간 전 작업 삭제" }
+                    check(states["COMPLETED"]==jobCount(requests)) { "응답 미완료" }
+                    check(jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs WHERE created_at>now()-interval '1 day'")==jobCount(requests+warm)) { "보존 기간 전 작업 삭제" }
+                    // 최초 진입 표본이 빠지면 나중 호출 시각이 섞일 수 있어 대기 목표를 판정하지 않는다
+                    check(report["waitSamplesDropped"]==0L) { "대기 표본 누락으로 응답 대기 판정 보류" }
                     check((report["responseWaiting"] as Map<*,*>)["p95Ms"].let { it as Double }<=2000) { "응답 대기 목표 미달" }
                     check(eligible(jdbc,"conversation")==0L && eligible(jdbc,"journal")==0L) { "종료 작업 적체 미회복" }
                     (report["steadyResponseEligiblePeak"] as? Long)?.let {
-                        check(it<=1040L) { "정리 적체가 40초 유입량 초과" }
+                        check(it<=52L) { "정리 적체가 40초 유입량 초과" }
                     }
                     check(restarted) { "정리 중단·재시작 미검증" }
                     check((report["journalsCompleted"] as Long)>=burst.size) { "일기 생성 미완료" }
@@ -191,6 +194,9 @@ class RetentionCapacityTest {
         FROM pg_stat_activity WHERE datname=current_database() AND state<>'idle' AND pid<>pg_backend_pid()
         GROUP BY application_name,state,wait_event_type,wait_event
     """.trimIndent())
+
+    // 응답 작업은 기록당 하나이므로 요청 수가 아니라 서로 다른 기록 수와 비교한다.
+    private fun jobCount(requests: Collection<CapacityRequest>) = requests.mapNotNull { it.jobId }.distinct().size.toLong()
 
     private fun eligible(jdbc:JdbcTemplate, schema:String):Long = if(schema=="conversation") jdbc.queryForObject<Long>("""
         SELECT count(*) FROM conversation.response_jobs j JOIN conversation.record_days r ON r.id=j.record_day_id

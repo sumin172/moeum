@@ -15,13 +15,12 @@ import java.util.UUID
 @Table(name = "response_jobs", schema = "conversation")
 class ResponseJobJpaEntity(
     @Id
-    val id: UUID,
-    @Column(name = "user_message_id", nullable = false)
-    val userMessageId: UUID,
+    @Column(name = "record_day_id")
+    val recordDayId: UUID,
     @Column(name = "user_id", nullable = false)
     val userId: UUID,
-    @Column(name = "record_day_id", nullable = false)
-    val recordDayId: UUID,
+    @Column(name = "observed_source_revision", nullable = false)
+    val observedSourceRevision: Long,
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     val status: JobStatus,
@@ -38,6 +37,4 @@ class ResponseJobJpaEntity(
     val createdAt: Instant,
     @Column(name = "updated_at", nullable = false)
     val updatedAt: Instant,
-    @Column(name = "input_source_revision", nullable = false)
-    val inputSourceRevision: Long,
 )

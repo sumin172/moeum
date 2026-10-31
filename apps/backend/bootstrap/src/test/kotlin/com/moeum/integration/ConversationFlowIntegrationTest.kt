@@ -38,7 +38,7 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
             HttpEntity(request, authHeaders(jwt)),
         )
         assertThat(saveResponse.statusCode).isEqualTo(HttpStatus.OK)
-        val savedId = saveResponse.body!!.message!!.id
+        val savedId = saveResponse.body!!.message.id
 
         // 같은 clientMessageId 재전송 -> 중복 저장 대신 기존 메시지를 그대로 반환해야 한다
         val retryResponse = restTemplate.exchange<com.moeum.conversation.interfaces.SaveMessageResponse>(
@@ -46,7 +46,7 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
             HttpMethod.POST,
             HttpEntity(request, authHeaders(jwt)),
         )
-        assertThat(retryResponse.body!!.message!!.id).isEqualTo(savedId)
+        assertThat(retryResponse.body!!.message.id).isEqualTo(savedId)
 
         // AI 응답(assistant 메시지)까지 비동기로 도착하는 걸 기다린다 — 유저 메시지 1개 + assistant 메시지 1개가 최종 상태.
         val messages = awaitTodayMessages(jwt, expectedSize = 2)
@@ -75,7 +75,10 @@ class ConversationFlowIntegrationTest : AbstractIntegrationTest() {
         val messages = awaitTodayMessages(jwt, expectedSize = 2)
 
         val userMessage = messages.single { it.role == "USER" }
-        assertThat(userMessage.responseStatus).isEqualTo("COMPLETED")
+        // ASSISTANT 저장과 작업 완료는 같은 트랜잭션이므로 답변이 보이면 기록의 응답 상태도 완료다.
+        val record = restTemplate.exchange<RecordConversationResponse>(recordUrl(jwt), HttpMethod.GET, HttpEntity<Void>(authHeaders(jwt))).body!!
+        assertThat(record.response.status).isEqualTo("COMPLETED")
+        assertThat(record.response.answeredSourceRevision).isEqualTo(userMessage.sourceSequence)
         val assistantMessage = messages.single { it.role == "ASSISTANT" }
         assertThat(assistantMessage.content).isEqualTo("테스트 응답입니다.")
     }

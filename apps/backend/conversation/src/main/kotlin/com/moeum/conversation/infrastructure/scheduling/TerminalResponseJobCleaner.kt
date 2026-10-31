@@ -23,14 +23,14 @@ class TerminalResponseJobCleaner(
 
     fun cleanBatch(): Int = jdbc.update("""
         WITH candidates AS (
-            SELECT j.id FROM conversation.response_jobs j
+            SELECT j.record_day_id FROM conversation.response_jobs j
             JOIN conversation.record_days r ON r.id=j.record_day_id
             WHERE j.status IN ('COMPLETED','FAILED') AND j.updated_at<=?
                 AND r.closed_at IS NOT NULL
-            ORDER BY j.updated_at,j.id LIMIT ?
+            ORDER BY j.updated_at,j.record_day_id LIMIT ?
             FOR UPDATE OF r,j SKIP LOCKED
         )
-        DELETE FROM conversation.response_jobs WHERE id IN (SELECT id FROM candidates)
+        DELETE FROM conversation.response_jobs WHERE record_day_id IN (SELECT record_day_id FROM candidates)
     """.trimIndent(), Timestamp.from(time.now().minus(properties.terminalAge)), properties.batchSize)
 
     @Scheduled(scheduler = "conversationRetentionScheduler", fixedDelayString = $$"${moeum.jobs.retention.interval:PT10S}", initialDelayString = $$"${moeum.jobs.retention.initial-delay:PT1M}")

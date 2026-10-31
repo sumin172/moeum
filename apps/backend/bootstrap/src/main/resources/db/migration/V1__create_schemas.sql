@@ -98,14 +98,14 @@ CREATE UNIQUE INDEX uq_messages_stream_sequence ON conversation.messages(record_
 CREATE INDEX idx_messages_context ON conversation.messages(user_id,record_day_id,source_sequence DESC,role ASC);
 CREATE UNIQUE INDEX uq_messages_source_sequence ON conversation.messages (record_day_id,source_sequence) WHERE role = 'USER';
 
--- 유저 메시지 하나에 대한 AI 응답 생성 작업. 메시지와 같은 트랜잭션에서 만들어진다.
+-- 기록 하나의 AI 응답 실행 상태. 기록의 첫 메시지와 같은 트랜잭션에서 만들어지고, 이후 접수·실행이 같은 행을 갱신한다.
+-- observed_source_revision: 실행 주기를 시작한 선점에서 관측한 기록의 원본 순번. 재시도·리스 회수에서 유지한다.
+-- next_attempt_at: PENDING이면 선점 가능 시각, FAILED면 다시 시작할 수 있는 가장 이른 시각.
 -- status/attempt_count/next_attempt_at/lease_expires_at/version: 공통 작업 실행 규칙(platform JobState, JobClaimSql)
 CREATE TABLE conversation.response_jobs (
-    id UUID PRIMARY KEY,
-    user_message_id UUID NOT NULL,
+    record_day_id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
-    record_day_id UUID NOT NULL,
-    input_source_revision BIGINT NOT NULL CHECK (input_source_revision > 0),
+    observed_source_revision BIGINT NOT NULL DEFAULT 0 CHECK (observed_source_revision >= 0),
     status TEXT NOT NULL,
     attempt_count INT NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL,
@@ -113,18 +113,13 @@ CREATE TABLE conversation.response_jobs (
     version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
-    CONSTRAINT fk_conversation_response_jobs_user_message
-        FOREIGN KEY (user_message_id) REFERENCES conversation.messages (id),
-    CONSTRAINT uq_conversation_response_jobs_user_message UNIQUE (user_message_id)
+    CONSTRAINT fk_conversation_response_jobs_record_day
+        FOREIGN KEY (record_day_id) REFERENCES conversation.record_days (id)
 );
 
 -- 완료 이력을 제외하고 선점할 작업을 예약 순서로 찾는다.
 CREATE INDEX idx_response_due ON conversation.response_jobs
     ((CASE WHEN status='PENDING' THEN next_attempt_at ELSE lease_expires_at END),created_at)
-    WHERE status IN ('PENDING','PROCESSING');
-
-CREATE UNIQUE INDEX uq_response_stream_source ON conversation.response_jobs(record_day_id,input_source_revision);
-CREATE INDEX idx_response_stream_active ON conversation.response_jobs(record_day_id,input_source_revision)
     WHERE status IN ('PENDING','PROCESSING');
 
 -- 서버 접수 속도. 사용자당 한 행만 유지한다.
@@ -134,7 +129,7 @@ CREATE TABLE conversation.conversation_usage (
     request_count INT NOT NULL CHECK (request_count >= 0)
 );
 
-CREATE INDEX idx_conversation_response_jobs_retention ON conversation.response_jobs (updated_at,id) WHERE status IN ('COMPLETED','FAILED');
+CREATE INDEX idx_conversation_response_jobs_retention ON conversation.response_jobs (updated_at,record_day_id) WHERE status IN ('COMPLETED','FAILED');
 
 
 CREATE TABLE journal.journals (

@@ -24,7 +24,7 @@ JobRunr·Quartz는 소스로 확인하지 않았다. Quartz는 트리거 관리 
 | 장애 감지       | 실행 중 heartbeat 5분 갱신, 6회 누락(30분) 후 재예약                     | 고정 lease 만료(대화 2분·일기 5분) 후 재선점                |
 | 펜싱 범위       | 라이브러리 행의 완료·재예약만 version 검사                               | 업무 결과 저장과 작업 완료를 같은 트랜잭션에서 version 검사 |
 | 완료 작업       | 일회성 작업은 행 삭제                                                    | 상태 보존·API 노출 후 보존 기간 뒤 정리                     |
-| 순서            | priority만 제공                                                          | 기록별 선두 작업만 선점                                     |
+| 순서            | priority만 제공                                                          | 기록당 한 작업, 미응답 입력을 순서대로 묶어 실행            |
 | 등록 트랜잭션   | Spring 스타터가 DataSource를 TransactionAwareDataSourceProxy로 감싸 참여 | 메시지와 같은 트랜잭션                                      |
 
 낙관적 선점을 기본으로 둔 것은 SKIP LOCKED가 없는 DB까지 지원하기 위해서다.
@@ -50,5 +50,5 @@ lease는 작업이 멈춰도 정해진 시간 뒤 회수한다. 정상이지만 
 ## 검증
 
 JobClaimIntegrationTest는 동시 선점 중복 방지와 lease 회수 뒤 늦은 저장 거절을 검사한다.
-ConversationOrderingIntegrationTest는 기록별 선두 선점과 다중 워커의 기록 간 병렬 진행을 검사한다.
+ConversationOrderingIntegrationTest는 기록당 한 작업의 선점·관측 상한·재개와 다중 워커의 기록 간 병렬 진행을 검사한다.
 fake 공급자 시험의 처리량과 장애 복구 범위는 [검증 현황](../CAPACITY_RESULTS.md)을 따른다.
