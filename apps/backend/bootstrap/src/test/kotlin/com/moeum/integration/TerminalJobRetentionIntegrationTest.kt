@@ -1,6 +1,5 @@
 package com.moeum.integration
 
-import com.moeum.journal.domain.model.failedPermanently
 
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.conversation.application.command.*
@@ -126,8 +125,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             Timestamp.from(now), recent.record.id.value)
         val pendingJob = response(input(user()), complete=false)
         val processingJob = response(input(user()), complete=false)
-        jdbc.update("UPDATE conversation.response_jobs SET status='PROCESSING',lease_expires_at=? WHERE record_day_id=?",
-            Timestamp.from(now.plus(Duration.ofDays(10))), processingJob.recordDayId.value)
+        jdbc.update("UPDATE conversation.response_jobs SET status='PROCESSING' WHERE record_day_id=?", processingJob.recordDayId.value)
         val failed = input(user())
         jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',attempt_count=3,updated_at=? WHERE record_day_id=?",
             Timestamp.from(now), failed.record.id.value)
@@ -177,8 +175,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             .failedPermanently(now)
         generations.save(failed)
         val processing = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), old))
-        jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING',lease_expires_at=? WHERE id=?",
-            Timestamp.from(now.plus(Duration.ofDays(10))), processing.id.value)
+        jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING' WHERE id=?", processing.id.value)
         val recent = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), now))
         assertThat(generationCleaner().cleanBatch()).isEqualTo(2)
         assertThat(journals.findByUserIdAndRecordDayId(user, day)).isEqualTo(edited)

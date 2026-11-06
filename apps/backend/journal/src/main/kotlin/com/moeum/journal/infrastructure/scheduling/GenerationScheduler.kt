@@ -25,4 +25,10 @@ class GenerationScheduler(private val delivery: RecordDeliveryWorker, private va
     fun pollDueJobs() {
         repeat(pool.concurrency) { if (!pool.submit { generationExecutor.executeNext() }) return }
     }
+    // 실행 슬롯이 모두 차 있어도 정리되도록 워커 풀 밖의 스케줄러 스레드에서 실행한다.
+    @Scheduled(scheduler = "journalPollScheduler",
+        fixedDelayString = $$"${moeum.journal.generation-job.lease-check-interval:PT10S}",
+        initialDelayString = $$"${moeum.journal.generation-job.initial-delay:PT0S}"
+    )
+    fun failExpiredLeases() = generationExecutor.failExpiredLeases()
 }

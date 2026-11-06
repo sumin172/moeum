@@ -59,7 +59,7 @@ class ConversationOrderingIntegrationTest {
     @Autowired lateinit var rest: TestRestTemplate
     @Autowired lateinit var jdbc: JdbcTemplate
     private val now get() = Instant.now()
-    @AfterEach fun finishTestJobs() { jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',lease_expires_at=NULL WHERE status IN ('PENDING','PROCESSING')") }
+    @AfterEach fun finishTestJobs() { jdbc.update("UPDATE conversation.response_jobs SET status='FAILED' WHERE status IN ('PENDING','PROCESSING')") }
     private fun command(content: String="기억") = SaveMessageCommand(UUID.randomUUID(),content,now,"Asia/Seoul")
     private fun accepted(user: UserId, cmd: SaveMessageCommand=command()) = save.save(user,cmd)
     private fun headers(jwt: String) = HttpHeaders().apply { setBearerAuth(jwt);contentType=MediaType.APPLICATION_JSON }
@@ -67,8 +67,17 @@ class ConversationOrderingIntegrationTest {
     private fun job(user: UserId, record: RecordDayId) = jobs.findByRecord(user, record)!!
     // 테스트 준비용으로 작업을 최종 실패 상태로 둔다. 재개 가능 시각은 이미 지났다.
     private fun failNow(record: RecordDayId, attempts: Int = 3) = jdbc.update(
-        "UPDATE conversation.response_jobs SET status='FAILED',attempt_count=?,next_attempt_at=?,lease_expires_at=NULL,updated_at=? WHERE record_day_id=?",
+        "UPDATE conversation.response_jobs SET status='FAILED',attempt_count=?,next_attempt_at=?,updated_at=? WHERE record_day_id=?",
         attempts, java.sql.Timestamp.from(now.minusSeconds(1)), java.sql.Timestamp.from(now.minusSeconds(1)), record.value)
+    // 선점 시각을 리스(2분)보다 앞당겨 워커가 실행 중 멈춘 상황을 만든다.
+    private fun stall(record: RecordDayId) = jdbc.update("UPDATE conversation.response_jobs SET updated_at=? WHERE record_day_id=?",
+        java.sql.Timestamp.from(now.minusSeconds(180)), record.value)
+    // 리스 만료로 FAILED가 된 작업을 사용자가 다시 요청한다. 재개 가능 시각은 이미 지난 것으로 둔다.
+    private fun retryNow(user: UserId, record: RecordDayId): ResponseJob {
+        jdbc.update("UPDATE conversation.response_jobs SET next_attempt_at=? WHERE record_day_id=?",
+            java.sql.Timestamp.from(now.minusSeconds(1)), record.value)
+        return retry.retry(user, record)
+    }
 
     @Test fun `배치는 예약 상한 이내에서 기록당 한 작업을 선점하고 잠근 기록의 현재 원본 순번을 관측 상한으로 잡는다`() {
         val users = (1..5).map { UserId.generate() }
@@ -77,13 +86,13 @@ class ConversationOrderingIntegrationTest {
         users.forEach { user ->
             assertThat(jdbc.queryForObject<Long>("SELECT count(*) FROM conversation.response_jobs WHERE user_id=?", user.value)).isEqualTo(1)
         }
-        val first = jobs.claimBatch(now, now.plusSeconds(120), 3)
-        val second = jobs.claimBatch(now, now.plusSeconds(120), 3)
+        val first = jobs.claimBatch(now,3)
+        val second = jobs.claimBatch(now,3)
         assertThat(first).hasSize(3)
         assertThat(second).hasSize(2)
         assertThat((first + second).map { it.recordDayId }.distinct()).hasSize(5)
         assertThat((first + second).map { it.observedSourceRevision }).containsOnly(2L)
-        assertThat(jobs.claimBatch(now, now.plusSeconds(120), 3)).isEmpty()
+        assertThat(jobs.claimBatch(now,3)).isEmpty()
     }
 
     @Test fun `최초 메시지가 동시에 도착해도 사용자 상태와 열린 기록은 하나로 생성된다`() {
@@ -157,7 +166,7 @@ class ConversationOrderingIntegrationTest {
     @Test fun `실행 중 접수 뒤 최종 실패하면 재개하고 다음 실행 주기의 선점에서 관측 상한이 전진한다`() {
         val user = UserId.generate()
         val first = accepted(user,command("첫 번째"))
-        val claimed = jobs.claimBatch(now,now.plusSeconds(120),1).single()
+        val claimed = jobs.claimBatch(now,1).single()
         assertThat(claimed.observedSourceRevision).isEqualTo(1)
         accepted(user,command("실행 중 입력"))
         assertThat(job(user,first.record.id).state.status).isEqualTo(JobStatus.PROCESSING)
@@ -169,29 +178,34 @@ class ConversationOrderingIntegrationTest {
 
         jdbc.update("UPDATE conversation.response_jobs SET next_attempt_at=? WHERE record_day_id=?",
             java.sql.Timestamp.from(now.minusSeconds(1)),first.record.id.value)
-        assertThat(jobs.claimBatch(now,now.plusSeconds(120),1).single().observedSourceRevision).isEqualTo(2)
+        assertThat(jobs.claimBatch(now,1).single().observedSourceRevision).isEqualTo(2)
     }
 
-    @Test fun `리스를 잃은 워커의 실패 저장은 거절되고 회수한 워커의 범위를 유지한다`() {
+    @Test fun `리스가 만료된 작업은 다시 선점하지 않고 FAILED로 정리하며 멈춘 동안 접수가 있으면 새 실행 주기를 연다`() {
         val user = UserId.generate()
         val first = accepted(user)
-        val old = jobs.claimBatch(now,now.plusSeconds(120),1).single()
-        accepted(user,command("회수 전 입력"))
-        jdbc.update("UPDATE conversation.response_jobs SET lease_expires_at=? WHERE record_day_id=?",java.sql.Timestamp.from(now.minusSeconds(1)),old.recordDayId.value)
-        val current = jobs.claimBatch(now,now.plusSeconds(120),1).single()
-        assertThat(current.observedSourceRevision).isEqualTo(1)
-        assertThat(current.state.attemptCount).isEqualTo(2)
+        val old = jobs.claimBatch(now,1).single()
+        stall(old.recordDayId)
+        assertThat(jobs.claimBatch(now,1)).isEmpty()
+        assertThat(failures.failExpired(now,100).map { it.recordDayId }).contains(old.recordDayId)
+        val expired = job(user,first.record.id)
+        assertThat(expired.state.status).isEqualTo(JobStatus.FAILED)
+        assertThat(expired.state.version).isGreaterThan(old.state.version)
+        // 멈췄던 워커의 늦은 실패 저장은 거절되고 FAILED가 유지된다
         assertThatThrownBy { failures.markFailed(old, com.moeum.platform.job.JobFailure(com.moeum.platform.job.JobFailureKind.PERMANENT)) }
             .isInstanceOf(org.springframework.dao.OptimisticLockingFailureException::class.java)
-        assertThat(job(user,first.record.id).state).isEqualTo(current.state)
+        assertThat(job(user,first.record.id).state).isEqualTo(expired.state)
 
-        jdbc.update("UPDATE conversation.response_jobs SET attempt_count=5,lease_expires_at=? WHERE record_day_id=?",
-            java.sql.Timestamp.from(now.minusSeconds(1)),old.recordDayId.value)
-        val exhausted = jobs.claimBatch(now,now.plusSeconds(120),1).single()
-        failures.markExhausted(exhausted)
-        // 회수 전 입력이 관측 상한 밖에 있으므로 호출 없이 끝난 실행도 새 실행 주기로 재개한다
-        assertThat(job(user,first.record.id).state.status).isEqualTo(JobStatus.PENDING)
-        assertThat(job(user,first.record.id).state.attemptCount).isZero()
+        // 재요청한 실행이 다시 멈추고 그 사이 새 입력이 접수되면 그 입력에 대한 새 실행 주기를 연다
+        retryNow(user,first.record.id)
+        val again = jobs.claimBatch(now,1).single()
+        assertThat(again.observedSourceRevision).isEqualTo(1)
+        accepted(user,command("멈춘 동안 입력"))
+        stall(again.recordDayId)
+        failures.failExpired(now,100)
+        val reopened = job(user,first.record.id)
+        assertThat(reopened.state.status).isEqualTo(JobStatus.PENDING)
+        assertThat(reopened.state.attemptCount).isZero()
     }
 
     @Test fun `다중 워커의 동시 선점은 기록마다 하나이고 서로 다른 기록은 진행한다`() {
@@ -200,7 +214,7 @@ class ConversationOrderingIntegrationTest {
         repeat(3) { accepted(UserId.generate()) }
         val gate = CountDownLatch(1)
         Executors.newFixedThreadPool(12).use { pool ->
-            val futures = (1..12).map { pool.submit<ResponseJob?> { gate.await();jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull() } }
+            val futures = (1..12).map { pool.submit<ResponseJob?> { gate.await();jobs.claimBatch(now,1).singleOrNull() } }
             gate.countDown()
             val claims = futures.mapNotNull { it.get(15,TimeUnit.SECONDS) }
             assertThat(claims).hasSize(4)
@@ -209,12 +223,15 @@ class ConversationOrderingIntegrationTest {
         }
     }
 
-    @Test fun `리스 회수 후 오래된 응답 저장은 본문과 스트림 순번까지 롤백된다`() {
+    @Test fun `리스 만료 정리와 재요청 뒤 이전 시도의 응답 저장은 본문과 스트림 순번까지 롤백된다`() {
         val user = UserId.generate()
         val first = accepted(user)
-        val old = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
-        jdbc.update("UPDATE conversation.response_jobs SET lease_expires_at=? WHERE record_day_id=?",java.sql.Timestamp.from(now.minusSeconds(1)),old.recordDayId.value)
-        val current = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
+        val old = jobs.claimBatch(now,1).singleOrNull()!!
+        stall(old.recordDayId)
+        failures.failExpired(now,100)
+        assertThat(job(user,first.record.id).state.status).isEqualTo(JobStatus.FAILED)
+        retryNow(user,first.record.id)
+        val current = jobs.claimBatch(now,1).singleOrNull()!!
         assertThat(current.recordDayId).isEqualTo(old.recordDayId)
         assertThatThrownBy { generated.save(old,1,answer()) }.isInstanceOf(org.springframework.dao.OptimisticLockingFailureException::class.java)
         assertThat(query.get(user,first.record.id,0,100).messages).hasSize(1)
@@ -227,14 +244,14 @@ class ConversationOrderingIntegrationTest {
     @Test fun `관측 상한 밖의 접수분은 성공 뒤 다음 실행 주기로 넘어가고 성공한 응답은 과거 문맥이 된다`() {
         val user = UserId.generate()
         val first = accepted(user,command("첫 번째"))
-        val job = jobs.claimBatch(now,now.plusSeconds(120),1).single()
+        val job = jobs.claimBatch(now,1).single()
         accepted(user,command("두 번째"))
         accepted(user,command("세 번째"))
         assertThat(messages.findUnanswered(user,first.record.id,0,job.observedSourceRevision,100).map { it.content }).containsExactly("첫 번째")
         generated.save(job,1,answer())
         assertThat(job(user,first.record.id).state.status).isEqualTo(JobStatus.PENDING)
 
-        val next = jobs.claimBatch(now,now.plusSeconds(120),1).single()
+        val next = jobs.claimBatch(now,1).single()
         val answered = messages.answeredSourceRevision(user,first.record.id)
         assertThat(answered).isEqualTo(1)
         assertThat(messages.findUnanswered(user,first.record.id,answered,next.observedSourceRevision,100).map { it.content })
@@ -283,7 +300,7 @@ class ConversationOrderingIntegrationTest {
     @Test fun `기록 조회 도중 워커가 답변을 완료해도 메시지·응답 상태·답변 경계를 한 스냅샷에서 반환한다`() {
         val user = UserId.generate()
         val first = accepted(user)
-        val claimed = jobs.claimBatch(now,now.plusSeconds(120),1).single()
+        val claimed = jobs.claimBatch(now,1).single()
         val once = java.util.concurrent.atomic.AtomicBoolean(true)
         org.mockito.Mockito.doAnswer { invocation ->
             val page = invocation.callRealMethod()
@@ -308,7 +325,7 @@ class ConversationOrderingIntegrationTest {
     @Test fun `저장 잠금의 커밋 순번으로 동시 원본과 응답을 증분 조회한다`() {
         val user = UserId.generate()
         val first = accepted(user)
-        val claimed = jobs.claimBatch(now,now.plusSeconds(120),1).singleOrNull()!!
+        val claimed = jobs.claimBatch(now,1).singleOrNull()!!
         val gate = CountDownLatch(1)
         Executors.newFixedThreadPool(2).use { pool ->
             val a = pool.submit { gate.await();accepted(user,command("동시 원본")) }

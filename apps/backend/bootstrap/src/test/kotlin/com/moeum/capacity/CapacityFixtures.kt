@@ -38,7 +38,7 @@ class CapacityFixtures(private val jdbc: JdbcTemplate) {
         return TerminalArrivals(ids("-r"), ids("-g"), records * 40L - records / 2)
     }
 
-    /** 오래됐지만 정리 조건에 해당하지 않아 남아야 하는 작업. 워커가 시험 중 상태를 바꾸지 않도록 예약·리스를 먼 미래로 둔다. */
+    /** 오래됐지만 정리 조건에 해당하지 않아 남아야 하는 작업. 워커가 시험 중 상태를 바꾸지 않도록 예약 시각과 PROCESSING의 선점 시각(리스 기준)을 먼 미래로 둔다. */
     data class ProtectedJobs(val responseStatuses: Map<UUID, String>, val generationStatuses: Map<UUID, String>)
 
     fun protectedJobs(): ProtectedJobs = transaction().execute {
@@ -57,8 +57,8 @@ class CapacityFixtures(private val jdbc: JdbcTemplate) {
         val responses = mapOf(openRecord to "COMPLETED", pendingRecord to "PENDING", processingRecord to "PROCESSING")
         responses.forEach { (id, status) ->
             named.update(PROTECTED_RESPONSE_JOB_SQL, MapSqlParameterSource()
-                .addValue("id", id).addValue("status", status).addValue("nextAttemptAt", far)
-                .addValue("leaseExpiresAt", if (status == "PROCESSING") far else null, Types.TIMESTAMP).addValue("old", old))
+                .addValue("id", id).addValue("status", status).addValue("nextAttemptAt", far).addValue("old", old)
+                .addValue("updatedAt", if (status == "PROCESSING") far else old))
         }
         // 일기 실패 작업은 생성 시각 기준이라 최근 생성이면 오래된 갱신 시각이어도 남는다
         val generations = mapOf(UUID.randomUUID() to "PENDING", UUID.randomUUID() to "PROCESSING", UUID.randomUUID() to "FAILED")
@@ -66,8 +66,8 @@ class CapacityFixtures(private val jdbc: JdbcTemplate) {
             named.update(PROTECTED_GENERATION_JOB_SQL, MapSqlParameterSource()
                 .addValue("id", id).addValue("userId", UUID.randomUUID()).addValue("recordId", UUID.randomUUID())
                 .addValue("status", status).addValue("nextAttemptAt", far)
-                .addValue("leaseExpiresAt", if (status == "PROCESSING") far else null, Types.TIMESTAMP)
-                .addValue("createdAt", if (status == "FAILED") Timestamp.from(now) else old).addValue("updatedAt", old))
+                .addValue("createdAt", if (status == "FAILED") Timestamp.from(now) else old)
+                .addValue("updatedAt", if (status == "PROCESSING") far else old))
         }
         ProtectedJobs(responses, generations)
     }
@@ -166,12 +166,12 @@ private const val PROTECTED_RECORD_SQL = """
     VALUES (:id,:userId,current_date-41,:startAt,current_date+30,'02:00','UTC',:closeAt,0,0,:closedAt,true)"""
 private const val PROTECTED_RESPONSE_JOB_SQL = """
     INSERT INTO conversation.response_jobs(record_day_id,user_id,observed_source_revision,status,attempt_count,
-        next_attempt_at,lease_expires_at,version,created_at,updated_at)
-    SELECT :id,user_id,0,:status,1,:nextAttemptAt,:leaseExpiresAt,1,:old,:old FROM conversation.record_days WHERE id=:id"""
+        next_attempt_at,version,created_at,updated_at)
+    SELECT :id,user_id,0,:status,1,:nextAttemptAt,1,:old,:updatedAt FROM conversation.record_days WHERE id=:id"""
 private const val PROTECTED_GENERATION_JOB_SQL = """
-    INSERT INTO journal.generation_jobs(id,user_id,record_day_id,status,attempt_count,next_attempt_at,lease_expires_at,
+    INSERT INTO journal.generation_jobs(id,user_id,record_day_id,status,attempt_count,next_attempt_at,
         version,created_at,updated_at)
-    VALUES (:id,:userId,:recordId,:status,1,:nextAttemptAt,:leaseExpiresAt,1,:createdAt,:updatedAt)"""
+    VALUES (:id,:userId,:recordId,:status,1,:nextAttemptAt,1,:createdAt,:updatedAt)"""
 
 private const val USERS_SQL = "INSERT INTO identity.users(id,google_id,email,created_at) VALUES (?,?,?,?)"
 private const val PREMIUM_SUBSCRIPTIONS_SQL =

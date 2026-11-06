@@ -52,6 +52,8 @@ import java.util.UUID
         "moeum.conversation.response-job.backoff=200ms",
         "moeum.conversation.response-job.manual-retry-cooldown=0s",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
+        // 리스 만료 정리는 테스트가 시각을 정해 직접 호출한다(기동 직후 한 번만 실행됨)
+        "moeum.conversation.response-job.lease-check-interval=PT1H",
         // 실제 provider 없이 LlmClient → 관측 수집 경로를 검증하기 위한 용도(FakeLlmProvider)
         "moeum.llm.routes.integration-test.provider=fake",
         "moeum.llm.routes.integration-test.model=fake-model",

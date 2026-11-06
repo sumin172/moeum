@@ -7,6 +7,7 @@ import com.moeum.kernel.TimeProvider
 import com.moeum.platform.job.JobFailure
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 
 @Service
 class MarkGenerationFailedService(
@@ -22,4 +23,10 @@ class MarkGenerationFailedService(
         generationJobRepository.save(job.failed(policy, timeProvider.now(), failure))
     }
 
+    // 리스가 만료된 PROCESSING 작업을 자동 재시도 없이 FAILED로 정리한다. 사용자 재요청으로만 다시 실행한다.
+    // 저장하면 version이 올라 중단됐다 되살아난 워커의 늦은 저장은 거부된다.
+    @Transactional
+    fun failExpired(now: Instant, limit: Int): List<GenerationJob> =
+        generationJobRepository.lockExpired(policy.leaseExpiredBefore(now), limit)
+            .map { generationJobRepository.save(it.failedPermanently(now)) }
 }

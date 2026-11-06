@@ -98,9 +98,10 @@ CREATE INDEX idx_messages_context ON conversation.messages(user_id,record_day_id
 CREATE UNIQUE INDEX uq_messages_source_sequence ON conversation.messages (record_day_id,source_sequence) WHERE role = 'USER';
 
 -- 기록 하나의 AI 응답 실행 상태. 기록의 첫 메시지와 같은 트랜잭션에서 만들어지고, 이후 접수·실행이 같은 행을 갱신한다.
--- observed_source_revision: 실행 주기를 시작한 선점에서 관측한 기록의 원본 순번. 재시도·리스 회수에서 유지한다.
+-- observed_source_revision: 실행 주기를 시작한 선점에서 관측한 기록의 원본 순번. 자동 재시도·사용자 재요청에서 유지한다.
 -- next_attempt_at: PENDING이면 선점 가능 시각, FAILED면 다시 시작할 수 있는 가장 이른 시각.
--- status/attempt_count/next_attempt_at/lease_expires_at/version: 공통 작업 실행 규칙(platform JobState, JobClaimSql)
+-- status/attempt_count/next_attempt_at/version/updated_at: 공통 작업 실행 규칙(platform JobState, JobClaimSql)
+-- PROCESSING의 updated_at은 선점 시각이며 리스 만료 판정 기준이다.
 CREATE TABLE conversation.response_jobs (
     record_day_id UUID PRIMARY KEY,
     user_id UUID NOT NULL,
@@ -108,7 +109,6 @@ CREATE TABLE conversation.response_jobs (
     status TEXT NOT NULL,
     attempt_count INT NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL,
-    lease_expires_at TIMESTAMPTZ NULL,
     version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
@@ -116,10 +116,12 @@ CREATE TABLE conversation.response_jobs (
         FOREIGN KEY (record_day_id) REFERENCES conversation.record_days (id)
 );
 
--- 완료 이력을 제외하고 선점할 작업을 예약 순서로 찾는다.
-CREATE INDEX idx_response_due ON conversation.response_jobs
-    ((CASE WHEN status='PENDING' THEN next_attempt_at ELSE lease_expires_at END),created_at)
-    WHERE status IN ('PENDING','PROCESSING');
+-- 선점할 PENDING 작업을 예약 순서로 찾는다.
+CREATE INDEX idx_response_due ON conversation.response_jobs (next_attempt_at,created_at)
+    WHERE status = 'PENDING';
+-- 리스가 만료된 PROCESSING 작업을 선점 시각 순서로 찾는다.
+CREATE INDEX idx_response_processing ON conversation.response_jobs (updated_at)
+    WHERE status = 'PROCESSING';
 
 -- 서버 접수 속도. 사용자당 한 행만 유지한다.
 CREATE TABLE conversation.conversation_usage (
@@ -151,7 +153,6 @@ CREATE TABLE journal.generation_jobs (
     status TEXT NOT NULL,
     attempt_count INT NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL,
-    lease_expires_at TIMESTAMPTZ NULL,
     version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
@@ -160,7 +161,7 @@ CREATE TABLE journal.generation_jobs (
 
 CREATE INDEX idx_journal_generation_jobs_pending ON journal.generation_jobs (next_attempt_at)
     WHERE status = 'PENDING';
-CREATE INDEX idx_journal_generation_jobs_processing ON journal.generation_jobs (lease_expires_at)
+CREATE INDEX idx_journal_generation_jobs_processing ON journal.generation_jobs (updated_at)
     WHERE status = 'PROCESSING';
 
 CREATE INDEX idx_journal_generation_jobs_completed_retention ON journal.generation_jobs (updated_at,id) WHERE status = 'COMPLETED';

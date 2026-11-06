@@ -50,7 +50,7 @@ class WorkerPool(
                             owned--
                             if (!executeReserved { task(job) }) rejected++
                         }
-                        if (rejected > 0) log.warn("종료 중 선점 작업 인계 실패: role={}, count={}; lease 만료 후 회수", name, rejected)
+                        if (rejected > 0) log.warn("종료 중 선점 작업 인계 실패: role={}, count={}; 리스 만료 후 FAILED로 정리", name, rejected)
                     }
                 } catch (e: Exception) {
                     log.error("Worker 선점 실패: role={}, code={}", name, SafeFailure.code(e))

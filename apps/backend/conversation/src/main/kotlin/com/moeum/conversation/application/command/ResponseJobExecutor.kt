@@ -21,6 +21,7 @@ import java.time.Instant
 
 // 예약된 실행 슬롯 이내에서 배치 선점하고, 각 작업을 대기열 없이 처리한다.
 // LLM 호출은 트랜잭션 밖에서 하고, 결과 저장/실패 기록만 각각 별도 트랜잭션으로 한다.
+// 리스가 만료된 작업은 실행 슬롯과 별개로 주기적으로 정리한다(failExpiredLeases).
 @Service
 @ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER)
 class ResponseJobExecutor(
@@ -34,7 +35,6 @@ class ResponseJobExecutor(
     private val limits: com.moeum.conversation.infrastructure.config.ConversationLimitProperties,
 ) {
     private val log = LoggerFactory.getLogger(ResponseJobExecutor::class.java)
-    private val policy = responseJobProperties.toPolicy()
     val claimBatchSize = responseJobProperties.claimBatchSize
     // 비동기 선점 완료 시각 때문에 다음 정규 poll까지 건너뛰지 않도록 반 간격만 쉰다.
     private val idleProbeDelay = responseJobProperties.pollInterval.dividedBy(2)
@@ -45,7 +45,7 @@ class ResponseJobExecutor(
     fun claim(reservedSlots: Int): List<ResponseJob> {
         val now=timeProvider.now()
         if(now.isBefore(nextProbeAt.get()))return emptyList()
-        return responseJobRepository.claimBatch(now,policy.leaseExpiresAt(now),reservedSlots).also {
+        return responseJobRepository.claimBatch(now,reservedSlots).also {
             if(it.isEmpty())nextProbeAt.set(now.plus(idleProbeDelay))
         }
     }
@@ -54,12 +54,6 @@ class ResponseJobExecutor(
     fun execute(job: ResponseJob) = WorkTrace.run(job.recordDayId.value, job.recordDayId.value, job.state.attemptCount) { process(job) }
 
     private fun process(job: ResponseJob) {
-        if (policy.isExhausted(job.state.attemptCount)) {
-            log.warn("리스 만료로 재시도 횟수를 넘긴 응답 작업을 최종 실패 처리: recordDayId={}", job.recordDayId.value)
-            recordFailure(job) { markResponseFailedService.markExhausted(job) }
-            return
-        }
-
         try {
             // 이 기록의 ASSISTANT는 version을 가진 현재 소유자만 저장하므로 실행 중 답변 경계가 바뀌지 않는다.
             val answered = messageRepository.answeredSourceRevision(job.userId, job.recordDayId)
@@ -74,7 +68,7 @@ class ResponseJobExecutor(
             saveGeneratedResponseService.save(job, targets.last().sourceSequence, response)
             log.atInfo().addKeyValue("event", "job.completed").log("Worker job completed")
         } catch (_: OptimisticLockingFailureException) {
-            log.warn("리스를 잃은 응답 작업이라 결과를 버림(다른 워커가 처리 중): recordDayId={}", job.recordDayId.value)
+            log.warn("리스를 잃은 응답 작업이라 결과를 버림(만료 정리 또는 재요청됨): recordDayId={}", job.recordDayId.value)
         } catch (e: Exception) {
             val failure = JobFailure.classify(e)
             log.atError().addKeyValue("event", "job.failed")
@@ -86,10 +80,27 @@ class ResponseJobExecutor(
         }
     }
 
-    // 실패 기록 자체가 실패해도(리스를 뺏긴 경우 포함) 로그는 남아야 한다.
+    // 리스가 만료된 작업을 정리한다. 정리 실패는 다음 주기에 다시 시도한다.
+    fun failExpiredLeases() {
+        runCatching { markResponseFailedService.failExpired(timeProvider.now(), EXPIRY_BATCH_SIZE) }
+            .onSuccess { jobs -> jobs.forEach { logLeaseExpired(it) } }
+            .onFailure { e -> log.warn("리스 만료 응답 작업 정리 실패: error={}", SafeFailure.code(e)) }
+    }
+
+    // resultStatus가 PENDING이면 멈춘 동안 접수된 입력에 대한 새 실행 주기가 열린 것이다.
+    private fun logLeaseExpired(job: ResponseJob) {
+        log.atWarn().addKeyValue("event", "job.lease_expired")
+            .addKeyValue("recordDayId", job.recordDayId.value)
+            .addKeyValue("resultStatus", job.state.status.name)
+            .log("리스가 만료된 응답 작업을 정리")
+    }
+
+    // 실패 기록 자체가 실패해도(리스 만료로 정리된 경우 포함) 로그는 남아야 한다.
     private fun recordFailure(job: ResponseJob, record: () -> Unit) {
         runCatching(record).onFailure { e ->
             log.warn("응답 작업 실패 기록을 남기지 못함: recordDayId={}, error={}", job.recordDayId.value, SafeFailure.code(e))
         }
     }
 }
+
+private const val EXPIRY_BATCH_SIZE = 100

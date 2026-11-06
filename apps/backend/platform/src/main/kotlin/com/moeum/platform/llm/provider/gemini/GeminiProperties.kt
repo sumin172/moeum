@@ -13,6 +13,5 @@ data class GeminiProperties(
     val apiKey: String = "",
     val baseUrl: String = "https://generativelanguage.googleapis.com",
     val connectionTimeoutMs: Int = 3_000,
-    // 일기 생성처럼 출력이 긴 호출도 들어오므로 대화 응답 기준보다 넉넉하게 잡는다
     val readTimeoutMs: Int = 60_000,
 )

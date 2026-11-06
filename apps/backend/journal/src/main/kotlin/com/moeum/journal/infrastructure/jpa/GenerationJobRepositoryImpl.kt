@@ -9,6 +9,7 @@ import com.moeum.platform.job.JobClaimSql
 import com.moeum.platform.job.JobState
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
@@ -16,7 +17,10 @@ private const val TABLE = "journal.generation_jobs"
 
 private const val CLAIM_NEXT_SQL =
     "UPDATE $TABLE ${JobClaimSql.CLAIM_SET} " +
-        "WHERE id = (SELECT id FROM $TABLE WHERE ${JobClaimSql.CLAIMABLE} ${JobClaimSql.PICK_ONE}) RETURNING *"
+        "WHERE id = (SELECT id FROM $TABLE WHERE ${JobClaimSql.DUE_PENDING} ${JobClaimSql.PICK_ONE}) RETURNING *"
+
+private const val LOCK_EXPIRED_SQL =
+    "SELECT * FROM $TABLE WHERE ${JobClaimSql.LEASE_EXPIRED} ORDER BY updated_at LIMIT :limit FOR UPDATE SKIP LOCKED"
 
 @Component
 class GenerationJobRepositoryImpl(
@@ -39,13 +43,19 @@ class GenerationJobRepositoryImpl(
         jpaRepository.findByUserIdAndRecordDayId(userId.value, recordDayId.value)?.toDomain()
 
     @Transactional
-    override fun claimNext(now: Instant, leaseExpiresAt: Instant): GenerationJob? =
+    override fun claimNext(now: Instant): GenerationJob? =
         entityManager.createNativeQuery(CLAIM_NEXT_SQL, GenerationJobJpaEntity::class.java)
             .setParameter("now", now)
-            .setParameter("leaseExpiresAt", leaseExpiresAt)
             .resultList
             .firstOrNull()
             ?.let { (it as GenerationJobJpaEntity).toDomain() }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun lockExpired(expiredBefore: Instant, limit: Int): List<GenerationJob> =
+        entityManager.createNativeQuery(LOCK_EXPIRED_SQL, GenerationJobJpaEntity::class.java)
+            .setParameter("expiredBefore", expiredBefore)
+            .setParameter("limit", limit)
+            .resultList.map { (it as GenerationJobJpaEntity).toDomain() }
 }
 
 private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
@@ -57,7 +67,6 @@ private fun GenerationJobJpaEntity.toDomain(): GenerationJob =
             status = status,
             attemptCount = attemptCount,
             nextAttemptAt = nextAttemptAt,
-            leaseExpiresAt = leaseExpiresAt,
             version = version,
         ),
         createdAt = createdAt,
@@ -72,7 +81,6 @@ private fun GenerationJob.toEntity(): GenerationJobJpaEntity =
         status = state.status,
         attemptCount = state.attemptCount,
         nextAttemptAt = state.nextAttemptAt,
-        leaseExpiresAt = state.leaseExpiresAt,
         version = state.version,
         createdAt = createdAt,
         updatedAt = updatedAt,

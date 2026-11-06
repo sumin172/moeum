@@ -10,42 +10,43 @@ enum class JobStatus { PENDING, PROCESSING, COMPLETED, FAILED }
 // PENDING ──claim──▶ PROCESSING ──성공──▶ COMPLETED
 //    ▲                   │
 //    └──실패, 재시도 남음──┤
-//                        └──실패, 재시도 소진──▶ FAILED ──사용자 재요청──▶ PENDING
+//                        ├──실패, 재시도 소진──▶ FAILED ──사용자 재요청──▶ PENDING
+//                        └──리스 만료(워커 중단)──▶ FAILED
 //
-// PROCESSING인 채로 리스가 만료되면(워커가 죽은 경우) 다른 워커가 다시 claim한다.
+// 자동 재시도는 살아 있는 워커가 직접 보고한 실패에만 적용한다. 리스가 만료된 PROCESSING은
+// 주기적인 정리 트랜잭션이 FAILED로 바꾸고 다시 실행하지 않는다.
+// 리스 기준 시각은 선점 시각(updated_at)이다. PROCESSING 동안에는 작업 행의 updated_at을 바꾸지 않는다.
 data class JobState(
     val status: JobStatus,
     // 지금까지 시작한 시도 횟수. claim될 때 1 증가한다.
     val attemptCount: Int,
     // PENDING일 때 이 시각부터 claim할 수 있다.
     val nextAttemptAt: Instant,
-    // PROCESSING일 때 이 시각이 지나면 다른 워커가 다시 가져갈 수 있다.
-    val leaseExpiresAt: Instant?,
-    // claim마다 증가한다. 리스를 뺏긴 워커의 늦은 결과 저장은 낙관적 락 충돌로 거부된다(fencing).
+    // claim과 모든 상태 저장마다 증가한다. 리스 만료로 정리됐거나 재요청된 뒤 도착한
+    // 이전 시도의 늦은 결과 저장은 낙관적 락 충돌로 거부된다(fencing).
     val version: Long,
 ) {
-    fun completed(): JobState = copy(status = JobStatus.COMPLETED, leaseExpiresAt = null)
+    fun completed(): JobState = copy(status = JobStatus.COMPLETED)
 
     fun failed(policy: JobPolicy, now: Instant, failure: JobFailure): JobState {
         val nextAttemptAt = policy.nextAttemptAt(attemptCount, now, failure) ?: return failedPermanently()
-        return copy(status = JobStatus.PENDING, nextAttemptAt = nextAttemptAt, leaseExpiresAt = null)
+        return copy(status = JobStatus.PENDING, nextAttemptAt = nextAttemptAt)
     }
 
-    fun failedPermanently(): JobState =
-        copy(status = JobStatus.FAILED, leaseExpiresAt = null)
+    fun failedPermanently(): JobState = copy(status = JobStatus.FAILED)
 
     // 최종 실패. nextAttemptAt은 다시 시작할 수 있는 가장 이른 시각이 된다.
     fun failedUntil(reopenAt: Instant): JobState =
-        copy(status = JobStatus.FAILED, nextAttemptAt = reopenAt, leaseExpiresAt = null)
+        copy(status = JobStatus.FAILED, nextAttemptAt = reopenAt)
 
     // 새 실행 주기를 시작한다. 같은 실행의 재시도가 아니므로 시도 횟수를 0으로 되돌린다.
     fun reopened(nextAttemptAt: Instant): JobState =
-        copy(status = JobStatus.PENDING, attemptCount = 0, nextAttemptAt = nextAttemptAt, leaseExpiresAt = null)
+        copy(status = JobStatus.PENDING, attemptCount = 0, nextAttemptAt = nextAttemptAt)
 
     // 자동 재예약 판단과 대화 작업의 누적 상한에 사용하므로 사용자 재요청에도 횟수를 초기화하지 않는다.
     fun restarted(now: Instant): JobState {
         check(status == JobStatus.FAILED) { "최종 실패한 작업만 다시 시작할 수 있습니다: status=$status" }
-        return copy(status = JobStatus.PENDING, nextAttemptAt = now, leaseExpiresAt = null)
+        return copy(status = JobStatus.PENDING, nextAttemptAt = now)
     }
 
     companion object {
@@ -54,7 +55,6 @@ data class JobState(
                 status = JobStatus.PENDING,
                 attemptCount = 0,
                 nextAttemptAt = nextAttemptAt,
-                leaseExpiresAt = null,
                 version = 0,
             )
     }

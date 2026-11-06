@@ -9,7 +9,7 @@ import java.time.Duration
 data class ResponseJobProperties(
     val maxAttempts: Int = 3,
     val backoff: List<Duration> = listOf(Duration.ofSeconds(10), Duration.ofSeconds(60)),
-    // provider read timeout(60초)보다 넉넉하게
+    // 실행 한 번의 상한. 넘긴 작업은 FAILED로 정리하므로 provider read timeout(60초)보다 넉넉하게 둔다.
     val lease: Duration = Duration.ofMinutes(2),
     // 실행 슬롯을 미리 확보하고 이 수 이하를 한 트랜잭션에서 선점한다.
     val claimBatchSize: Int = 32,

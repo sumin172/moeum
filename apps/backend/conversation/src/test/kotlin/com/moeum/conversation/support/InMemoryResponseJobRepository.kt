@@ -30,27 +30,26 @@ class InMemoryResponseJobRepository(private val records: InMemoryRecordDayReposi
     override fun findByRecord(userId: UserId, recordDayId: RecordDayId): ResponseJob? =
         jobs[recordDayId]?.takeIf { it.userId == userId }
 
-    override fun claimBatch(now: Instant, leaseExpiresAt: Instant, limit: Int): List<ResponseJob> =
+    override fun claimBatch(now: Instant, limit: Int): List<ResponseJob> =
         jobs.values
-            .filter { isClaimable(it, now) }
-            .sortedBy { if (it.state.status == JobStatus.PENDING) it.state.nextAttemptAt else it.state.leaseExpiresAt }
+            .filter { it.state.status == JobStatus.PENDING && !it.state.nextAttemptAt.isAfter(now) }
+            .sortedBy { it.state.nextAttemptAt }
             .take(limit)
-            .map { claimed(it, now, leaseExpiresAt) }
+            .map { claimed(it, now) }
 
-    private fun isClaimable(job: ResponseJob, now: Instant): Boolean {
-        val state = job.state
-        return (state.status == JobStatus.PENDING && !state.nextAttemptAt.isAfter(now)) ||
-            (state.status == JobStatus.PROCESSING && state.leaseExpiresAt?.isAfter(now) == false)
-    }
+    override fun lockExpired(expiredBefore: Instant, limit: Int): List<ResponseJob> =
+        jobs.values
+            .filter { it.state.status == JobStatus.PROCESSING && !it.updatedAt.isAfter(expiredBefore) }
+            .sortedBy { it.updatedAt }
+            .take(limit)
 
-    private fun claimed(job: ResponseJob, now: Instant, leaseExpiresAt: Instant): ResponseJob {
+    private fun claimed(job: ResponseJob, now: Instant): ResponseJob {
         val observed = if (job.state.attemptCount == 0) records.days.getValue(job.recordDayId).sourceRevision
             else job.observedSourceRevision
         val claimed = job.copy(
             state = job.state.copy(
                 status = JobStatus.PROCESSING,
                 attemptCount = job.state.attemptCount + 1,
-                leaseExpiresAt = leaseExpiresAt,
                 version = job.state.version + 1,
             ),
             observedSourceRevision = observed,

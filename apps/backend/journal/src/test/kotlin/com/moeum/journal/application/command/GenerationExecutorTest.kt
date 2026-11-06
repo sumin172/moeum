@@ -7,7 +7,6 @@ import com.moeum.conversation.application.publicapi.RecordDelivery
 import com.moeum.journal.domain.GeneratedJournal
 import com.moeum.journal.domain.JournalGenerator
 import com.moeum.journal.domain.model.GenerationJob
-import com.moeum.journal.domain.model.failedPermanently
 import com.moeum.journal.infrastructure.config.GenerationJobProperties
 import com.moeum.journal.support.InMemoryGenerationJobRepository
 import com.moeum.journal.support.InMemoryJournalRepository
@@ -18,7 +17,9 @@ import com.moeum.platform.job.JobStatus
 import com.moeum.platform.llm.LlmException
 import com.moeum.journal.infrastructure.ai.JournalGenerationException
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.springframework.dao.OptimisticLockingFailureException
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -61,7 +62,6 @@ class GenerationExecutorTest {
         journalGenerator = generator,
         saveGeneratedJournalService = SaveGeneratedJournalService(journalRepository, jobRepository, timeProvider),
         markGenerationFailedService = MarkGenerationFailedService(jobRepository, settings, timeProvider),
-        generationJobProperties = settings,
         timeProvider = timeProvider,
     )
 
@@ -140,6 +140,33 @@ class GenerationExecutorTest {
         assertThat(generator.calls).isEqualTo(2)
         assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.FAILED)
         assertThat(journals).isEmpty()
+    }
+
+    // 워커가 실행 중 중단된 상황: 선점만 하고 결과를 남기지 않는다
+    private fun claimAndDie(): GenerationJob = jobRepository.claimNext(now)!!
+
+    @Test
+    fun `리스가 만료된 작업은 자동으로 다시 실행하지 않고 FAILED로 정리하며 늦은 저장을 거부한다`() {
+        val job = enqueue()
+        val dead = claimAndDie()
+        val generator = ScriptedGenerator(failures = 0)
+        val runner = executor(generator)
+
+        now = now.plus(properties.lease).minusSeconds(1)
+        runner.failExpiredLeases()
+        assertThat(jobRepository.jobs.getValue(job.id).state.status).isEqualTo(JobStatus.PROCESSING)
+
+        now = now.plusSeconds(1)
+        runner.failExpiredLeases()
+        val expired = jobRepository.jobs.getValue(job.id)
+        assertThat(expired.state.status).isEqualTo(JobStatus.FAILED)
+        assertThat(expired.state.attemptCount).isEqualTo(1)
+        // 되살아난 워커의 늦은 저장은 거부된다
+        assertThatThrownBy { jobRepository.save(dead.completed(now)) }
+            .isInstanceOf(OptimisticLockingFailureException::class.java)
+
+        assertThat(runner.executeNext()).isFalse()
+        assertThat(generator.calls).isZero()
     }
 
     @Test
