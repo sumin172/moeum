@@ -35,13 +35,13 @@ class RecordDayOperationsService(
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     override fun claimDelivery(): RecordDelivery? {
         val now = time.now()
-        val day = records.claimDelivery(now, now.plus(Duration.ofMinutes(1))) ?: return null
-        return RecordDelivery(day.id, day.userId, day.closedAt!!, day.deliveryVersion)
+        val day = records.claimDelivery(now, now.minus(DELIVERY_LEASE)) ?: return null
+        return RecordDelivery(day.id, day.userId, day.closedAt!!)
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     override fun acknowledge(delivery: RecordDelivery): Boolean =
-        records.acknowledgeDelivery(delivery.userId, delivery.recordDayId, delivery.version)
+        records.acknowledgeDelivery(delivery.userId, delivery.recordDayId)
 
     override fun readJournalInput(userId: UserId, recordDayId: RecordDayId): JournalInput {
         val day = records.find(userId, recordDayId) ?: throw RecordDayNotFoundException("기록이 없습니다")
@@ -50,3 +50,6 @@ class RecordDayOperationsService(
         return JournalInput(day.displayDate, input.map { MessageSnapshot(it.role.name, it.content, it.occurredAt) })
     }
 }
+
+// 선점 후 이 시간 안에 확인되지 않은 전달은 다른 워커가 다시 선점한다. 등록은 멱등이라 재전달해도 작업은 하나다.
+private val DELIVERY_LEASE: Duration = Duration.ofMinutes(1)

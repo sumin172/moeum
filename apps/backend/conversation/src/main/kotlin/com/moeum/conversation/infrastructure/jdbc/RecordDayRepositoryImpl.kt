@@ -55,11 +55,10 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate, private val record
         jdbc.update(
             """INSERT INTO conversation.record_days
                 (id,user_id,display_date,start_at,close_date,close_time,timezone,close_at,
-                 source_revision,closed_at,delivery_version,delivery_lease_expires_at,delivery_acknowledged)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 source_revision,closed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             day.id.value, day.userId.value, day.displayDate, ts(day.startAt), day.closeDate, day.closeTime,
             day.timezone, ts(day.closeAt), day.sourceRevision, day.closedAt?.let(::ts),
-            day.deliveryVersion, day.deliveryLeaseExpiresAt?.let(::ts), day.deliveryAcknowledged,
         )
     }
 
@@ -90,19 +89,19 @@ class RecordDayRepositoryImpl(private val jdbc: JdbcTemplate, private val record
         return null
     }
 
-    override fun claimDelivery(now: Instant, leaseExpiresAt: Instant): RecordDay? =
+    override fun claimDelivery(now: Instant, expiredBefore: Instant): RecordDay? =
         jdbc.query(
-            """UPDATE conversation.record_days SET delivery_version=delivery_version+1, delivery_lease_expires_at=?
+            """UPDATE conversation.record_days SET delivery_claimed_at=?
                WHERE id=(SELECT id FROM conversation.record_days
                  WHERE closed_at IS NOT NULL AND NOT delivery_acknowledged
-                   AND (delivery_lease_expires_at IS NULL OR delivery_lease_expires_at<=?)
+                   AND (delivery_claimed_at IS NULL OR delivery_claimed_at<=?)
                  ORDER BY closed_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *""",
-            dayMapper, ts(leaseExpiresAt), ts(now),
+            dayMapper, ts(now), ts(expiredBefore),
         ).firstOrNull()
 
-    override fun acknowledgeDelivery(userId: UserId, id: RecordDayId, version: Long): Boolean =
-        jdbc.update("""UPDATE conversation.record_days SET delivery_acknowledged=true, delivery_lease_expires_at=NULL
-            WHERE user_id=? AND id=? AND delivery_version=? AND NOT delivery_acknowledged""", userId.value, id.value, version) == 1
+    override fun acknowledgeDelivery(userId: UserId, id: RecordDayId): Boolean =
+        jdbc.update("""UPDATE conversation.record_days SET delivery_acknowledged=true
+            WHERE user_id=? AND id=? AND NOT delivery_acknowledged""", userId.value, id.value) == 1
 }
 
 private fun ts(value: Instant) = java.sql.Timestamp.from(value)
@@ -117,7 +116,5 @@ private val dayMapper = RowMapper { rs: ResultSet, _: Int ->
         closeDate=rs.getObject("close_date", LocalDate::class.java), closeTime=rs.getObject("close_time", LocalTime::class.java),
         timezone=rs.getString("timezone"), closeAt=rs.instant("close_at")!!,
         sourceRevision=rs.getLong("source_revision"), closedAt=rs.instant("closed_at"),
-        deliveryVersion=rs.getLong("delivery_version"), deliveryLeaseExpiresAt=rs.instant("delivery_lease_expires_at"),
-        deliveryAcknowledged=rs.getBoolean("delivery_acknowledged"),
     )
 }

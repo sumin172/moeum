@@ -207,18 +207,19 @@ class DayBoundaryIntegrationTest : AbstractIntegrationTest() {
             user.value)).isEqualTo(1)
     }
 
-    @Test fun `전달 확인 전에 재전달되어도 생성 작업은 하나이고 이전 버전 확인은 실패한다`() {
+    @Test fun `전달 확인 전에 재전달되어도 생성 작업은 하나이고 확인은 등록 뒤 한 번만 반영된다`() {
         val user = UserId.generate()
         val first = accepted(user)
         close(first.record.id.value)
         val delivery = generateSequence { records.claimDelivery() }.first { it.recordDayId == first.record.id }
         assertThat(registration.register(delivery)).isTrue()
-        jdbc.update("UPDATE conversation.record_days SET delivery_lease_expires_at=now()-interval '1 second' WHERE id=?", first.record.id.value)
+        // 전달 리스(1분)가 지난 것으로 둔다
+        jdbc.update("UPDATE conversation.record_days SET delivery_claimed_at=now()-interval '61 seconds' WHERE id=?", first.record.id.value)
         val second = generateSequence { records.claimDelivery() }.first { it.recordDayId == first.record.id }
-        assertThat(second.version).isGreaterThan(delivery.version)
         assertThat(registration.register(second)).isFalse()
-        assertThat(records.acknowledge(delivery)).isFalse()
-        assertThat(records.acknowledge(second)).isTrue()
+        // 리스를 잃은 이전 시도의 확인도 등록 뒤라 유효하고, 확인은 한 번만 반영된다
+        assertThat(records.acknowledge(delivery)).isTrue()
+        assertThat(records.acknowledge(second)).isFalse()
         assertThat(count("journal.generation_jobs", user)).isEqualTo(1)
     }
 

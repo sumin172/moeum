@@ -79,7 +79,7 @@ object CapacityRoleMain {
             if(after) context.getBean<com.moeum.journal.application.command.RegisterRecordGenerationService>().register(delivery)
             Files.writeString(Path.of(System.getProperty("capacity.readyFile")+".delivery-crash.json"),
                 mapper.writeValueAsString(mapOf("recordDayId" to delivery.recordDayId.value.toString(),
-                    "version" to delivery.version,"afterRegistration" to after,"crashedAt" to Instant.now().toString())))
+                    "afterRegistration" to after,"crashedAt" to Instant.now().toString())))
             Runtime.getRuntime().halt(91)
         }
         control.createContext("/control") { exchange ->

@@ -16,7 +16,6 @@ data class RecordDelivery(
     val recordDayId: RecordDayId,
     val userId: UserId,
     val closedAt: Instant,
-    val version: Long,
 )
 data class JournalInput(val displayDate: LocalDate, val messages: List<MessageSnapshot>)
 data class MessageSnapshot(val role: String, val content: String, val occurredAt: Instant)

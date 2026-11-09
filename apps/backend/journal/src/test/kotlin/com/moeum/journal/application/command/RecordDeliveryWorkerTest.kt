@@ -15,7 +15,7 @@ class RecordDeliveryWorkerTest {
     @Test
     fun `한 번의 실행에서 첫 100건 뒤에 남은 전달 작업도 처리한다`() {
         val user = UserId.generate()
-        val pending = ArrayDeque((1..101).map { RecordDelivery(RecordDayId.generate(), user, Instant.now(), 1) })
+        val pending = ArrayDeque((1..101).map { RecordDelivery(RecordDayId.generate(), user, Instant.now()) })
         var acknowledged = 0
         val records = object : RecordDayOperations {
             override fun closeNext() = false
