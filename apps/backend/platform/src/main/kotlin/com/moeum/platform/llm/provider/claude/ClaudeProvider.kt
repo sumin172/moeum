@@ -11,7 +11,6 @@ import com.moeum.platform.llm.LlmRole
 import com.moeum.platform.llm.LlmRoute
 import com.moeum.platform.llm.provider.LlmProvider
 import com.moeum.platform.llm.provider.LlmProviderResult
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
@@ -30,7 +29,6 @@ class ClaudeProvider(
 
     override fun missingSettings(): List<String> = listOfNotNull("moeum.claude.api-key".takeIf { properties.apiKey.isBlank() })
 
-    @CircuitBreaker(name = "llm-claude")
     override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
         val body = ClaudeMessageRequest(
             model = route.model,

@@ -28,7 +28,7 @@ import tools.jackson.databind.json.JsonMapper
 
 /**
  * 운영과 같은 Boot 설정 로딩(local → 워커 프로필 순서)·공급자 등록·용도별 라우팅으로 실제 공급자를 부른다.
- * DB·JPA·스케줄러와 서킷브레이커·관측 버퍼는 실행하지 않는다. 검증 범위는 실제 공급자 호출과 생성 계약이며 운영 장애 격리는 포함하지 않는다.
+ * DB·JPA·스케줄러와 관측 버퍼는 실행하지 않는다. 검증 범위는 실제 공급자 호출과 생성 계약이며 운영 장애 격리는 포함하지 않는다.
  */
 internal class ProviderValidationContext private constructor(
     private val context: ConfigurableApplicationContext,

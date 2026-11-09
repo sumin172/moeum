@@ -4,26 +4,14 @@ import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
 
 import org.springframework.boot.context.properties.ConfigurationProperties
-import java.time.Duration
 
+// 프로세스의 동시 호출 수는 워커 실행 슬롯(moeum.runtime.*-concurrency)이 정한다.
 @ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @ConfigurationProperties(prefix = "moeum.llm")
 data class LlmProperties(
     // 용도별 provider·모델 선택. 모델 교체나 provider 전환은 코드가 아니라 이 설정으로 한다.
     val routes: Map<String, LlmRoute> = emptyMap(),
-    // provider별 동시 호출 상한(bulkhead). 트래픽이 몰려도 LLM 호출이 무제한으로 늘어나 rate limit과
-    // DB 커넥션 경쟁을 일으키지 않게 한다.
-    val maxConcurrentCalls: Map<String, Int> = emptyMap(),
-    // 동시 호출 상한에 걸렸을 때 기다리는 최대 시간. 넘기면 LlmException — 비동기 작업이면 재시도로 넘어간다.
-    val acquireTimeout: Duration = Duration.ofSeconds(5),
-) {
-    init {
-        require(maxConcurrentCalls.values.all { it > 0 }) { "LLM 동시 호출 상한은 양수여야 합니다" }
-        require(!acquireTimeout.isNegative) { "LLM permit 대기 시간은 음수일 수 없습니다" }
-    }
-
-    fun concurrentLimit(provider: String): Int = maxConcurrentCalls[provider] ?: 10
-}
+)
 
 data class LlmRoute(
     // provider 이름(gemini | claude | cloudflare)

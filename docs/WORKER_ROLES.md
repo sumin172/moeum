@@ -16,7 +16,6 @@ $env:CLOUDFLARE_API_TOKEN = "API Token"
 로컬에서도 환경변수로 주입한다. `application-local.yml`은 저장소가 추적하는 파일이므로 `${CLOUDFLARE_ACCOUNT_ID:}`·`${CLOUDFLARE_API_TOKEN:}`의 콜론 뒤 기본값에 실제 값을 넣지 않는다.
 키를 저장소에 기록하지 않는다. 대화 워커는 대화 라우트가 선택한 공급자의 필수 설정이 없으면 기동하지 않는다. 규칙은 [AI 공급자](LLM.md#공급자-설정과-기동-검사)를 따른다.
 연결·읽기 제한은 각각 기본 3초·60초이며 `moeum.cloudflare.connection-timeout-ms`, `read-timeout-ms`로 조정한다.
-`CONVERSATION_LLM_CONCURRENCY`는 Cloudflare 동시 호출 상한에도 적용한다.
 `thinking-budget: 0`은 마지막 사용자 메시지에 `/no_think`를 추가하는 소프트 제어다. 강제 비활성화를 보장하지 않는다.
 완결된 선두 추론 블록은 응답에서 제거하고, 미완결 추론·출력 잘림·비정상 종료는 저장하지 않는다.
 토큰 수는 공급자의 전체 completion 사용량을 기록하므로 숨긴 추론도 사용량에서 제외하지 않는다.
@@ -42,16 +41,16 @@ API는 servlet, 워커는 none web application type이다.
 
 ## 역할과 기본값
 
-| 역할                | 실행 경로                          | DB pool 최대/최소 | 실행 슬롯 | provider별 동시 호출 상한 |
-|---------------------|------------------------------------|------------------:|----------:|--------------------------:|
-| API                 | HTTP 저장·조회·일기 재시도 접수    |            10 / 2 | 해당 없음 |                 해당 없음 |
-| conversation-worker | 대화 응답·종료 작업 정리           |             4 / 1 |         8 |                         8 |
-| journal-worker      | 마감·전달·일기 생성·종료 작업 정리 |             2 / 1 |         2 |                         2 |
+| 역할                | 실행 경로                          | DB pool 최대/최소 | 실행 슬롯 |
+|---------------------|------------------------------------|------------------:|----------:|
+| API                 | HTTP 저장·조회·일기 재시도 접수    |            10 / 2 | 해당 없음 |
+| conversation-worker | 대화 응답·종료 작업 정리           |             4 / 1 |         8 |
+| journal-worker      | 마감·전달·일기 생성·종료 작업 정리 |             2 / 1 |         2 |
 
 수치는 설정 기본값이며 성능 시험 설정과 별개다.
 외부 호출 동안 DB 트랜잭션을 유지하지 않는다.
 선점·입력 조회·결과 저장에서 연결을 사용한다.
-프로세스별 pool·호출 제한·circuit breaker는 독립적이며 DB와 공급자 계정의 총량은 공유한다.
+프로세스별 pool·실행 슬롯은 독립적이며 DB와 공급자 계정의 총량은 공유한다.
 
 API에 HTTP·보안 빈이, 워커에 해당 역할의 LLM·스케줄 빈이 등록된다.
 설정 바인딩도 역할별 JWT/Google 또는 LLM 사용 범위를 따른다. refresh token HMAC 검증 빈은 API 역할에서만 등록된다.
@@ -100,10 +99,8 @@ WorkerRoleIsolationIntegrationTest는 각 역할을 기동해 역할별 필수 �
 | JOURNAL_DB_POOL_SIZE             | 일기 인스턴스 최대 DB 연결                                                              |
 | CONVERSATION_WORKER_CONCURRENCY  | 대화 실행 슬롯                                                                          |
 | JOURNAL_WORKER_CONCURRENCY       | 일기 실행 슬롯                                                                          |
-| CONVERSATION_LLM_CONCURRENCY     | 대화 프로세스 provider별 동시 호출                                                      |
-| JOURNAL_LLM_CONCURRENCY          | 일기 프로세스 provider별 동시 호출                                                      |
 
-기동 시 역할별 슬롯 합계와 provider 호출 상한을 검증한다.
+LLM 호출은 워커 실행 슬롯 안에서만 일어나므로 실행 슬롯 수가 그 프로세스의 공급자 동시 호출 수다.
 DB pool의 minimum-idle은 maximum-pool-size 이하여야 한다.
 API 역할의 인증 키 주입은 [인증·구독](AUTH.md)을 따른다.
 

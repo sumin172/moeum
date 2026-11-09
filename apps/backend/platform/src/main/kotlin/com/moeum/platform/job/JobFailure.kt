@@ -13,8 +13,8 @@ data class JobFailure(val kind: JobFailureKind, val retryAfter: Duration? = null
                 return when {
                     code == "HTTP_429" -> JobFailure(JobFailureKind.RATE_LIMITED, error.retryAfter)
                     code == "EMPTY_CONTENT" -> JobFailure(JobFailureKind.INVALID_OUTPUT)
-                    code == null || code in setOf("TIMEOUT", "IO_ERROR", "BULKHEAD_FULL", "HTTP_408", "HTTP_409") ||
-                        code.startsWith("HTTP_5") || code == "CallNotPermittedException" -> JobFailure(JobFailureKind.TRANSIENT)
+                    code == null || code in setOf("TIMEOUT", "IO_ERROR", "HTTP_408", "HTTP_409") ||
+                        code.startsWith("HTTP_5") -> JobFailure(JobFailureKind.TRANSIENT)
                     else -> JobFailure(JobFailureKind.PERMANENT)
                 }
             }

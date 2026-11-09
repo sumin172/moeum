@@ -3,10 +3,7 @@ package com.moeum.platform.llm.provider
 import com.moeum.platform.llm.*
 import com.moeum.platform.llm.provider.gemini.GeminiProperties
 import com.moeum.platform.llm.provider.gemini.GeminiProvider
-import io.github.resilience4j.circuitbreaker.CircuitBreaker
-import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
@@ -120,24 +117,5 @@ class GeminiProviderTest {
         server.expect(requestTo("https://gemini.test/v1beta/models/flash:generateContent"))
             .andRespond(withSuccess("""{"candidates":[{"finishReason":"STOP"}]}""", MediaType.APPLICATION_JSON))
         assertThat(provider.generate(LlmRoute("gemini", "flash", 10), request).errorCode).isEqualTo("EMPTY_CONTENT")
-    }
-
-    @ParameterizedTest
-    @CsvSource("MAX_TOKENS,OUTPUT_TRUNCATED", "SAFETY,OUTPUT_BLOCKED")
-    fun `출력 잘림과 차단은 호출 뒤 라우터에서 거절하고 공급자 서킷은 실패로 집계하지 않는다`(reason: String, expected: String) {
-        server.expect(requestTo("https://gemini.test/v1beta/models/flash:generateContent"))
-            .andRespond(withSuccess("""{"candidates":[{"content":{"parts":[{"text":"중간 본문"}]},"finishReason":"$reason"}]}""", MediaType.APPLICATION_JSON))
-        val breaker = CircuitBreaker.of("test", CircuitBreakerConfig.custom().recordExceptions(LlmException::class.java).build())
-        val delegate = provider
-        val wrapped = object : LlmProvider by delegate {
-            override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult =
-                breaker.executeSupplier { delegate.generate(route, request) }
-        }
-        val client = RoutingLlmClient(listOf(wrapped), LlmProperties(routes = mapOf("chat" to LlmRoute("gemini", "flash", 10)))) { }
-        assertThatThrownBy { client.generate(request) }.isInstanceOfSatisfying(LlmException::class.java) {
-            assertThat(it.errorCode).isEqualTo(expected)
-        }
-        assertThat(breaker.metrics.numberOfFailedCalls).isZero()
-        assertThat(breaker.metrics.numberOfSuccessfulCalls).isEqualTo(1)
     }
 }

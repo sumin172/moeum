@@ -30,7 +30,7 @@ import java.util.UUID
 /**
  * 설정된 실제 공급자 경로를 운영 등록·라우팅 그대로 검증한다. DB·스케줄러·자동 재시도는 실행하지 않는다.
  * 경로는 providerValidation.path(journal | conversation | both), 공급자·모델 교체는 providerValidation.provider·model로 지정한다.
- * 선택한 경로의 라우트와 인증만 검사한다. 서킷브레이커는 적용하지 않고 동시 호출 상한은 워커 설정대로 적용하며, 운영 장애 격리는 검증 범위가 아니다.
+ * 선택한 경로의 라우트와 인증만 검사한다. 운영 장애 격리는 검증 범위가 아니다.
  */
 class ProviderValidationTest {
     private val mapper = JsonMapper.builder().build()
@@ -162,7 +162,7 @@ class ProviderValidationTest {
             }
         }
         results += validate(journal, ValidationPath.JOURNAL, "session", 1, context.toList())
-        // 공급자 8개 동시 호출의 단기 표본. 8개 스레드가 대화 워커 설정의 라우터 하나를 공유하므로 동시 호출 상한도 적용된다.
+        // 공급자 8개 동시 호출의 단기 표본. 8개 스레드가 대화 워커 설정의 라우터 하나를 공유한다.
         // 워커 실행 경로·DB를 거치지 않으므로 워커·DB 부하 검증은 아니다.
         val executor = java.util.concurrent.Executors.newFixedThreadPool(8)
         try {
