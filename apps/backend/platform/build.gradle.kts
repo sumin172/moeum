@@ -28,16 +28,14 @@ dependencies {
     implementation(libs.micrometer.core)
     compileOnly(libs.logback.classic)
     compileOnly(libs.jakarta.servlet.api)
-    compileOnly(libs.jackson.databind)
+    implementation(libs.jackson.databind)
     implementation(libs.jjwt.api)
     runtimeOnly(libs.jjwt.impl)
     runtimeOnly(libs.jjwt.jackson)
 
     implementation(libs.spring.web)
-    implementation(libs.spring.cloud.starter.circuitbreaker.resilience4j)
 
     testImplementation(libs.spring.boot.starter.test)
-    testImplementation(libs.jackson.databind)
     testImplementation(libs.kotlin.reflect)
 }
 

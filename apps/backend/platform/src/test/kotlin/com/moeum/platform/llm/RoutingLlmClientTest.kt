@@ -12,9 +12,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import com.moeum.platform.job.JobFailure
 import com.moeum.platform.job.JobFailureKind
 import java.time.Duration
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.web.client.HttpClientErrorException
@@ -43,8 +40,7 @@ class RoutingLlmClientTest {
 
     private fun ok(route: LlmRoute) = LlmProviderResult("답변", "${route.model}-001", 10, 5, cachedInputTokens = 3)
 
-    private fun properties(vararg routes: Pair<String, LlmRoute>, maxConcurrent: Map<String, Int> = emptyMap()) =
-        LlmProperties(routes = routes.toMap(), maxConcurrentCalls = maxConcurrent, acquireTimeout = Duration.ofMillis(100))
+    private fun properties(vararg routes: Pair<String, LlmRoute>) = LlmProperties(routes = routes.toMap())
 
     private fun request(purpose: String) =
         LlmRequest(purpose, "system", listOf(LlmMessage(LlmRole.USER, "안녕")), promptVersion = "v1")
@@ -117,31 +113,6 @@ class RoutingLlmClientTest {
         )
 
         assertThat(client.generate(request("chat")).text).isEqualTo("답변")
-    }
-
-    @Test
-    fun `provider별 동시 호출 상한을 넘으면 기다리다 LlmException으로 거절한다`() {
-        val inFlight = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        val slow = FakeProvider("gemini") { route ->
-            inFlight.countDown()
-            release.await(5, TimeUnit.SECONDS)
-            ok(route)
-        }
-        val client = RoutingLlmClient(
-            listOf(slow), properties("chat" to LlmRoute("gemini", "flash", 150), maxConcurrent = mapOf("gemini" to 1)), telemetry,
-        )
-        val executor = Executors.newSingleThreadExecutor()
-        val first = executor.submit<LlmResult> { client.generate(request("chat")) }
-        inFlight.await(5, TimeUnit.SECONDS)
-
-        assertThatThrownBy { client.generate(request("chat")) }
-            .isInstanceOf(LlmException::class.java)
-            .hasMessageContaining("동시 호출 상한")
-
-        release.countDown()
-        assertThat(first.get(5, TimeUnit.SECONDS).text).isEqualTo("답변")
-        executor.shutdown()
     }
 
     @Test

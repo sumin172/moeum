@@ -6,7 +6,6 @@ import com.moeum.platform.llm.provider.LlmProvider
 import com.moeum.platform.llm.provider.LlmProviderResult
 import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.body
@@ -25,7 +24,6 @@ class CloudflareProvider(
         "moeum.cloudflare.api-token".takeIf { properties.apiToken.isBlank() },
     )
 
-    @CircuitBreaker(name = "llm-cloudflare")
     override fun generate(route: LlmRoute, request: LlmRequest): LlmProviderResult {
         // 기동 시 라우트 검사를 거치지 않은 호출도 원격 요청 없이 실패시킨다. 필수 설정 판단은 missingSettings 하나로 둔다.
         if (missingSettings().isNotEmpty()) {

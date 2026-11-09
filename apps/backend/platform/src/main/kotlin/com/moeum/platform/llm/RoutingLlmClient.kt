@@ -11,14 +11,13 @@ import com.moeum.platform.observability.WorkTrace
 import com.moeum.platform.llm.provider.LlmProvider
 import com.moeum.platform.llm.provider.LlmProviderResult
 import org.springframework.stereotype.Component
-import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.time.Duration
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import org.springframework.web.client.RestClientResponseException
 
-// 용도(purpose)별 라우팅 → provider별 동시 호출 상한 → provider 호출(서킷브레이커는 provider에) → 비차단 관측 기록.
+// 용도(purpose)별 라우팅 → provider 호출 → 비차단 관측 기록.
 @ConditionalOnRole(ExecutionRole.CONVERSATION_WORKER, ExecutionRole.JOURNAL_WORKER)
 @Component
 class RoutingLlmClient(
@@ -28,9 +27,6 @@ class RoutingLlmClient(
 ) : LlmClient {
 
     private val providersByName = providers.associateBy { it.name }
-    private val permits = providersByName.keys.associateWith {
-        Semaphore(properties.concurrentLimit(it))
-    }
 
     init {
         // 잘못된 라우팅 설정은 첫 호출이 아니라 기동 시점에 드러나야 한다. 인증은 이 역할이 쓰는 용도만 requireRoute로 검사한다.
@@ -53,16 +49,10 @@ class RoutingLlmClient(
         val route = properties.routes[request.purpose]
             ?: throw IllegalArgumentException("moeum.llm.routes.${request.purpose} 설정이 없습니다")
         val provider = providersByName.getValue(route.provider)
-        val permit = permits.getValue(route.provider)
 
         val generationId = UuidV7.generate()
         WorkTrace.generation(generationId)
         val startedAt = System.nanoTime()
-        if (!permit.tryAcquire(properties.acquireTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            val error = LlmException("LLM 동시 호출 상한 초과", errorCode = "BULKHEAD_FULL")
-            record(request, provider, route, startedAt, null, generationId, error)
-            throw error
-        }
         var result: LlmProviderResult? = null
         try {
             result = provider.generate(route, request)
@@ -78,8 +68,6 @@ class RoutingLlmClient(
             throw LlmException("LLM 호출 실패",
                 errorCode = if (e is LlmException) e.errorCode else SafeFailure.code(e),
                 retryAfter = retryAfter(e))
-        } finally {
-            permit.release()
         }
     }
 

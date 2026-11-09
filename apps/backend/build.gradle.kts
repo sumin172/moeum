@@ -14,13 +14,3 @@ allprojects {
         mavenCentral()
     }
 }
-
-subprojects {
-    plugins.withId("io.spring.dependency-management") {
-        configure<io.spring.gradle.dependencymanagement.dsl.DependencyManagementExtension> {
-            imports {
-                mavenBom("org.springframework.cloud:spring-cloud-dependencies:${rootProject.libs.versions.spring.cloud.dependencies.get()}")
-            }
-        }
-    }
-}

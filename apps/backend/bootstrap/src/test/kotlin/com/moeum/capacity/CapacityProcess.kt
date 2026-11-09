@@ -33,7 +33,6 @@ class CapacityProcess(
     fun start() {
         Files.deleteIfExists(ready)
         val pool = when (role) { "api" -> settings.apiPool; "conversation-worker" -> settings.conversationPool; else -> settings.journalPool }
-        val slots = if (role == "journal-worker") settings.journalSlots else settings.conversationSlots
         val executable=if(System.getProperty("os.name").startsWith("Windows")) "java.exe" else "java"
         val java = Path.of(System.getProperty("java.home"), "bin", executable)
         val arguments = listOf(
@@ -48,7 +47,6 @@ class CapacityProcess(
             "--moeum.jwt.secret=${CapacitySettings.JWT_SECRET}",
             "--moeum.llm.routes.conversation-response.provider=capacity-fake",
             "--moeum.llm.routes.journal-generation.provider=capacity-fake",
-            "--moeum.llm.max-concurrent-calls.capacity-fake=$slots",
             "--moeum.runtime.conversation-concurrency=${settings.conversationSlots}",
             "--moeum.runtime.journal-concurrency=${settings.journalSlots}",
             "--moeum.runtime.shutdown-timeout=2s",

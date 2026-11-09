@@ -11,8 +11,3 @@ moeum:
   runtime:
     roles: conversation-worker
     conversation-concurrency: ${CONVERSATION_WORKER_CONCURRENCY:8}
-  llm:
-    max-concurrent-calls:
-      cloudflare: ${CONVERSATION_LLM_CONCURRENCY:8}
-      gemini: ${CONVERSATION_LLM_CONCURRENCY:8}
-      claude: ${CONVERSATION_LLM_CONCURRENCY:8}

@@ -22,7 +22,7 @@ Conversation과 Journal은 Identity publicapi로 권한·한도를 조회한다.
 
 같은 jar를 API, conversation-worker, journal-worker로 각각 실행한다.
 API는 저장·조회·일기 재시도 접수를 처리한다. 대화 워커는 AI 답변을, 일기 워커는 마감·전달·일기 생성을 처리한다.
-역할별 프로세스·실행 슬롯·DB 풀·공급자 동시 호출 상한이 있다.
+역할별 프로세스·실행 슬롯·DB 풀이 있다. 실행 슬롯이 공급자 동시 호출 수를 정한다.
 DB 서버와 공급자 계정의 총량은 공유한다. 설정과 합산 예산은 [실행 역할](WORKER_ROLES.md)을 따른다.
 
 ## 저장 모델

@@ -78,7 +78,6 @@ class WorkerRoleIsolationIntegrationTest {
                 requiredSettings.getValue(role) + listOf(
                     "--moeum.llm.routes.conversation-response.provider=isolation",
                     "--moeum.llm.routes.journal-generation.provider=isolation",
-                    "--moeum.llm.max-concurrent-calls.isolation=${if (role == "journal-worker") 2 else 8}",
                     "--moeum.conversation.response-job.poll-interval=PT0.1S",
                     "--moeum.journal.generation-job.poll-interval=PT0.1S",
                     "--moeum.journal.generation-job.backoff=1h",
@@ -181,7 +180,7 @@ class WorkerRoleIsolationIntegrationTest {
             assertThatThrownBy { launch(postgres, "api", null, requiredSettings.getValue("api") - JWT_SECRET).close() }
                 .hasStackTraceContaining("moeum.jwt")
             assertThatThrownBy { launch(postgres, "journal-worker", null, requiredSettings.getValue("journal-worker") + invalidLlmSettings).close() }
-                .hasStackTraceContaining("LLM 동시 호출 상한은 양수여야 합니다")
+                .hasStackTraceContaining("없는 provider입니다")
             assertThatThrownBy { launch(postgres, "api", null, requiredSettings.getValue("api") - SIGNING_SECRET + invalidApiSettings).close() }
                 .hasStackTraceContaining("refresh token signing secret")
             // 역할이 쓰는 용도의 공급자 인증이 없으면 첫 업무 실패가 아니라 기동에서 거부한다.
@@ -238,7 +237,7 @@ class WorkerRoleIsolationIntegrationTest {
         "conversation-worker" to CLOUDFLARE_SETTINGS,
         "journal-worker" to listOf(GEMINI_KEY),
     )
-    private val invalidLlmSettings = listOf("--moeum.llm.max-concurrent-calls.gemini=0")
+    private val invalidLlmSettings = listOf("--moeum.llm.routes.journal-generation.provider=missing")
     private val invalidApiSettings = listOf("--moeum.auth.session.signing-secret=short")
 
     private val apiBeans = listOf(
