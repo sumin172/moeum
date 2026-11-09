@@ -22,14 +22,12 @@ class JournalRepositoryImpl(
         jpaRepository.findByUserIdAndRecordDayId(userId.value, recordDayId.value)?.toDomain()
 
     override fun insertGenerated(journal: Journal): Journal {
-        val inserted = jdbc.update("""
+        jdbc.update("""
             INSERT INTO journal.journals(id,user_id,record_day_id,display_date,title,body,version)
             VALUES (?,?,?,?,?,?,0)
-            ON CONFLICT (user_id,record_day_id) DO NOTHING
         """.trimIndent(), journal.id.value,journal.userId.value,journal.recordDayId.value,journal.displayDate,
             journal.title,journal.body)
-        return if (inserted == 1) journal else
-            findByUserIdAndRecordDayId(journal.userId,journal.recordDayId) ?: error("충돌한 일기가 없습니다")
+        return journal
     }
 
     // 사용자 수정만 이 경로로 들어온다. flush 후의 실제 version을 응답한다.

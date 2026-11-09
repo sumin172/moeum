@@ -165,4 +165,3 @@ CREATE INDEX idx_journal_generation_jobs_processing ON journal.generation_jobs (
     WHERE status = 'PROCESSING';
 
 CREATE INDEX idx_journal_generation_jobs_completed_retention ON journal.generation_jobs (updated_at,id) WHERE status = 'COMPLETED';
-CREATE INDEX idx_journal_generation_jobs_failed_retention ON journal.generation_jobs (created_at,id) WHERE status = 'FAILED';

@@ -122,23 +122,67 @@ class ResponseJobExecutorTest {
     }
 
     @Test
-    fun `자동 재시도는 같은 관측 상한을 유지하고 그 사이 접수분은 성공 뒤에 답한다`() {
+    fun `재시도 대기 중 접수한 입력은 예약 시각을 지키며 새 실행 주기로 함께 재시도한다`() {
         accept("첫 번째")
-        val responder = ScriptedResponder(ArrayDeque(listOf(failure, answer("첫 응답"), answer("다음 응답"))))
+        val responder = ScriptedResponder(ArrayDeque(listOf(failure, answer("함께 답함"))))
         val runner = executor(responder)
         runner.executeNext()
+        val retryAt = job().state.nextAttemptAt
         accept("두 번째")
         assertThat(job().state.status).isEqualTo(JobStatus.PENDING)
-        assertThat(job().state.attemptCount).isEqualTo(1)
+        assertThat(job().state.attemptCount).isZero()
+        assertThat(job().state.nextAttemptAt).isEqualTo(retryAt)
         assertThat(runner.executeNext()).isFalse()
+
+        timeProvider.fixedNow = retryAt
+        runner.executeNext()
+        assertThat(responder.requests[1].second.map { it.content }).containsExactly("첫 번째", "두 번째")
+        assertThat(job().observedSourceRevision).isEqualTo(2)
+        assertThat(assistantMessages().map { it.sourceSequence }).containsExactly(2L)
+        assertThat(job().state.status).isEqualTo(JobStatus.COMPLETED)
+    }
+
+    @Test
+    fun `실행 중 접수 뒤 실패하면 재시도가 남아 있어도 새 실행 주기로 함께 재시도한다`() {
+        accept("첫 번째")
+        val failsAfterIntake = { accept("두 번째"); throw LlmException("LLM 호출 실패") }
+        val responder = ScriptedResponder(ArrayDeque(listOf(failsAfterIntake, answer("함께 답함"))))
+        val runner = executor(responder)
+        runner.executeNext()
+        assertThat(job().state.status).isEqualTo(JobStatus.PENDING)
+        assertThat(job().state.attemptCount).isZero()
+        // 일반 backoff 10초 + 지터 최대 20%
+        assertThat(job().state.nextAttemptAt).isBetween(start.plusSeconds(10), start.plusSeconds(12))
 
         advance(Duration.ofSeconds(15))
         runner.executeNext()
-        assertThat(responder.requests[1].second.map { it.content }).containsExactly("첫 번째")
-        assertThat(job().state.attemptCount).isZero()
-        runner.executeNext()
-        assertThat(responder.requests[2].second.map { it.content }).containsExactly("두 번째")
-        assertThat(assistantMessages().map { it.sourceSequence }).containsExactly(1L, 2L)
+        assertThat(responder.requests[1].second.map { it.content }).containsExactly("첫 번째", "두 번째")
+        assertThat(assistantMessages().map { it.sourceSequence }).containsExactly(2L)
+        assertThat(job().state.status).isEqualTo(JobStatus.COMPLETED)
+    }
+
+    @Test
+    fun `재시도 대기 중 입력이 이어져도 실행 기회는 입력마다만 다시 열리고 호출 수는 여유 상한 안이다`() {
+        val inputs = 5
+        val calls = AtomicInteger()
+        val alwaysFailing = object : ConversationResponder {
+            override fun respond(history: List<Message>, targets: List<Message>): ConversationResponse {
+                calls.incrementAndGet()
+                throw LlmException("LLM 호출 실패")
+            }
+        }
+        val runner = executor(alwaysFailing)
+        repeat(inputs) { index ->
+            accept("입력 $index")
+            advance(Duration.ofMinutes(10))
+            runner.executeNext()
+            assertThat(job().state.status).isEqualTo(JobStatus.PENDING)
+        }
+        repeat(50) { advance(Duration.ofMinutes(10)); runner.executeNext() }
+
+        assertThat(job().state.status).isEqualTo(JobStatus.FAILED)
+        assertThat(calls.get()).isEqualTo(inputs - 1 + testResponseJobProperties.maxAttempts)
+        assertThat(calls.get()).isLessThanOrEqualTo((2 * inputs + 1) * testResponseJobProperties.maxAttempts)
     }
 
     @Test

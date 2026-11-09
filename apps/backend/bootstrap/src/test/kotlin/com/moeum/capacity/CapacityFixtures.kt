@@ -60,13 +60,13 @@ class CapacityFixtures(private val jdbc: JdbcTemplate) {
                 .addValue("id", id).addValue("status", status).addValue("nextAttemptAt", far).addValue("old", old)
                 .addValue("updatedAt", if (status == "PROCESSING") far else old))
         }
-        // 일기 실패 작업은 생성 시각 기준이라 최근 생성이면 오래된 갱신 시각이어도 남는다
+        // 일기 실패 작업은 기한 없이 재시도할 수 있어 오래돼도 남는다
         val generations = mapOf(UUID.randomUUID() to "PENDING", UUID.randomUUID() to "PROCESSING", UUID.randomUUID() to "FAILED")
         generations.forEach { (id, status) ->
             named.update(PROTECTED_GENERATION_JOB_SQL, MapSqlParameterSource()
                 .addValue("id", id).addValue("userId", UUID.randomUUID()).addValue("recordId", UUID.randomUUID())
                 .addValue("status", status).addValue("nextAttemptAt", far)
-                .addValue("createdAt", if (status == "FAILED") Timestamp.from(now) else old)
+                .addValue("createdAt", old)
                 .addValue("updatedAt", if (status == "PROCESSING") far else old))
         }
         ProtectedJobs(responses, generations)
@@ -155,8 +155,7 @@ private const val ARRIVAL_GENERATION_JOBS_SQL = """
     INSERT INTO journal.generation_jobs
         (id,user_id,record_day_id,status,attempt_count,next_attempt_at,version,created_at,updated_at)
     SELECT md5(:prefix||'-g'||i)::uuid,md5(:prefix||'-user'||i)::uuid,md5(:prefix||'-r'||i)::uuid,
-        CASE WHEN i%2=0 THEN 'FAILED' ELSE 'COMPLETED' END,1,now()-interval '31 days',1,
-        now()-interval '32 days',CASE WHEN i%2=0 THEN now() ELSE now()-interval '31 days' END
+        'COMPLETED',1,now()-interval '31 days',1,now()-interval '32 days',now()-interval '31 days'
     FROM generate_series(1,:records) i"""
 private const val ARRIVAL_IDS_SQL = "SELECT md5(:prefix||:kind||i)::uuid FROM generate_series(1,:records) i"
 

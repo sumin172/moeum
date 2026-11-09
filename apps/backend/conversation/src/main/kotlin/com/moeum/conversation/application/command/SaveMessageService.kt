@@ -82,8 +82,18 @@ class SaveMessageService(
         val current = if (created) null else responseJobRepository.findByRecord(userId, record.id)
         val job = when {
             current == null -> ResponseJob.pending(userId, record.id, now).also(responseJobRepository::insert)
-            else -> current.inputAccepted(now)?.let(responseJobRepository::save) ?: current
+            else -> current.inputAccepted(now)?.let(responseJobRepository::save)
+                ?.also { if (it.mergedInputFrom(current)) logInputMerged(current) } ?: current
         }
         return SaveMessageResult(saved, job, record)
+    }
+
+    private fun logInputMerged(previous: ResponseJob) {
+        log.atInfo().addKeyValue("event", "job.input_merged")
+            .addKeyValue("recordDayId", previous.recordDayId.value)
+            .addKeyValue("previousStatus", previous.state.status.name)
+            .addKeyValue("previousAttempts", previous.state.attemptCount)
+            .addKeyValue("at", "intake")
+            .log("실패한 시도가 있는 응답에 새 입력을 합쳐 새 실행 주기를 엶")
     }
 }

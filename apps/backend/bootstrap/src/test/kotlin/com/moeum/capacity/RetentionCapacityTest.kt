@@ -245,7 +245,6 @@ class RetentionCapacityTest {
         SELECT count(*) FROM conversation.response_jobs j JOIN conversation.record_days r ON r.id=j.record_day_id
         WHERE j.status IN ('COMPLETED','FAILED') AND j.updated_at<=now()-interval '30 days' AND r.closed_at IS NOT NULL
     """.trimIndent())!! else jdbc.queryForObject<Long>("""
-        SELECT count(*) FROM journal.generation_jobs WHERE (status='COMPLETED' AND updated_at<=now()-interval '30 days')
-            OR (status='FAILED' AND created_at<=now()-interval '30 days')
+        SELECT count(*) FROM journal.generation_jobs WHERE status='COMPLETED' AND updated_at<=now()-interval '30 days'
     """.trimIndent())!!
 }

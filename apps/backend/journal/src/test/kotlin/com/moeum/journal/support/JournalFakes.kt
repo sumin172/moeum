@@ -7,6 +7,7 @@ import com.moeum.journal.domain.model.Journal
 import com.moeum.kernel.TimeProvider
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.orm.ObjectOptimisticLockingFailureException
 import java.time.Instant
 import java.time.LocalDate
@@ -18,8 +19,11 @@ class InMemoryJournalRepository : JournalRepository {
 
     override fun findByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): Journal? = journals[userId to recordDayId]
 
-    override fun insertGenerated(journal: Journal): Journal =
-        journals.getOrPut(journal.userId to journal.recordDayId) { journal }
+    override fun insertGenerated(journal: Journal): Journal {
+        if (journals.containsKey(journal.userId to journal.recordDayId)) throw DuplicateKeyException("uq_journal_journals_user_record_day")
+        journals[journal.userId to journal.recordDayId] = journal
+        return journal
+    }
     override fun updateEdited(journal: Journal): Journal {
         val current = journals[journal.userId to journal.recordDayId]
         if (current == null || current.version != journal.version) {

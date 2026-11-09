@@ -109,20 +109,6 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         }
     }
 
-    @Test fun `기존 결과가 있는 복구 작업도 사용자가 수정한 현재 결과를 변경하지 않는다`() {
-        val user = jwtProvider.parse(issueJwt()).userId
-        insertPremiumSubscription(jdbcTemplate,user)
-        val initial = claimed(user)
-        val original = saveGeneratedJournalService.save(initial,LocalDate.of(2027,2,1),generation())
-        val edited = edit.edit(user,initial.recordDayId,"수정 제목","수정 본문",original.version)
-        // 결과가 남아 있는 복구 상태를 주입한다. 서비스에 AI 재작성 API를 추가하지 않는다.
-        jdbcTemplate.update("UPDATE journal.generation_jobs SET status='PROCESSING',version=version+1 WHERE id=?",initial.id.value)
-        val repair = generationJobRepository.findByUserIdAndRecordDayId(user,initial.recordDayId)!!
-        val result = saveGeneratedJournalService.save(repair,LocalDate.of(2027,2,1),generation("교체하면 안 되는 결과"))
-        assertThat(result).isEqualTo(edited)
-        assertThat(journalRepository.findByUserIdAndRecordDayId(user,initial.recordDayId)).isEqualTo(edited)
-    }
-
     @Test fun `표시 날짜가 같아도 다른 기록은 별도 일기로 저장 조회된다`() {
         val user = UserId.generate()
         val date = LocalDate.of(2027,2,1)
