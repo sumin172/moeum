@@ -65,6 +65,12 @@ class GenerationExecutorTest {
         timeProvider = timeProvider,
     )
 
+    private fun GenerationExecutor.executeNext(): Boolean {
+        val claimed = claim(1).singleOrNull() ?: return false
+        execute(claimed)
+        return true
+    }
+
     private fun enqueue(): GenerationJob = jobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, recordDayId, dayEnd, dayEnd.minusSeconds(7200)))
 
     @Test
@@ -143,7 +149,7 @@ class GenerationExecutorTest {
     }
 
     // 워커가 실행 중 중단된 상황: 선점만 하고 결과를 남기지 않는다
-    private fun claimAndDie(): GenerationJob = jobRepository.claimNext(now)!!
+    private fun claimAndDie(): GenerationJob = jobRepository.claimBatch(now, 1).single()
 
     @Test
     fun `리스가 만료된 작업은 자동으로 다시 실행하지 않고 FAILED로 정리하며 늦은 저장을 거부한다`() {

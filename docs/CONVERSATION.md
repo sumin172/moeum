@@ -36,7 +36,7 @@ POST /api/conversations/messages는 입력 검증과 사용자 상태 잠금 뒤
 현재 기록의 `sourceRevision`이 접수한 USER 메시지 수다. 사용자별 사용량 행에는 분 단위 접수 속도만 보관한다.
 기록이 닫히고 새 기록이 열리면 전체 횟수 한도를 다시 제공한다. 여행으로 조기 마감돼도 동일하다.
 과거 `occurredAt`은 기록 귀속이나 한도 기간을 변경하지 않는다.
-접수 후 AI 실패가 발생해도 최초 사용량은 유지하고 자동·사용자 실패 재시도는 추가 차감하지 않는다.
+접수 후 AI 실패가 발생해도 최초 사용량은 유지하고 자동 재시도는 추가 차감하지 않는다.
 
 GET /api/conversations/quota는 limit, used, remaining, resetAt을 반환한다. 열린 기록이 없거나 예정 마감이 지났으면 used는 0이고 resetAt은 null이다.
 열린 기록의 resetAt은 현재 예약된 closeAt이며 장소 이동에 따라 바뀔 수 있다.
@@ -54,7 +54,7 @@ PUT /api/conversations/preferences는 closeTime을 바꾸고 바뀐 값을 반�
 
 응답 작업은 기록당 하나이며 연속 입력을 한 실행에서 함께 답한다.
 작업은 실행 주기를 시작한 선점에서 기록의 sourceRevision을 관측 상한(observedSourceRevision, O)으로 저장한다.
-같은 주기의 자동 재시도와 수동 재시도는 O를 유지한다. 실제 답변 범위는 저장하지 않고 실행할 때 현재 설정으로 계산한다.
+같은 주기의 자동 재시도는 O를 유지한다. 실제 답변 범위는 저장하지 않고 실행할 때 현재 설정으로 계산한다.
 
 - 답변 대상: (answered, O]의 USER를 오래된 순으로 한 호출의 메시지 수·글자 예산 안까지 고른다. 첫 미응답 입력은 항상 포함한다. 마지막 대상의 순번이 E다.
 - 과거 문맥: answered 이하의 최근 메시지를 원본 순번별 USER → ASSISTANT 순서로 읽고, 대상에 배정하고 남은 메시지 수·글자 예산으로 줄인다.
@@ -65,7 +65,7 @@ PUT /api/conversations/preferences는 closeTime을 바꾸고 바뀐 값을 반�
 잠금 획득 후 새 문장에서 작업 상태와 sourceRevision을 다시 읽어 선점 여부와 O를 정한다.
 DB 잠금과 트랜잭션은 선점 후 해제하며 LLM 호출 동안 유지하지 않는다.
 
-접수·선점·성공·실패·리스 만료 정리·수동 재시도는 같은 기록 행 잠금 아래에서 전이를 결정한다. 상태 전이는 다음과 같다.
+접수·선점·성공·실패·리스 만료 정리는 같은 기록 행 잠금 아래에서 전이를 결정한다. 상태 전이는 다음과 같다.
 
 | 사건                       | 처리                                                                                                                     |
 |----------------------------|--------------------------------------------------------------------------------------------------------------------------|
@@ -77,29 +77,24 @@ DB 잠금과 트랜잭션은 선점 후 해제하며 LLM 호출 동안 유지하
 | 실패, 자동 재시도 남음     | PENDING, 시도 횟수·O 유지, 오류별 backoff                                                                                |
 | 최종 실패                  | sourceRevision > O이면 시도 횟수 0으로 재개 가능 시각에 PENDING, 아니면 FAILED와 재개 가능 시각                          |
 | 리스 만료                  | 다시 실행하지 않고 최종 실패와 같은 판단                                                                                 |
-| 수동 재시도                | FAILED만 PENDING으로 되돌린다. O·시도 횟수 유지                                                                          |
 
 최종 실패 뒤 같은 기록에 새 메시지가 접수되면 실패한 입력과 새 입력을 함께 답하는 새 실행 주기를 연다.
 실행 중에 접수된 입력이 있으면 최종 실패 시점에 같은 규칙을 적용한다. 자동 반복은 중단하며, 새 메시지는 미응답 내용에 대한 제한된 실행 기회를 다시 제공한다.
-인증·설정 오류처럼 새 메시지로 해결되지 않는 실패도 기록당 접수 한도와 누적 시도 상한 안에서 다시 호출될 수 있다.
-마감된 기록에는 새 메시지가 접수되지 않으므로 그 기록의 최종 실패는 수동 재시도로 복구한다. 이미 PENDING인 작업과 남은 입력 처리는 마감 뒤에도 진행한다.
+인증·설정 오류처럼 새 메시지로 해결되지 않는 실패도 기록당 접수 한도와 실행 주기당 자동 시도 상한 안에서 다시 호출될 수 있다.
+대화 응답에는 별도의 재시도 요청이 없다. 마감된 기록에는 새 메시지가 접수되지 않으므로 그 기록의 최종 실패는 FAILED로 남는다. 이미 PENDING인 작업과 남은 입력 처리는 마감 뒤에도 진행한다.
 
-FAILED의 next_attempt_at은 재개 가능 시각이다. 일반 backoff, 수동 재시도 대기, 429의 최소 대기와 공급자 `Retry-After` 중 가장 늦은 시각이며 새 메시지에 의한 재개와 수동 재시도 모두 이 시각을 지킨다.
+FAILED의 next_attempt_at은 재개 가능 시각이다. 일반 backoff, 실패 뒤 최소 대기(reopen-cooldown, 기본 1분), 429의 최소 대기와 공급자 `Retry-After` 중 가장 늦은 시각이며 새 메시지에 의한 재개가 이 시각을 지킨다.
 
 선점은 PENDING만 대상으로 한다. 선점 후 리스(기본 2분) 안에 끝나지 않은 PROCESSING은 워커가 중단된 것으로 본다.
 리스 기준 시각은 선점 시각(updated_at)이며 PROCESSING 동안 작업 행을 갱신하지 않는다.
 대화 워커의 주기 작업(기본 10초)이 실행 슬롯과 별개로 만료 작업의 기록 행을 SKIP LOCKED로 잠그고 위 표의 리스 만료 전이를 적용한다.
-만료된 시도는 자동으로 다시 실행하지 않는다. 멈춘 동안 접수된 입력이 없으면 FAILED로 남아 수동 재시도로 복구하고, 있으면 그 입력에 대한 새 실행 주기를 연다.
+만료된 시도는 자동으로 다시 실행하지 않는다. 멈춘 동안 접수된 입력이 없으면 FAILED로 남고 다음 메시지가 재개하며, 있으면 그 입력에 대한 새 실행 주기를 연다.
 정리는 version을 증가시키므로 멈췄던 워커의 늦은 성공 저장은 원본 결과·메시지·스트림 카운터까지 롤백되고, 실패 저장도 거절된다.
 이전 시도의 외부 호출 자체를 멈추는 보장은 아니며 영속 결과의 반영을 차단한다.
 
 일시적 네트워크·서버 오류는 제한된 backoff로 자동 재시도한다. HTTP 429는 별도 최소 대기와 공급자의
 `Retry-After` 중 더 늦은 시각을 따르며, 인증·명확한 입력 오류는 자동 반복을 중단한다.
 공급자가 출력 잘림·차단 또는 정상 완료로 인정하지 않는 종료 사유를 반환하면 본문을 저장하지 않고 자동 반복을 중단한다.
-
-POST /api/conversations/records/{recordDayId}/response-attempts는 최종 실패한 기록의 응답을 다시 대기 상태로 만들고 기록의 응답 상태를 202로 반환한다.
-PENDING/PROCESSING의 반복 요청은 현재 상태를 반환한다. 재시도할 실패가 없는 COMPLETED는 409, 응답 작업이 없거나 기한이 지난 기록은 404다.
-수동 재시도는 자동·수동 시도를 합친 누적 호출 상한을 넘지 않는다. 재개 가능 시각 전 요청은 429, 상한 소진은 409다.
 
 ## 기록·메시지·작업 상태 조회
 
@@ -113,11 +108,10 @@ limit은 1~200 범위로 제한하고 nextCursor는 페이지의 최대 순번�
 빈 증분 페이지는 받은 after를 유지한다.
 
 메시지는 streamSequence와 sourceSequence를 포함한다.
-response는 status, retryable, answeredSourceRevision이다. 작업이 정리됐으면 status는 null이다.
+response는 status, answeredSourceRevision이다. 작업이 정리됐으면 status는 null이다.
 sourceSequence가 answeredSourceRevision보다 큰 USER가 아직 답하지 않은 입력이다. 묶음 응답에서는 실행 중 접수된 USER가 ASSISTANT보다 앞선 streamSequence를 가질 수 있으므로 stream 위치로 미응답을 판단하지 않는다.
 새 메시지 없이 응답 작업만 실패할 수 있으므로 메시지 커서로 상태 변경을 추적하지 않는다.
-retryable은 FAILED이고 누적 호출 상한과 재시도 기한 안일 때 true다. 재개 가능 시각 전에도 true일 수 있으며 요청 시 429를 반환한다.
-조회와 재요청 사이에는 상태가 바뀔 수 있으므로 재요청 시 서버가 다시 검증한다.
+FAILED는 다음 메시지가 접수되면 실패한 입력까지 함께 답하는 새 실행으로 재개된다.
 
 ## 현재 설정과 제한
 
@@ -131,8 +125,7 @@ retryable은 FAILED이고 누적 호출 상한과 재시도 기한 안일 때 tr
 | moeum.conversation.limits.context-char-budget          | 20,000                |
 | moeum.conversation.limits.max-message-length           | 4,000                 |
 | moeum.conversation.response-job.max-attempts           | 3                     |
-| moeum.conversation.response-job.max-total-attempts     | 5                     |
-| moeum.conversation.response-job.manual-retry-cooldown  | 1분                   |
+| moeum.conversation.response-job.reopen-cooldown        | 1분                   |
 | moeum.conversation.response-job.rate-limit-backoff     | 최소 1분              |
 
 무료·구독 횟수, 분당 새 메시지 상한, 메시지당 길이 상한은 확정된 현재 수치이며 서버 설정으로 변경할 수 있다. 횟수 한도는 기록별로 적용한다.
@@ -146,6 +139,6 @@ AI 문맥의 100개 메시지·20,000자는 사용자에게 보장하는 기억�
 
 ## 종료 작업 보존
 
-마감된 기록의 오래된 종료 작업은 정리될 수 있다. 정리된 기록의 response.status는 null이고 재시도는 404이며 메시지와 AI 응답은 계속 조회할 수 있다.
+마감된 기록의 오래된 종료 작업은 정리될 수 있다. 정리된 기록의 response.status는 null이며 메시지와 AI 응답은 계속 조회할 수 있다.
 기존 메시지의 중복 전송은 quota나 작업을 새로 만들지 않고 원본을 반환하되 responseStatus는 null일 수 있다.
 보존 기간이 지난 실패 작업은 정리 전이라도 다시 실행할 수 없다. 정리 조건과 기간은 [관측·보존](OBSERVABILITY_RETENTION.md)을 따른다.

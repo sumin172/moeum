@@ -22,7 +22,7 @@ cd apps/backend
 현재 통과 결과의 설정이다. 60초 시험이며 장시간 운영 승인을 대신하지 않는다.
 
 ```powershell
-.\gradlew.bat :bootstrap:capacityTest --console=plain --offline --no-daemon '-Pkotlin.compiler.execution.strategy=in-process' '-Pcapacity.profile=P1' '-Pcapacity.scenario=benchmark' '-Pcapacity.durationSeconds=60' '-Pcapacity.warmupSeconds=30' '-Pcapacity.conversationDelayMs=1000' '-Pcapacity.journalDelayMs=10000' '-Pcapacity.conversationSlots=320' '-Pcapacity.conversationPool=12' '-Pcapacity.conversationReplicas=2' '-Pcapacity.conversationBatchSize=32' '-Pcapacity.apiPool=24' '-Pcapacity.journalSlots=48' '-Pcapacity.journalPool=4' '-Pcapacity.historyRecords=50000' '-Pcapacity.journalBurst=1000' '-Pcapacity.journalDrainSeconds=400'
+.\gradlew.bat :bootstrap:capacityTest --console=plain --offline --no-daemon '-Pkotlin.compiler.execution.strategy=in-process' '-Pcapacity.profile=P1' '-Pcapacity.scenario=benchmark' '-Pcapacity.durationSeconds=60' '-Pcapacity.warmupSeconds=30' '-Pcapacity.conversationDelayMs=1000' '-Pcapacity.journalDelayMs=10000' '-Pcapacity.conversationSlots=320' '-Pcapacity.conversationPool=12' '-Pcapacity.conversationReplicas=2' '-Pcapacity.apiPool=24' '-Pcapacity.journalSlots=48' '-Pcapacity.journalPool=4' '-Pcapacity.historyRecords=50000' '-Pcapacity.journalBurst=1000' '-Pcapacity.journalDrainSeconds=400'
 ```
 
 ## 실제 종료·리스 복구
@@ -58,7 +58,6 @@ sustained는 목표 부하 확인 시험이므로 프로파일과 관계없이 A
 | capacity.warmupSeconds                            | 워밍업 5초. 목표를 판정하는 시험(benchmark P1·sustained·정리 시험)은 30초 미만이면 시작 전 거부 |
 | capacity.conversationSlots / journalSlots         | 인스턴스 슬롯 8 / 2                                                                             |
 | capacity.conversationReplicas                     | 대화 워커 수 1, 2 이상이면 1→N 비교 구간 추가                                                   |
-| capacity.conversationBatchSize                    | 워커당 배치 선점 상한 32; 예약 실행 슬롯 이내                                                   |
 | capacity.apiPool / conversationPool / journalPool | DB 풀 10 / 4 / 2                                                                                |
 | capacity.conversationDelayMs / journalDelayMs     | fake 호출 지연 100 / 200ms                                                                      |
 | capacity.historyRecords                           | 180일에 분산할 과거 기록 수 0; 기록당 USER 20개·ASSISTANT 19~20개                               |

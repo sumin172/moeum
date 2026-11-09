@@ -43,7 +43,7 @@ data class JobState(
     fun reopened(nextAttemptAt: Instant): JobState =
         copy(status = JobStatus.PENDING, attemptCount = 0, nextAttemptAt = nextAttemptAt)
 
-    // 자동 재예약 판단과 대화 작업의 누적 상한에 사용하므로 사용자 재요청에도 횟수를 초기화하지 않는다.
+    // 사용자 재요청(일기). 자동 재예약 판단에 시도 횟수를 쓰므로 초기화하지 않는다.
     fun restarted(now: Instant): JobState {
         check(status == JobStatus.FAILED) { "최종 실패한 작업만 다시 시작할 수 있습니다: status=$status" }
         return copy(status = JobStatus.PENDING, nextAttemptAt = now)

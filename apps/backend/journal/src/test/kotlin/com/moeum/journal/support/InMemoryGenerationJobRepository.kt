@@ -36,22 +36,21 @@ class InMemoryGenerationJobRepository : GenerationJobRepository {
     override fun findByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): GenerationJob? =
         jobs.values.find { it.userId == userId && it.recordDayId == recordDayId }
 
-    override fun claimNext(now: Instant): GenerationJob? {
-        val job = jobs.values
+    override fun claimBatch(now: Instant, limit: Int): List<GenerationJob> =
+        jobs.values
             .filter { it.state.status == JobStatus.PENDING && !it.state.nextAttemptAt.isAfter(now) }
-            .minByOrNull { it.state.nextAttemptAt }
-            ?: return null
-        val claimed = job.copy(
-            state = job.state.copy(
-                status = JobStatus.PROCESSING,
-                attemptCount = job.state.attemptCount + 1,
-                version = job.state.version + 1,
-            ),
-            updatedAt = now,
-        )
-        jobs[job.id] = claimed
-        return claimed
-    }
+            .sortedBy { it.state.nextAttemptAt }
+            .take(limit)
+            .map { job ->
+                job.copy(
+                    state = job.state.copy(
+                        status = JobStatus.PROCESSING,
+                        attemptCount = job.state.attemptCount + 1,
+                        version = job.state.version + 1,
+                    ),
+                    updatedAt = now,
+                ).also { jobs[it.id] = it }
+            }
 
     override fun lockExpired(expiredBefore: Instant, limit: Int): List<GenerationJob> =
         jobs.values

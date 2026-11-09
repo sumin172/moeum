@@ -15,9 +15,9 @@ import java.time.Instant
 
 private const val TABLE = "journal.generation_jobs"
 
-private const val CLAIM_NEXT_SQL =
+private const val CLAIM_BATCH_SQL =
     "UPDATE $TABLE ${JobClaimSql.CLAIM_SET} " +
-        "WHERE id = (SELECT id FROM $TABLE WHERE ${JobClaimSql.DUE_PENDING} ${JobClaimSql.PICK_ONE}) RETURNING *"
+        "WHERE id IN (SELECT id FROM $TABLE WHERE ${JobClaimSql.DUE_PENDING} ${JobClaimSql.PICK_BATCH}) RETURNING *"
 
 private const val LOCK_EXPIRED_SQL =
     "SELECT * FROM $TABLE WHERE ${JobClaimSql.LEASE_EXPIRED} ORDER BY updated_at LIMIT :limit FOR UPDATE SKIP LOCKED"
@@ -43,12 +43,13 @@ class GenerationJobRepositoryImpl(
         jpaRepository.findByUserIdAndRecordDayId(userId.value, recordDayId.value)?.toDomain()
 
     @Transactional
-    override fun claimNext(now: Instant): GenerationJob? =
-        entityManager.createNativeQuery(CLAIM_NEXT_SQL, GenerationJobJpaEntity::class.java)
+    override fun claimBatch(now: Instant, limit: Int): List<GenerationJob> {
+        require(limit > 0)
+        return entityManager.createNativeQuery(CLAIM_BATCH_SQL, GenerationJobJpaEntity::class.java)
             .setParameter("now", now)
-            .resultList
-            .firstOrNull()
-            ?.let { (it as GenerationJobJpaEntity).toDomain() }
+            .setParameter("limit", limit)
+            .resultList.map { (it as GenerationJobJpaEntity).toDomain() }
+    }
 
     @Transactional(propagation = Propagation.MANDATORY)
     override fun lockExpired(expiredBefore: Instant, limit: Int): List<GenerationJob> =

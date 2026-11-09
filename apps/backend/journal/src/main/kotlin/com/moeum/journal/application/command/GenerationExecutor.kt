@@ -16,7 +16,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
 
-// 실행 슬롯 안에서 한 작업을 선점한다. 리스는 실제 실행 시점에 시작되고,
+// 예약된 실행 슬롯 이내에서 배치 선점하고, 각 작업을 대기열 없이 처리한다.
 // 여러 인스턴스가 동시에 돌아도 SKIP LOCKED로 같은 작업을 잡지 않는다.
 // LLM 호출은 트랜잭션 밖에서 하고, 결과 저장/실패 기록만 각각 별도 트랜잭션으로 한다.
 // 리스가 만료된 작업은 실행 슬롯과 별개로 주기적으로 FAILED 정리한다(failExpiredLeases).
@@ -32,13 +32,11 @@ class GenerationExecutor(
 ) {
     private val log = LoggerFactory.getLogger(GenerationExecutor::class.java)
 
-    fun executeNext(): Boolean {
-        val job = generationJobRepository.claimNext(timeProvider.now()) ?: return false
-        WorkTrace.run(job.id.value, job.recordDayId.value, job.state.attemptCount) { execute(job) }
-        return true
-    }
+    fun claim(reservedSlots: Int): List<GenerationJob> = generationJobRepository.claimBatch(timeProvider.now(), reservedSlots)
 
-    private fun execute(job: GenerationJob) {
+    fun execute(job: GenerationJob) = WorkTrace.run(job.id.value, job.recordDayId.value, job.state.attemptCount) { process(job) }
+
+    private fun process(job: GenerationJob) {
         try {
             val input = recordDayOperations.readJournalInput(job.userId, job.recordDayId)
             val generation = journalGenerator.generate(input.displayDate, input.messages)

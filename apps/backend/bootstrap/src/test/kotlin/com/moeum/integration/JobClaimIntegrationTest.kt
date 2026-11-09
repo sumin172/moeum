@@ -49,7 +49,8 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
         val claimedPerWorker = workers.invokeAll(
             (1..8).map {
                 Callable {
-                    generateSequence { generationJobRepository.claimNext(claimAt) }
+                    generateSequence { generationJobRepository.claimBatch(claimAt, 3).takeIf { it.isNotEmpty() } }
+                        .flatten()
                         .map { it.id }
                         .toList()
                 }
@@ -66,12 +67,12 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
     fun `리스가 만료된 작업은 다시 선점되지 않고 FAILED로 정리되며, 재요청 뒤에도 이전 시도의 늦은 저장은 거부된다`() {
         createJobs(1)
         val firstAt = farFuture.plus(Duration.ofDays(1))
-        val first = generateSequence { generationJobRepository.claimNext(firstAt) }
+        val first = generateSequence { generationJobRepository.claimBatch(firstAt, 1).singleOrNull() }
             .first { it.state.attemptCount == 1 }
 
         // 리스(2분)가 지나도 선점 SQL은 만료 작업을 다시 잡지 않는다
         val expiredAt = firstAt.plus(Duration.ofMinutes(3))
-        val claimedAfterExpiry = generateSequence { generationJobRepository.claimNext(expiredAt) }
+        val claimedAfterExpiry = generateSequence { generationJobRepository.claimBatch(expiredAt, 1).singleOrNull() }
             .map { it.id }.toList()
         assertThat(claimedAfterExpiry).doesNotContain(first.id)
 
@@ -87,7 +88,7 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
         // 사용자 재요청 뒤 새 시도만 저장할 수 있다
         val retryAt = expiredAt.plusSeconds(1)
         generationJobRepository.save(failed.restarted(retryAt))
-        val second = generateSequence { generationJobRepository.claimNext(retryAt) }
+        val second = generateSequence { generationJobRepository.claimBatch(retryAt, 1).singleOrNull() }
             .first { it.id == first.id }
         assertThat(second.state.attemptCount).isEqualTo(2)
         assertThatThrownBy { generationJobRepository.save(first.completed(retryAt)) }

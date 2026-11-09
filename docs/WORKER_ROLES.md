@@ -44,7 +44,7 @@ API는 servlet, 워커는 none web application type이다.
 
 | 역할                | 실행 경로                          | DB pool 최대/최소 | 실행 슬롯 | provider별 동시 호출 상한 |
 |---------------------|------------------------------------|------------------:|----------:|--------------------------:|
-| API                 | HTTP 저장·조회·재시도 접수         |            10 / 2 | 해당 없음 |                 해당 없음 |
+| API                 | HTTP 저장·조회·일기 재시도 접수    |            10 / 2 | 해당 없음 |                 해당 없음 |
 | conversation-worker | 대화 응답·종료 작업 정리           |             4 / 1 |         8 |                         8 |
 | journal-worker      | 마감·전달·일기 생성·종료 작업 정리 |             2 / 1 |         2 |                         2 |
 
@@ -77,15 +77,13 @@ WorkerRoleIsolationIntegrationTest는 각 역할을 기동해 역할별 필수 �
 ## 작업 실행
 
 실행 풀은 가상 스레드를 사용하고 슬롯 수로 동시 작업을 제한한다.
-대화는 남은 슬롯을 먼저 예약하고 한 트랜잭션에서 최대 claim-batch-size(기본 32, 상한 64)개를 선점한다.
-인스턴스별 선점 트랜잭션은 하나이며 기록마다 한 작업을 포함한다.
-기록 잠금 후 새 READ COMMITTED 문장에서 작업 상태와 기록의 원본 순번을 다시 읽어 선점 여부와 관측 상한을 정한다.
-실제 AI 실행은 예약 슬롯의 스레드에서 병렬로 진행한다.
-
-일기는 슬롯 안에서 한 작업씩 선점한다.
+대화·일기 모두 poll마다 남은 슬롯을 먼저 예약하고 한 트랜잭션에서 최대 32개(풀 공통 상한)를 선점한다.
+인스턴스·역할별 선점 트랜잭션은 하나다. 실제 AI 실행은 예약 슬롯의 스레드에서 병렬로 진행한다.
 선점 실패·빈 결과·종료 시 사용하지 않은 슬롯을 반환한다.
+
+대화 선점은 기록마다 한 작업을 포함한다.
+기록 잠금 후 새 READ COMMITTED 문장에서 작업 상태와 기록의 원본 순번을 다시 읽어 선점 여부와 관측 상한을 정한다.
 커밋 후 실행 인계 전에 종료된 작업은 리스 만료 후 FAILED로 정리된다.
-대화 빈 큐는 poll 간격의 절반 동안 재탐색을 생략한다.
 대화·일기의 기본 poll 간격은 각각 1초다.
 
 마감·전달은 별도 journalDeliveryScheduler에서 기본 5초 간격으로 처리한다.
@@ -101,7 +99,6 @@ WorkerRoleIsolationIntegrationTest는 각 역할을 기동해 역할별 필수 �
 | CONVERSATION_DB_POOL_SIZE        | 대화 인스턴스 최대 DB 연결                                                              |
 | JOURNAL_DB_POOL_SIZE             | 일기 인스턴스 최대 DB 연결                                                              |
 | CONVERSATION_WORKER_CONCURRENCY  | 대화 실행 슬롯                                                                          |
-| CONVERSATION_CLAIM_BATCH_SIZE    | 대화 배치 선점 상한                                                                     |
 | JOURNAL_WORKER_CONCURRENCY       | 일기 실행 슬롯                                                                          |
 | CONVERSATION_LLM_CONCURRENCY     | 대화 프로세스 provider별 동시 호출                                                      |
 | JOURNAL_LLM_CONCURRENCY          | 일기 프로세스 provider별 동시 호출                                                      |

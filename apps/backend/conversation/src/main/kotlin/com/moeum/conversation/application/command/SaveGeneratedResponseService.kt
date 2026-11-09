@@ -17,7 +17,7 @@ class SaveGeneratedResponseService(
     private val timeProvider: TimeProvider,
     private val records: com.moeum.conversation.domain.RecordDayRepository,
 ) {
-    // 작업 전이를 먼저 저장한다 — 리스 만료로 정리됐거나 재요청된 이전 시도면 여기서 낙관적 락 충돌로 트랜잭션 전체가 롤백되어
+    // 작업 전이를 먼저 저장한다 — 리스 만료로 정리된 이전 시도면 여기서 낙관적 락 충돌로 트랜잭션 전체가 롤백되어
     // assistant 메시지가 중복 저장되지 않는다. 기록 잠금 아래의 원본 순번으로 이어서 답할 입력을 판단한다.
     @Transactional
     fun save(job: ResponseJob, answeredThrough: Long, response: ConversationResponse) {

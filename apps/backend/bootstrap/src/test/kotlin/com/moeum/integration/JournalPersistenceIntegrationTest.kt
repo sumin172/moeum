@@ -49,7 +49,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
     private fun claimed(user: UserId): GenerationJob {
         val future = Instant.now().plus(Duration.ofDays(600))
         val pending = generationJobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(user,RecordDayId.generate(),future,Instant.now()))
-        return generateSequence { generationJobRepository.claimNext(future.plusSeconds(1)) }.first { it.id==pending.id }
+        return generateSequence { generationJobRepository.claimBatch(future.plusSeconds(1), 1).singleOrNull() }.first { it.id==pending.id }
     }
 
     @Test fun `두 기기의 동시 수정은 한 건만 저장한다`() {
@@ -94,7 +94,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
                 assertThat(failed.state.status).isEqualTo(JobStatus.FAILED)
                 generationJobRepository.save(failed.restarted(Instant.now()))
                 val replacement = generateSequence {
-                    generationJobRepository.claimNext(Instant.now().plus(Duration.ofDays(601)))
+                    generationJobRepository.claimBatch(Instant.now().plus(Duration.ofDays(601)), 1).singleOrNull()
                 }.first { it.id==old.id }
                 val fresh = saveGeneratedJournalService.save(replacement,LocalDate.of(2027,2,1),generation("정상 AI"))
                 edit.edit(user,old.recordDayId,"사용자 제목","사용자 수정본",fresh.version)
@@ -130,7 +130,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         val future = Instant.now().plus(Duration.ofDays(500))
         val created = ids.map { generationJobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(user,it,future,Instant.now())).id }
         created.forEachIndexed { index,id ->
-            val job = generateSequence { generationJobRepository.claimNext(future.plusSeconds(1)) }.first { it.id == id }
+            val job = generateSequence { generationJobRepository.claimBatch(future.plusSeconds(1), 1).singleOrNull() }.first { it.id == id }
             saveGeneratedJournalService.save(job,date,GeneratedJournal("제목$index", "본문$index"))
         }
         assertThat(journalRepository.findByDate(user,date)).hasSize(2)
@@ -145,7 +145,7 @@ class JournalPersistenceIntegrationTest : AbstractIntegrationTest() {
         val farFuture = Instant.now().plus(Duration.ofDays(400))
         generationJobRepository.save(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, RecordDayId.generate(), farFuture, Instant.now()))
         val claimAt = farFuture.plusSeconds(1)
-        val job = generateSequence { generationJobRepository.claimNext(claimAt) }
+        val job = generateSequence { generationJobRepository.claimBatch(claimAt, 1).singleOrNull() }
             .first { it.userId == userId }
 
         val journal = saveGeneratedJournalService.save(

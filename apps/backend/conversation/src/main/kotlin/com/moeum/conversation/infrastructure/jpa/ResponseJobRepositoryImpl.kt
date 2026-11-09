@@ -14,7 +14,7 @@ import java.time.Instant
 
 private const val TABLE = "conversation.response_jobs"
 
-// 새 실행 주기(attempt_count=0)만 잠근 기록의 현재 원본 순번을 관측 상한으로 잡는다. 자동 재시도·사용자 재요청은 기존 상한을 유지한다.
+// 새 실행 주기(attempt_count=0)만 잠근 기록의 현재 원본 순번을 관측 상한으로 잡는다. 자동 재시도는 기존 상한을 유지한다.
 private const val CLAIM_BATCH_SQL =
     "UPDATE $TABLE j ${JobClaimSql.CLAIM_SET}, " +
         "observed_source_revision = CASE WHEN j.attempt_count = 0 THEN r.source_revision ELSE j.observed_source_revision END " +
@@ -42,7 +42,7 @@ class ResponseJobRepositoryImpl(
 
     @Transactional
     override fun claimBatch(now: Instant, limit: Int): List<ResponseJob> {
-        require(limit in 1..64)
+        require(limit > 0)
         val recordIds=entityManager.createNativeQuery("""
             SELECT r.id FROM conversation.response_jobs j
             JOIN conversation.record_days r ON r.id=j.record_day_id

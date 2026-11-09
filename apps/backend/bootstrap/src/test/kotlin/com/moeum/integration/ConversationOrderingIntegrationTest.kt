@@ -37,7 +37,7 @@ import java.util.concurrent.*
     AbstractIntegrationTest.FakeLlmProviderConfig::class)
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties=[
     "moeum.conversation.response-job.initial-delay=PT1H",
-    "moeum.conversation.response-job.manual-retry-cooldown=0s",
+    "moeum.conversation.response-job.reopen-cooldown=0s",
     "moeum.journal.generation-job.initial-delay=PT1H","moeum.journal.delivery.initial-delay=PT1H",
     // 기동 시 라우트 검사를 실제 공급자 인증이 아니라 시험용 fake 공급자 기준으로 한다
     "moeum.llm.routes.conversation-response.provider=fake","moeum.llm.routes.journal-generation.provider=fake"
@@ -52,7 +52,6 @@ class ConversationOrderingIntegrationTest {
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean lateinit var messages: MessageRepository
     @Autowired lateinit var query: RecordQueryService
     @Autowired lateinit var quota: ConversationQuotaService
-    @Autowired lateinit var retry: RetryResponseService
     @Autowired lateinit var generated: SaveGeneratedResponseService
     @Autowired lateinit var failures: MarkResponseFailedService
     @Autowired lateinit var jwtProvider: JwtProvider
@@ -72,11 +71,11 @@ class ConversationOrderingIntegrationTest {
     // 선점 시각을 리스(2분)보다 앞당겨 워커가 실행 중 멈춘 상황을 만든다.
     private fun stall(record: RecordDayId) = jdbc.update("UPDATE conversation.response_jobs SET updated_at=? WHERE record_day_id=?",
         java.sql.Timestamp.from(now.minusSeconds(180)), record.value)
-    // 리스 만료로 FAILED가 된 작업을 사용자가 다시 요청한다. 재개 가능 시각은 이미 지난 것으로 둔다.
-    private fun retryNow(user: UserId, record: RecordDayId): ResponseJob {
+    // FAILED가 된 기록에 새 메시지를 보내 다음 실행 주기를 연다. 재개 가능 시각은 이미 지난 것으로 둔다.
+    private fun resumeWith(user: UserId, record: RecordDayId, content: String): SaveMessageResult {
         jdbc.update("UPDATE conversation.response_jobs SET next_attempt_at=? WHERE record_day_id=?",
             java.sql.Timestamp.from(now.minusSeconds(1)), record.value)
-        return retry.retry(user, record)
+        return accepted(user, command(content))
     }
 
     @Test fun `배치는 예약 상한 이내에서 기록당 한 작업을 선점하고 잠근 기록의 현재 원본 순번을 관측 상한으로 잡는다`() {
@@ -145,24 +144,6 @@ class ConversationOrderingIntegrationTest {
         assertThat(quota.current(user)).extracting("used","remaining").containsExactly(20,0)
     }
 
-    @Test fun `새 메시지와 수동 재시도가 동시에 와도 기록 잠금 아래에서 재개는 한 번만 일어난다`() {
-        val user = UserId.generate()
-        val first = accepted(user,command("실패한 입력"))
-        failNow(first.record.id)
-        val failed = job(user,first.record.id)
-        val gate = CountDownLatch(1)
-        Executors.newFixedThreadPool(2).use { pool ->
-            val intake = pool.submit { gate.await();accepted(user,command("새 입력")) }
-            val manual = pool.submit<ResponseJob> { gate.await();retry.retry(user,first.record.id) }
-            gate.countDown();intake.get(15,TimeUnit.SECONDS);manual.get(15,TimeUnit.SECONDS)
-        }
-        val resumed = job(user,first.record.id)
-        assertThat(resumed.state.status).isEqualTo(JobStatus.PENDING)
-        // 먼저 잠금을 얻은 쪽만 전이하고 다른 쪽은 PENDING을 그대로 본다
-        assertThat(resumed.state.version).isEqualTo(failed.state.version + 1)
-        assertThat(resumed.state.attemptCount).isIn(0, 3)
-    }
-
     @Test fun `실행 중 접수 뒤 최종 실패하면 재개하고 다음 실행 주기의 선점에서 관측 상한이 전진한다`() {
         val user = UserId.generate()
         val first = accepted(user,command("첫 번째"))
@@ -196,10 +177,10 @@ class ConversationOrderingIntegrationTest {
             .isInstanceOf(org.springframework.dao.OptimisticLockingFailureException::class.java)
         assertThat(job(user,first.record.id).state).isEqualTo(expired.state)
 
-        // 재요청한 실행이 다시 멈추고 그 사이 새 입력이 접수되면 그 입력에 대한 새 실행 주기를 연다
-        retryNow(user,first.record.id)
+        // 새 메시지로 재개한 실행이 다시 멈추고 그 사이 또 입력이 접수되면 그 입력에 대한 새 실행 주기를 연다
+        resumeWith(user,first.record.id,"다시 이어서")
         val again = jobs.claimBatch(now,1).single()
-        assertThat(again.observedSourceRevision).isEqualTo(1)
+        assertThat(again.observedSourceRevision).isEqualTo(2)
         accepted(user,command("멈춘 동안 입력"))
         stall(again.recordDayId)
         failures.failExpired(now,100)
@@ -223,22 +204,22 @@ class ConversationOrderingIntegrationTest {
         }
     }
 
-    @Test fun `리스 만료 정리와 재요청 뒤 이전 시도의 응답 저장은 본문과 스트림 순번까지 롤백된다`() {
+    @Test fun `리스 만료 정리와 새 메시지 재개 뒤 이전 시도의 응답 저장은 본문과 스트림 순번까지 롤백된다`() {
         val user = UserId.generate()
         val first = accepted(user)
         val old = jobs.claimBatch(now,1).singleOrNull()!!
         stall(old.recordDayId)
         failures.failExpired(now,100)
         assertThat(job(user,first.record.id).state.status).isEqualTo(JobStatus.FAILED)
-        retryNow(user,first.record.id)
+        resumeWith(user,first.record.id,"다시 이어서")
         val current = jobs.claimBatch(now,1).singleOrNull()!!
         assertThat(current.recordDayId).isEqualTo(old.recordDayId)
         assertThatThrownBy { generated.save(old,1,answer()) }.isInstanceOf(org.springframework.dao.OptimisticLockingFailureException::class.java)
-        assertThat(query.get(user,first.record.id,0,100).messages).hasSize(1)
-        generated.save(current,1,answer())
-        assertThat(query.get(user,first.record.id,0,100).messages.map { it.streamSequence }).containsExactly(1L,2L)
+        assertThat(query.get(user,first.record.id,0,100).messages.map { it.role }).containsExactly(MessageRole.USER,MessageRole.USER)
+        generated.save(current,2,answer())
+        assertThat(query.get(user,first.record.id,0,100).messages.map { it.streamSequence }).containsExactly(1L,2L,3L)
         assertThat(job(user,first.record.id).state.status).isEqualTo(JobStatus.COMPLETED)
-        assertThat(quota.current(user).used).isEqualTo(1)
+        assertThat(quota.current(user).used).isEqualTo(2)
     }
 
     @Test fun `관측 상한 밖의 접수분은 성공 뒤 다음 실행 주기로 넘어가고 성공한 응답은 과거 문맥이 된다`() {
@@ -285,16 +266,10 @@ class ConversationOrderingIntegrationTest {
         val url = "/api/conversations/records/"+first.record.id.value
         val response = rest.exchange<RecordConversationResponse>(url,HttpMethod.GET,HttpEntity<Void>(headers(jwt)))
         assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-        assertThat(response.body!!.response).isEqualTo(ResponseStateResponse("FAILED",true,0))
+        assertThat(response.body!!.response).isEqualTo(ResponseStateResponse("FAILED",0))
         assertThat(query.get(user,first.record.id,first.message.streamSequence,50).messages).isEmpty()
         val otherJwt = jwtProvider.issue(UserId.generate()).token
         assertThat(rest.exchange<String>(url,HttpMethod.GET,HttpEntity<Void>(headers(otherJwt))).statusCode).isEqualTo(HttpStatus.NOT_FOUND)
-        assertThat(rest.exchange<String>("$url/response-attempts",HttpMethod.POST,HttpEntity<Void>(headers(otherJwt))).statusCode)
-            .isEqualTo(HttpStatus.NOT_FOUND)
-        val retried = rest.exchange<ResponseStateResponse>("$url/response-attempts",HttpMethod.POST,HttpEntity<Void>(headers(jwt)))
-        assertThat(retried.statusCode).isEqualTo(HttpStatus.ACCEPTED)
-        assertThat(retried.body!!.status).isEqualTo("PENDING")
-        assertThat(quota.current(user).used).isEqualTo(1)
     }
 
     @Test fun `기록 조회 도중 워커가 답변을 완료해도 메시지·응답 상태·답변 경계를 한 스냅샷에서 반환한다`() {

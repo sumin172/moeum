@@ -23,7 +23,7 @@ class GenerationScheduler(private val delivery: RecordDeliveryWorker, private va
         initialDelayString = $$"${moeum.journal.generation-job.initial-delay:PT0S}"
     )
     fun pollDueJobs() {
-        repeat(pool.concurrency) { if (!pool.submit { generationExecutor.executeNext() }) return }
+        pool.submitBatch(generationExecutor::claim, generationExecutor::execute)
     }
     // 실행 슬롯이 모두 차 있어도 정리되도록 워커 풀 밖의 스케줄러 스레드에서 실행한다.
     @Scheduled(scheduler = "journalPollScheduler",

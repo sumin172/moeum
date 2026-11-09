@@ -10,7 +10,6 @@ data class CapacitySettings(
     val conversationSlots: Int = number("conversationSlots", 8),
     val journalSlots: Int = number("journalSlots", 2),
     val conversationReplicas: Int = number("conversationReplicas", 1),
-    val conversationBatchSize: Int = number("conversationBatchSize", 32),
     val conversationDelayMs: Int = number("conversationDelayMs", 100),
     val journalDelayMs: Int = number("journalDelayMs", 200),
     val historyRecords: Int = number("historyRecords", 0),
@@ -26,7 +25,6 @@ data class CapacitySettings(
         require(scenario in setOf("benchmark", "sustained", "failure")) { "지원하는 capacity.scenario: benchmark, sustained, failure (입력: $scenario)" }
         require(durationSeconds in 5..14400 && warmupSeconds in 0..600)
         require(rps in 1..2500 && conversationReplicas in 1..8)
-        require(conversationBatchSize in 1..64)
         require(conversationSlots in 1..1024 && journalSlots in 1..1024)
         require(conversationDelayMs in 0..30000 && journalDelayMs in 0..30000)
         require(historyRecords in 0..100000 && journalBurst in 0..100000)

@@ -6,11 +6,8 @@ import com.moeum.platform.runtime.ExecutionRole
 import com.moeum.conversation.domain.AiQuotaExceededException
 import com.moeum.conversation.domain.InvalidConversationRequestException
 import com.moeum.conversation.domain.RecordDayNotFoundException
-import com.moeum.conversation.domain.ResponseAlreadyCompletedException
-import com.moeum.conversation.domain.ResponseJobNotFoundException
 import com.moeum.platform.web.ErrorResponse
 import com.moeum.platform.observability.SafeFailure
-import com.moeum.platform.job.ManualRetryUnavailableException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -30,18 +27,6 @@ class ConversationExceptionHandler {
             .body(ErrorResponse(code = ConversationErrorCode.INVALID_REQUEST.code, message = ConversationErrorCode.INVALID_REQUEST.description))
     }
 
-    @ExceptionHandler(ResponseJobNotFoundException::class)
-    fun handleResponseNotFound(e: ResponseJobNotFoundException): ResponseEntity<ErrorResponse> {
-        log.warn("재시도할 수 없는 응답 작업: {}", SafeFailure.code(e))
-        return error(HttpStatus.NOT_FOUND, ConversationErrorCode.RESPONSE_NOT_FOUND)
-    }
-
-    @ExceptionHandler(ResponseAlreadyCompletedException::class)
-    fun handleAlreadyCompleted(e: ResponseAlreadyCompletedException): ResponseEntity<ErrorResponse> {
-        log.warn("이미 완료된 응답 재요청: {}", SafeFailure.code(e))
-        return error(HttpStatus.CONFLICT, ConversationErrorCode.RESPONSE_ALREADY_COMPLETED)
-    }
-
     @ExceptionHandler(AiQuotaExceededException::class)
     fun handleQuotaExceeded(e: AiQuotaExceededException): ResponseEntity<QuotaErrorResponse> {
         log.warn("AI 응답 quota 초과: {}", SafeFailure.code(e))
@@ -54,15 +39,6 @@ class ConversationExceptionHandler {
     @ExceptionHandler(com.moeum.conversation.domain.ConversationRateExceededException::class)
     fun rateExceeded(): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ErrorResponse(code="MESSAGE_RATE_EXCEEDED",message="잠시 후 다시 전송해주세요"))
-
-    @ExceptionHandler(ManualRetryUnavailableException::class)
-    fun retryUnavailable(e: ManualRetryUnavailableException): ResponseEntity<ErrorResponse> =
-        if (e.nextAllowedAt == null) ResponseEntity.status(HttpStatus.CONFLICT)
-            .body(ErrorResponse(code="RESPONSE_RETRY_EXHAUSTED",message="응답 재시도 횟수를 모두 사용했습니다"))
-        else ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-            .body(ErrorResponse(code="RESPONSE_RETRY_TOO_SOON",message="잠시 후 다시 요청해주세요"))
-    private fun error(status: HttpStatus, code: ConversationErrorCode): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(status).body(ErrorResponse(code = code.code, message = code.description))
 }
 
 data class QuotaErrorResponse(val code: String, val message: String, val quota: com.moeum.conversation.domain.ConversationQuota)

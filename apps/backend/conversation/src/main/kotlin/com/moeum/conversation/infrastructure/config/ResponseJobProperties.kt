@@ -11,17 +11,10 @@ data class ResponseJobProperties(
     val backoff: List<Duration> = listOf(Duration.ofSeconds(10), Duration.ofSeconds(60)),
     // 실행 한 번의 상한. 넘긴 작업은 FAILED로 정리하므로 provider read timeout(60초)보다 넉넉하게 둔다.
     val lease: Duration = Duration.ofMinutes(2),
-    // 실행 슬롯을 미리 확보하고 이 수 이하를 한 트랜잭션에서 선점한다.
-    val claimBatchSize: Int = 32,
-    val pollInterval: Duration = Duration.ofSeconds(1),
-    val maxTotalAttempts: Int = maxAttempts + 2,
-    val manualRetryCooldown: Duration = Duration.ofMinutes(1),
+    // 최종 실패 뒤 새 메시지로 재개하기 전 최소 대기
+    val reopenCooldown: Duration = Duration.ofMinutes(1),
     val rateLimitBackoff: Duration = Duration.ofMinutes(1),
 ) {
-    init {
-        require(claimBatchSize in 1..64)
-        require(!pollInterval.isNegative && !pollInterval.isZero)
-    }
     fun toPolicy(): JobPolicy = JobPolicy(maxAttempts = maxAttempts, backoff = backoff, lease = lease,
-        maxTotalAttempts = maxTotalAttempts, manualRetryCooldown = manualRetryCooldown, rateLimitBackoff = rateLimitBackoff)
+        reopenCooldown = reopenCooldown, rateLimitBackoff = rateLimitBackoff)
 }

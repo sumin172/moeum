@@ -11,8 +11,8 @@ interface GenerationJobRepository {
     /** 결과 저장 트랜잭션에서 PROCESSING 소유권과 version을 잠금 아래 검증한다. */
     fun lockClaim(job: GenerationJob)
     fun findByUserIdAndRecordDayId(userId: UserId, recordDayId: RecordDayId): GenerationJob?
-    // 실행할 차례인 PENDING 작업 하나를 선점한다(SKIP LOCKED). 없으면 null.
-    fun claimNext(now: Instant): GenerationJob?
+    // 실행할 차례인 PENDING 작업을 limit개까지 선점한다(SKIP LOCKED).
+    fun claimBatch(now: Instant, limit: Int): List<GenerationJob>
     // expiredBefore 이전에 선점된 PROCESSING 작업을 호출부 트랜잭션 안에서 잠근다(SKIP LOCKED).
     fun lockExpired(expiredBefore: Instant, limit: Int): List<GenerationJob>
 }

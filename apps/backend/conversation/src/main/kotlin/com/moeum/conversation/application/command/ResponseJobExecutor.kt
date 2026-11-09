@@ -8,7 +8,6 @@ import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.domain.model.selectResponseTargets
 import com.moeum.platform.runtime.ConditionalOnRole
 import com.moeum.platform.runtime.ExecutionRole
-import com.moeum.conversation.infrastructure.config.ResponseJobProperties
 import com.moeum.kernel.TimeProvider
 import com.moeum.platform.observability.SafeFailure
 import com.moeum.platform.observability.WorkTrace
@@ -16,8 +15,6 @@ import com.moeum.platform.job.JobFailure
 import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.stereotype.Service
-import java.util.concurrent.atomic.AtomicReference
-import java.time.Instant
 
 // 예약된 실행 슬롯 이내에서 배치 선점하고, 각 작업을 대기열 없이 처리한다.
 // LLM 호출은 트랜잭션 밖에서 하고, 결과 저장/실패 기록만 각각 별도 트랜잭션으로 한다.
@@ -30,25 +27,11 @@ class ResponseJobExecutor(
     private val conversationResponder: ConversationResponder,
     private val saveGeneratedResponseService: SaveGeneratedResponseService,
     private val markResponseFailedService: MarkResponseFailedService,
-    responseJobProperties: ResponseJobProperties,
     private val timeProvider: TimeProvider,
     private val limits: com.moeum.conversation.infrastructure.config.ConversationLimitProperties,
 ) {
     private val log = LoggerFactory.getLogger(ResponseJobExecutor::class.java)
-    val claimBatchSize = responseJobProperties.claimBatchSize
-    // 비동기 선점 완료 시각 때문에 다음 정규 poll까지 건너뛰지 않도록 반 간격만 쉰다.
-    private val idleProbeDelay = responseJobProperties.pollInterval.dividedBy(2)
-    private val nextProbeAt = AtomicReference(Instant.MIN)
-
-    fun canPoll(): Boolean = !timeProvider.now().isBefore(nextProbeAt.get())
-
-    fun claim(reservedSlots: Int): List<ResponseJob> {
-        val now=timeProvider.now()
-        if(now.isBefore(nextProbeAt.get()))return emptyList()
-        return responseJobRepository.claimBatch(now,reservedSlots).also {
-            if(it.isEmpty())nextProbeAt.set(now.plus(idleProbeDelay))
-        }
-    }
+    fun claim(reservedSlots: Int): List<ResponseJob> = responseJobRepository.claimBatch(timeProvider.now(), reservedSlots)
 
     // 응답 작업은 기록당 하나이므로 기록 ID가 작업 ID다.
     fun execute(job: ResponseJob) = WorkTrace.run(job.recordDayId.value, job.recordDayId.value, job.state.attemptCount) { process(job) }
@@ -68,7 +51,7 @@ class ResponseJobExecutor(
             saveGeneratedResponseService.save(job, targets.last().sourceSequence, response)
             log.atInfo().addKeyValue("event", "job.completed").log("Worker job completed")
         } catch (_: OptimisticLockingFailureException) {
-            log.warn("리스를 잃은 응답 작업이라 결과를 버림(만료 정리 또는 재요청됨): recordDayId={}", job.recordDayId.value)
+            log.warn("리스를 잃은 응답 작업이라 결과를 버림(만료 정리됨): recordDayId={}", job.recordDayId.value)
         } catch (e: Exception) {
             val failure = JobFailure.classify(e)
             log.atError().addKeyValue("event", "job.failed")

@@ -85,17 +85,15 @@ class JobStateTest {
     }
 
     @Test
-    fun `출력 오류는 한 번만 자동 재시도하고 수동 재시도는 누적 횟수로 제한한다`() {
+    fun `출력 오류는 한 번만 자동 재시도한다`() {
         val invalid = JobFailure(JobFailureKind.INVALID_OUTPUT)
         val first = JobState.pending(now).claimed().failed(policy, now, invalid)
         assertThat(first.status).isEqualTo(JobStatus.PENDING)
         assertThat(first.claimed().failed(policy, now, invalid).status).isEqualTo(JobStatus.FAILED)
-        assertThat(policy.manualRetryExhausted(4)).isFalse()
-        assertThat(policy.manualRetryExhausted(5)).isTrue()
     }
 
     @Test
-    fun `재개 가능 시각은 일반 backoff·수동 대기·공급자 대기 중 가장 늦은 시각이다`() {
+    fun `재개 가능 시각은 일반 backoff·최소 대기·공급자 대기 중 가장 늦은 시각이다`() {
         val slowBackoff = policy.copy(backoff = listOf(Duration.ofMinutes(3)))
         assertThat(policy.reopenAt(1, now, JobFailure(JobFailureKind.PERMANENT))).isEqualTo(now.plus(Duration.ofMinutes(1)))
         assertThat(slowBackoff.reopenAt(1, now, JobFailure(JobFailureKind.TRANSIENT))).isEqualTo(now.plus(Duration.ofMinutes(3)))

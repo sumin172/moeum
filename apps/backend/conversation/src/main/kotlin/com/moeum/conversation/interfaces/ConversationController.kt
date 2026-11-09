@@ -5,7 +5,6 @@ import com.moeum.conversation.application.query.RecordQueryService
 import com.moeum.conversation.interfaces.dto.*
 import com.moeum.kernel.*
 import org.springframework.security.core.annotation.AuthenticationPrincipal
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDate
 import java.time.LocalTime
@@ -16,19 +15,13 @@ data class CloseTimeRequest(val closeTime: LocalTime)
 @ConditionalOnRole(ExecutionRole.API)
 @RestController
 @RequestMapping("/api/conversations")
-class ConversationController(private val saveMessageService: SaveMessageService, private val recordQueryService: RecordQueryService, private val retryResponseService: RetryResponseService,
+class ConversationController(private val saveMessageService: SaveMessageService, private val recordQueryService: RecordQueryService,
     private val quota: ConversationQuotaService,
 ) {
     @PostMapping("/messages")
     fun saveMessage(@AuthenticationPrincipal userId: UserId, @RequestBody request: SaveMessageRequest): SaveMessageResponse =
         saveMessageService.save(userId, SaveMessageCommand(request.clientMessageId, request.content, request.occurredAt, request.timezone))
             .let { SaveMessageResponse(it.record.id.value, MessageResponse.from(it.message), it.responseJob?.state?.status?.name) }
-    @PostMapping("/records/{recordDayId}/response-attempts")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    fun retryResponse(@AuthenticationPrincipal userId: UserId, @PathVariable recordDayId: UUID): ResponseStateResponse {
-        val id = RecordDayId(recordDayId)
-        return ResponseStateResponse.from(recordQueryService.responseState(userId, id, retryResponseService.retry(userId, id)))
-    }
     @GetMapping("/quota")
     fun quota(@AuthenticationPrincipal userId: UserId) = quota.current(userId)
     @GetMapping("/records")

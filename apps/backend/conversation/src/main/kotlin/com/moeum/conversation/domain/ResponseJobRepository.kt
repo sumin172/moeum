@@ -8,7 +8,7 @@ import java.time.Instant
 interface ResponseJobRepository {
     // 기록의 첫 접수 트랜잭션에서 INSERT한다. 기존 상태 갱신과 구분한다.
     fun insert(job: ResponseJob)
-    // 낙관적 락(version)으로 저장한다 — 리스 만료 정리나 재요청 뒤 이전 시도의 늦은 저장은 ObjectOptimisticLockingFailureException.
+    // 낙관적 락(version)으로 저장한다 — 리스 만료 정리 뒤 이전 시도의 늦은 저장은 ObjectOptimisticLockingFailureException.
     fun save(job: ResponseJob): ResponseJob
     fun findByRecord(userId: UserId, recordDayId: RecordDayId): ResponseJob?
     // 선점은 사용자와 무관하게 실행할 차례인 기록을 고르는 경로라 user_id 없이 조회한다.

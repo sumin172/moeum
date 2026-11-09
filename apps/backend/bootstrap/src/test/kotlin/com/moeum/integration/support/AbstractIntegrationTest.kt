@@ -50,7 +50,7 @@ import java.util.UUID
         "moeum.journal.generation-job.max-attempts=2",
         "moeum.journal.generation-job.backoff=200ms",
         "moeum.conversation.response-job.backoff=200ms",
-        "moeum.conversation.response-job.manual-retry-cooldown=0s",
+        "moeum.conversation.response-job.reopen-cooldown=0s",
         "moeum.conversation.response-job.poll-interval=PT0.3S",
         // 리스 만료 정리는 테스트가 시각을 정해 직접 호출한다(기동 직후 한 번만 실행됨)
         "moeum.conversation.response-job.lease-check-interval=PT1H",

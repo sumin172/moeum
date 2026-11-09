@@ -30,7 +30,6 @@ import java.util.concurrent.*
 class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var save: SaveMessageService
     @Autowired lateinit var responses: ResponseJobRepository
-    @Autowired lateinit var retryResponse: RetryResponseService
     @Autowired lateinit var generations: GenerationJobRepository
     @Autowired lateinit var journals: JournalRepository
     @Autowired lateinit var registration: RegisterRecordGenerationService
@@ -117,7 +116,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             *generationIds.toTypedArray())).isZero()
     }
 
-    @Test fun `열린 기록·최근 종료·대기·실행 중 작업은 보존하고 마감된 기록의 실패는 기한 안에 수동 재시도할 수 있다`() {
+    @Test fun `열린 기록·최근 종료·대기·실행 중 작업은 보존한다`() {
         val open = input(user(), close = false)
         val openJob = response(open)
         val recent = input(user())
@@ -137,9 +136,6 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE record_day_id=?", it.value)).isEqualTo(1)
         }
         assertThat(responses.findByRecord(expired.message.userId, expired.record.id)).isNull()
-        // 마감 뒤 새 메시지는 다음 기록에 속하므로 이전 기록의 실패는 수동 재시도로만 복구한다
-        assertThat(retryResponse.retry(failed.message.userId, failed.record.id).state.status)
-            .isEqualTo(com.moeum.platform.job.JobStatus.PENDING)
     }
 
     @Test fun `정리 작업은 잠긴 기록을 건너뛰고 잠금 해제 이후 정리한다`() {
