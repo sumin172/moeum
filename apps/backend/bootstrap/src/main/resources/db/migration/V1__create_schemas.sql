@@ -67,8 +67,7 @@ CREATE TABLE conversation.record_days (
     stream_sequence BIGINT NOT NULL DEFAULT 0,
     source_revision BIGINT NOT NULL DEFAULT 0,
     closed_at TIMESTAMPTZ NULL,
-    delivery_version BIGINT NOT NULL DEFAULT 0,
-    delivery_lease_expires_at TIMESTAMPTZ NULL,
+    delivery_claimed_at TIMESTAMPTZ NULL,
     delivery_acknowledged BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT ck_record_interval CHECK (start_at < COALESCE(closed_at,close_at))
 );
@@ -76,7 +75,7 @@ CREATE UNIQUE INDEX uq_record_open_user ON conversation.record_days(user_id) WHE
 CREATE INDEX idx_record_user_interval ON conversation.record_days(user_id,start_at);
 CREATE INDEX idx_record_user_date ON conversation.record_days(user_id,display_date,start_at);
 CREATE INDEX idx_record_close_due ON conversation.record_days(close_at) WHERE closed_at IS NULL;
-CREATE INDEX idx_record_delivery ON conversation.record_days(delivery_lease_expires_at,closed_at)
+CREATE INDEX idx_record_delivery ON conversation.record_days(delivery_claimed_at,closed_at)
     WHERE closed_at IS NOT NULL AND delivery_acknowledged = FALSE;
 
 CREATE TABLE conversation.messages (

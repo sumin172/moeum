@@ -21,9 +21,6 @@ data class RecordDay(
     val closeAt: Instant,
     val sourceRevision: Long = 0,
     val closedAt: Instant? = null,
-    val deliveryVersion: Long = 0,
-    val deliveryLeaseExpiresAt: Instant? = null,
-    val deliveryAcknowledged: Boolean = false,
 ) {
     fun closeIfDue(now: Instant): RecordDay =
         if (closedAt == null && now >= closeAt) copy(closedAt = closeAt) else this

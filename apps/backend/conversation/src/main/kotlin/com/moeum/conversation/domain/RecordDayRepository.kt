@@ -19,6 +19,8 @@ interface RecordDayRepository {
     fun insert(day: RecordDay)
     fun update(day: RecordDay)
     fun claimDueClosure(now: Instant): RecordDay?
-    fun claimDelivery(now: Instant, leaseExpiresAt: Instant): RecordDay?
-    fun acknowledgeDelivery(userId: UserId, id: RecordDayId, version: Long): Boolean
+    // 닫힌 미전달 기록 중 선점되지 않았거나 expiredBefore 이전에 선점된 하나를 now로 선점한다(SKIP LOCKED).
+    fun claimDelivery(now: Instant, expiredBefore: Instant): RecordDay?
+    // 등록이 커밋된 뒤에만 호출한다. 등록은 멱등이므로 어느 전달 시도가 확인해도 결과가 같다.
+    fun acknowledgeDelivery(userId: UserId, id: RecordDayId): Boolean
 }

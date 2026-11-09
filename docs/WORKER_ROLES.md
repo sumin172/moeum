@@ -88,7 +88,7 @@ WorkerRoleIsolationIntegrationTest는 각 역할을 기동해 역할별 필수 �
 
 마감·전달은 별도 journalDeliveryScheduler에서 기본 5초 간격으로 처리한다.
 마감·전달 각각 최대 100건, 실행당 최대 5회 반복하며 2초 경과 뒤 새 반복을 시작하지 않는다.
-전달 리스는 1분이다. 설정은 moeum.journal.delivery.interval과 initial-delay다.
+전달 리스는 선점 시각부터 1분이다. 설정은 moeum.journal.delivery.interval과 initial-delay다.
 종료 작업 정리는 역할별 독립 스케줄러에서 실행하며 [보존 계약](OBSERVABILITY_RETENTION.md)을 따른다.
 
 ## 배포 설정

@@ -463,12 +463,13 @@ class GrowthCapacityTest {
                 Thread.sleep(500)
             }
             val state=jdbc.queryForMap("""
-                SELECT delivery_acknowledged,delivery_version,
+                SELECT delivery_acknowledged,delivery_claimed_at>?::timestamptz reclaimed,
                     (SELECT count(*) FROM journal.generation_jobs WHERE record_day_id=?) jobs,
                     (SELECT count(*) FROM journal.journals WHERE record_day_id=?) journals
                 FROM conversation.record_days WHERE id=?
-            """.trimIndent(),id,id,id)
-            check(state["delivery_acknowledged"]==true && (state["delivery_version"] as Number).toLong()>crash["version"].asLong())
+            """.trimIndent(),java.sql.Timestamp.from(Instant.parse(crash["crashedAt"].asString())),id,id,id)
+            // 중단 뒤 다른 워커가 리스 만료 후 다시 선점해 확인했다
+            check(state["delivery_acknowledged"]==true && state["reclaimed"]==true)
             check((state["jobs"] as Number).toInt()==1 && (state["journals"] as Number).toInt()==1)
             replacement.kill()
             mapOf("afterRegistration" to after,"killedPid" to interrupted.pid,"replacementPid" to replacement.pid,

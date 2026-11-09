@@ -177,7 +177,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
         assertThat(generationCleaner().cleanBatch()).isEqualTo(1)
         assertThat(journals.findByUserIdAndRecordDayId(user, day)).isEqualTo(edited)
         assertThat(generations.findByUserIdAndRecordDayId(user, day)).isNull()
-        assertThat(registration.register(RecordDelivery(day, user, old, 1))).isFalse()
+        assertThat(registration.register(RecordDelivery(day, user, old))).isFalse()
         assertThatThrownBy { retry.retry(user, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
         listOf(failed, processing, recent).forEach { assertThat(generations.findByUserIdAndRecordDayId(user, it.recordDayId)).isNotNull() }
     }

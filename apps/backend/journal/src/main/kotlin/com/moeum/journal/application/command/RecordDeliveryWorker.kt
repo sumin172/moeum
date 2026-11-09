@@ -20,10 +20,10 @@ class RecordDeliveryWorker(private val records: RecordDayOperations, private val
                 try {
                     val created = registration.register(delivery)
                     val acknowledged = records.acknowledge(delivery)
-                    log.info("기록 전달: recordDayId={}, version={}, registered={}, acknowledged={}",
-                        delivery.recordDayId.value, delivery.version, created, acknowledged)
+                    log.info("기록 전달: recordDayId={}, registered={}, acknowledged={}",
+                        delivery.recordDayId.value, created, acknowledged)
                 } catch (e: Exception) {
-                    log.error("기록 전달 실패: recordDayId={}, version={}, code={}", delivery.recordDayId.value, delivery.version, SafeFailure.code(e))
+                    log.error("기록 전달 실패: recordDayId={}, code={}", delivery.recordDayId.value, SafeFailure.code(e))
                     // 리스 만료 후 재전달한다. 다른 기록은 계속 처리한다.
                 }
             }
