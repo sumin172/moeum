@@ -7,6 +7,7 @@ import com.moeum.kernel.TimeProvider
 import com.moeum.platform.job.JobFailure
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
 
 // 최종 실패 시 이 실행 주기 이후의 접수를 보고 재개를 정하므로 접수와 같은 기록 잠금 아래에서 전이한다.
 @Service
@@ -25,9 +26,11 @@ class MarkResponseFailedService(
         responseJobRepository.save(job.failed(policy, timeProvider.now(), failure, record.sourceRevision))
     }
 
+    // 리스가 만료된 작업을 정리한다. 버전이 올라가므로 중단됐던 워커의 늦은 저장은 거부된다.
     @Transactional
-    fun markExhausted(job: ResponseJob) {
-        val record = records.find(job.userId, job.recordDayId, lock = true) ?: error("응답 기록이 없습니다")
-        responseJobRepository.save(job.exhausted(policy, timeProvider.now(), record.sourceRevision))
-    }
+    fun failExpired(now: Instant, limit: Int): List<ResponseJob> =
+        responseJobRepository.lockExpired(policy.leaseExpiredBefore(now), limit).map { job ->
+            val record = records.find(job.userId, job.recordDayId, lock = true) ?: error("응답 기록이 없습니다")
+            responseJobRepository.save(job.leaseExpired(policy, now, record.sourceRevision))
+        }
 }

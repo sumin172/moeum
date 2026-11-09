@@ -1,6 +1,5 @@
 package com.moeum.integration
 
-import com.moeum.journal.domain.model.failedPermanently
 
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.conversation.application.command.*
@@ -31,7 +30,6 @@ import java.util.concurrent.*
 class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
     @Autowired lateinit var save: SaveMessageService
     @Autowired lateinit var responses: ResponseJobRepository
-    @Autowired lateinit var retryResponse: RetryResponseService
     @Autowired lateinit var generations: GenerationJobRepository
     @Autowired lateinit var journals: JournalRepository
     @Autowired lateinit var registration: RegisterRecordGenerationService
@@ -118,7 +116,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             *generationIds.toTypedArray())).isZero()
     }
 
-    @Test fun `열린 기록·최근 종료·대기·실행 중 작업은 보존하고 마감된 기록의 실패는 기한 안에 수동 재시도할 수 있다`() {
+    @Test fun `열린 기록·최근 종료·대기·실행 중 작업은 보존한다`() {
         val open = input(user(), close = false)
         val openJob = response(open)
         val recent = input(user())
@@ -126,8 +124,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             Timestamp.from(now), recent.record.id.value)
         val pendingJob = response(input(user()), complete=false)
         val processingJob = response(input(user()), complete=false)
-        jdbc.update("UPDATE conversation.response_jobs SET status='PROCESSING',lease_expires_at=? WHERE record_day_id=?",
-            Timestamp.from(now.plus(Duration.ofDays(10))), processingJob.recordDayId.value)
+        jdbc.update("UPDATE conversation.response_jobs SET status='PROCESSING' WHERE record_day_id=?", processingJob.recordDayId.value)
         val failed = input(user())
         jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',attempt_count=3,updated_at=? WHERE record_day_id=?",
             Timestamp.from(now), failed.record.id.value)
@@ -139,9 +136,6 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             assertThat(jdbc.queryForObject<Int>("SELECT count(*) FROM conversation.response_jobs WHERE record_day_id=?", it.value)).isEqualTo(1)
         }
         assertThat(responses.findByRecord(expired.message.userId, expired.record.id)).isNull()
-        // 마감 뒤 새 메시지는 다음 기록에 속하므로 이전 기록의 실패는 수동 재시도로만 복구한다
-        assertThat(retryResponse.retry(failed.message.userId, failed.record.id).state.status)
-            .isEqualTo(com.moeum.platform.job.JobStatus.PENDING)
     }
 
     @Test fun `정리 작업은 잠긴 기록을 건너뛰고 잠금 해제 이후 정리한다`() {
@@ -177,8 +171,7 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
             .failedPermanently(now)
         generations.save(failed)
         val processing = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), old))
-        jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING',lease_expires_at=? WHERE id=?",
-            Timestamp.from(now.plus(Duration.ofDays(10))), processing.id.value)
+        jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING' WHERE id=?", processing.id.value)
         val recent = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), now))
         assertThat(generationCleaner().cleanBatch()).isEqualTo(2)
         assertThat(journals.findByUserIdAndRecordDayId(user, day)).isEqualTo(edited)

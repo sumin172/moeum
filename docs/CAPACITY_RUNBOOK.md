@@ -22,13 +22,13 @@ cd apps/backend
 현재 통과 결과의 설정이다. 60초 시험이며 장시간 운영 승인을 대신하지 않는다.
 
 ```powershell
-.\gradlew.bat :bootstrap:capacityTest --console=plain --offline --no-daemon '-Pkotlin.compiler.execution.strategy=in-process' '-Pcapacity.profile=P1' '-Pcapacity.scenario=benchmark' '-Pcapacity.durationSeconds=60' '-Pcapacity.warmupSeconds=30' '-Pcapacity.conversationDelayMs=1000' '-Pcapacity.journalDelayMs=10000' '-Pcapacity.conversationSlots=320' '-Pcapacity.conversationPool=12' '-Pcapacity.conversationReplicas=2' '-Pcapacity.conversationBatchSize=32' '-Pcapacity.apiPool=24' '-Pcapacity.journalSlots=48' '-Pcapacity.journalPool=4' '-Pcapacity.historyRecords=50000' '-Pcapacity.journalBurst=1000' '-Pcapacity.journalDrainSeconds=400'
+.\gradlew.bat :bootstrap:capacityTest --console=plain --offline --no-daemon '-Pkotlin.compiler.execution.strategy=in-process' '-Pcapacity.profile=P1' '-Pcapacity.scenario=benchmark' '-Pcapacity.durationSeconds=60' '-Pcapacity.warmupSeconds=30' '-Pcapacity.conversationDelayMs=1000' '-Pcapacity.journalDelayMs=10000' '-Pcapacity.conversationSlots=320' '-Pcapacity.conversationPool=12' '-Pcapacity.conversationReplicas=2' '-Pcapacity.apiPool=24' '-Pcapacity.journalSlots=48' '-Pcapacity.journalPool=4' '-Pcapacity.historyRecords=50000' '-Pcapacity.journalBurst=1000' '-Pcapacity.journalDrainSeconds=400'
 ```
 
 ## 실제 종료·리스 복구
 
 429·timeout·5xx 첫 시도 실패, 일기 JVM 종료, 전달 등록 전·후 `Runtime.halt`를 실행한다.
-운영의 생성 리스 5분과 전달 리스 1분을 실제로 기다린다. DB 시각을 앞당기지 않는다.
+운영의 생성 리스 2분과 전달 리스 1분을 실제로 기다린다. DB 시각을 앞당기지 않는다.
 전달 경계 시험의 중단 JVM은 자동 전달과 자동 생성을 일시 정지하고 수동으로 정확한 경계에 진입한다.
 복구 JVM은 정상 스케줄러를 사용한다. 이 시험은 용량 승인과 분리한다.
 
@@ -58,7 +58,6 @@ sustained는 목표 부하 확인 시험이므로 프로파일과 관계없이 A
 | capacity.warmupSeconds                            | 워밍업 5초. 목표를 판정하는 시험(benchmark P1·sustained·정리 시험)은 30초 미만이면 시작 전 거부 |
 | capacity.conversationSlots / journalSlots         | 인스턴스 슬롯 8 / 2                                                                             |
 | capacity.conversationReplicas                     | 대화 워커 수 1, 2 이상이면 1→N 비교 구간 추가                                                   |
-| capacity.conversationBatchSize                    | 워커당 배치 선점 상한 32; 예약 실행 슬롯 이내                                                   |
 | capacity.apiPool / conversationPool / journalPool | DB 풀 10 / 4 / 2                                                                                |
 | capacity.conversationDelayMs / journalDelayMs     | fake 호출 지연 100 / 200ms                                                                      |
 | capacity.historyRecords                           | 180일에 분산할 과거 기록 수 0; 기록당 USER 20개·ASSISTANT 19~20개                               |
@@ -76,8 +75,9 @@ sustained 기준선과 1→N 구간은 최대 1800초로 제한한다.
 
 failure는 429·timeout·5xx를 대화 실행 주기마다 첫 시도에 주입하고 실제 재시도를 확인한다. 판정 기준은 [시험 기준](CAPACITY.md#시험별-목적과-판정)을 따른다.
 시험 설정과 운영 기본값의 차이는 [시험 기준](CAPACITY.md#운영-설정과-다른-시험-설정)에 있다. 운영 기본 backoff를 검증했다는 뜻은 아니다.
-일기 JVM은 30초 fake 호출 중 실제 강제 종료한 뒤 새 JVM으로 회수한다.
-운영 기본 5분 generation lease를 사용하며 DB 리스 시각을 인위적으로 당기지 않는다.
+일기 JVM은 30초 fake 호출 중 실제 강제 종료한 뒤 새 JVM을 기동한다.
+운영 기본 2분 generation lease 만료 뒤 중단 작업이 FAILED로 정리되는지 확인하고, 사용자 재요청과 같은 상태 전이로 다시 실행해 완료를 확인한다.
+DB 시각은 인위적으로 당기지 않는다.
 이 때문에 장애 시험은 짧은 부하 구간보다 수 분 오래 걸릴 수 있다.
 일기 JVM이 없는 동안에도 실제 API 요청 25건을 보내 대화 완료를 확인한다.
 이어 전달 등록 직전·직후 Runtime.halt로 각각 종료하고 실제 1분 전달 리스 만료 뒤 단일 작업·단일 결과와 ack 회수를 확인한다.

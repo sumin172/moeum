@@ -413,6 +413,18 @@ class GrowthCapacityTest {
         val offlineWaiting=percentiles(load.waitingTimes(offlineRequests,conversations))
         val replacement=start("journal-worker",1,url)
         val recoveryStart=System.nanoTime()
+        // 중단된 작업은 리스 만료 후 FAILED로 정리되고 자동으로 다시 실행되지 않는다
+        val expiryDeadline=System.nanoTime()+TimeUnit.MINUTES.toNanos(4)
+        fun processing()=jdbc.queryForObject<Int>("SELECT count(*) FROM journal.generation_jobs WHERE status='PROCESSING' AND record_day_id IN (?,?,?)",
+            *ids.toTypedArray())!!
+        while(processing()>0 && System.nanoTime()<expiryDeadline)Thread.sleep(1000)
+        check(processing()==0) { "리스 만료 작업이 FAILED로 정리되지 않았습니다" }
+        val expired=jdbc.queryForObject<Int>("SELECT count(*) FROM journal.generation_jobs WHERE status='FAILED' AND record_day_id IN (?,?,?)",
+            *ids.toTypedArray())!!
+        check(expired>=interrupted) { "중단된 작업이 FAILED로 남지 않았습니다" }
+        // 사용자 재요청과 같은 상태 전이(FAILED → PENDING, version 증가)로 다시 실행한다
+        jdbc.update("UPDATE journal.generation_jobs SET status='PENDING',next_attempt_at=now(),version=version+1,updated_at=now() WHERE status='FAILED' AND record_day_id IN (?,?,?)",
+            *ids.toTypedArray())
         val end=System.nanoTime()+TimeUnit.MINUTES.toNanos(7)
         var nextProgress=recoveryStart
         var completed=0
@@ -420,7 +432,7 @@ class GrowthCapacityTest {
             completed=jdbc.queryForObject<Int>("SELECT count(*) FROM journal.journals WHERE record_day_id IN (?,?,?)", *ids.toTypedArray())!!
             if(completed==ids.size)break
             if(System.nanoTime()>=nextProgress) {
-                println("CAPACITY journal recovery completed=$completed/${ids.size} elapsedSeconds=${(System.nanoTime()-recoveryStart)/1000000000}; waiting for production lease")
+                println("CAPACITY journal recovery completed=$completed/${ids.size} elapsedSeconds=${(System.nanoTime()-recoveryStart)/1000000000}; waiting after lease expiry and user retry")
                 nextProgress=System.nanoTime()+TimeUnit.SECONDS.toNanos(30)
             }
             Thread.sleep(1000)
@@ -429,8 +441,8 @@ class GrowthCapacityTest {
         return mapOf("killedPid" to killed,"replacementPid" to replacement.pid,"interruptedProcessing" to interrupted,
             "whileJournalOffline" to mapOf("requests" to 25,"apiLatency" to percentiles(offlineRequests.map { it.latencyMs }),
                 "responseWaiting" to offlineWaiting,"waitSamplesDropped" to load.waitSamplesDropped(conversations),"integrity" to offlineIntegrity),
-            "recoveredJournals" to completed,"recoverySeconds" to (System.nanoTime()-recoveryStart)/1000000000.0,
-            "leaseNote" to "production five-minute generation lease, no database lease timestamp injection")
+            "expiredToFailed" to expired,"recoveredJournals" to completed,"recoverySeconds" to (System.nanoTime()-recoveryStart)/1000000000.0,
+            "leaseNote" to "production two-minute generation lease; expired jobs FAILED then retried by user-retry state transition, no database timestamp injection")
     }
 
     private fun deliveryRecovery(url:String,fixtures:CapacityFixtures,jdbc:JdbcTemplate):List<Map<String,Any>> {

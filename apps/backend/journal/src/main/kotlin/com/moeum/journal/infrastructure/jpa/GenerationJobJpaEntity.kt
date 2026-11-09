@@ -27,8 +27,6 @@ class GenerationJobJpaEntity(
     val attemptCount: Int,
     @Column(name = "next_attempt_at", nullable = false)
     val nextAttemptAt: Instant,
-    @Column(name = "lease_expires_at")
-    val leaseExpiresAt: Instant?,
     @Version
     @Column(nullable = false)
     val version: Long,

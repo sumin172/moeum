@@ -8,18 +8,23 @@ import com.moeum.platform.job.JobClaimSql
 import com.moeum.platform.job.JobState
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 private const val TABLE = "conversation.response_jobs"
 
-// 새 실행 주기(attempt_count=0)만 잠근 기록의 현재 원본 순번을 관측 상한으로 잡는다. 재시도·리스 회수는 기존 상한을 유지한다.
+// 새 실행 주기(attempt_count=0)만 잠근 기록의 현재 원본 순번을 관측 상한으로 잡는다. 자동 재시도는 기존 상한을 유지한다.
 private const val CLAIM_BATCH_SQL =
     "UPDATE $TABLE j ${JobClaimSql.CLAIM_SET}, " +
         "observed_source_revision = CASE WHEN j.attempt_count = 0 THEN r.source_revision ELSE j.observed_source_revision END " +
         "FROM conversation.record_days r " +
-        "WHERE r.id = j.record_day_id AND j.record_day_id IN (:recordIds) AND (${JobClaimSql.CLAIMABLE}) " +
+        "WHERE r.id = j.record_day_id AND j.record_day_id IN (:recordIds) AND ${JobClaimSql.DUE_PENDING} " +
         "RETURNING j.*"
+
+// 기록 잠금 뒤 새 문장에서 다시 읽어 잠금 전에 끝났거나 정리된 작업은 제외한다.
+private const val EXPIRED_SQL =
+    "SELECT * FROM $TABLE WHERE record_day_id IN (:recordIds) AND ${JobClaimSql.LEASE_EXPIRED}"
 
 @Component
 class ResponseJobRepositoryImpl(
@@ -36,21 +41,37 @@ class ResponseJobRepositoryImpl(
         jpaRepository.findByUserIdAndRecordDayId(userId.value, recordDayId.value)?.toDomain()
 
     @Transactional
-    override fun claimBatch(now: Instant, leaseExpiresAt: Instant, limit: Int): List<ResponseJob> {
-        require(limit in 1..64)
+    override fun claimBatch(now: Instant, limit: Int): List<ResponseJob> {
+        require(limit > 0)
         val recordIds=entityManager.createNativeQuery("""
             SELECT r.id FROM conversation.response_jobs j
             JOIN conversation.record_days r ON r.id=j.record_day_id
-            WHERE j.status IN ('PENDING','PROCESSING')
-                AND (CASE WHEN j.status='PENDING' THEN j.next_attempt_at ELSE j.lease_expires_at END)<=:now
-            ORDER BY (CASE WHEN j.status='PENDING' THEN j.next_attempt_at ELSE j.lease_expires_at END),j.created_at
+            WHERE j.status='PENDING' AND j.next_attempt_at<=:now
+            ORDER BY j.next_attempt_at,j.created_at
             LIMIT :limit FOR UPDATE OF r SKIP LOCKED
         """).setParameter("now",now).setParameter("limit",limit).resultList
         if(recordIds.isEmpty())return emptyList()
         // 기록 잠금 획득 후 새로운 READ COMMITTED 문장에서 작업 상태와 원본 순번을 다시 읽는다.
         // 후보 조회 중 커밋된 접수·재개가 있어도 잠금 뒤의 최신 값으로 선점 여부와 관측 상한을 정한다.
         return entityManager.createNativeQuery(CLAIM_BATCH_SQL, ResponseJobJpaEntity::class.java)
-            .setParameter("recordIds",recordIds).setParameter("now",now).setParameter("leaseExpiresAt",leaseExpiresAt)
+            .setParameter("recordIds",recordIds).setParameter("now",now)
+            .resultList.map { (it as ResponseJobJpaEntity).toDomain() }
+    }
+
+    // 선점·접수·결과 저장과 같은 순서(기록 → 작업)로 잠근다.
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun lockExpired(expiredBefore: Instant, limit: Int): List<ResponseJob> {
+        require(limit >= 1)
+        val recordIds = entityManager.createNativeQuery("""
+            SELECT r.id FROM conversation.response_jobs j
+            JOIN conversation.record_days r ON r.id=j.record_day_id
+            WHERE j.status='PROCESSING' AND j.updated_at<=:expiredBefore
+            ORDER BY j.updated_at
+            LIMIT :limit FOR UPDATE OF r SKIP LOCKED
+        """).setParameter("expiredBefore", expiredBefore).setParameter("limit", limit).resultList
+        if (recordIds.isEmpty()) return emptyList()
+        return entityManager.createNativeQuery(EXPIRED_SQL, ResponseJobJpaEntity::class.java)
+            .setParameter("recordIds", recordIds).setParameter("expiredBefore", expiredBefore)
             .resultList.map { (it as ResponseJobJpaEntity).toDomain() }
     }
 }
@@ -63,7 +84,6 @@ private fun ResponseJobJpaEntity.toDomain(): ResponseJob =
             status = status,
             attemptCount = attemptCount,
             nextAttemptAt = nextAttemptAt,
-            leaseExpiresAt = leaseExpiresAt,
             version = version,
         ),
         observedSourceRevision = observedSourceRevision,
@@ -79,7 +99,6 @@ private fun ResponseJob.toEntity(): ResponseJobJpaEntity =
         status = state.status,
         attemptCount = state.attemptCount,
         nextAttemptAt = state.nextAttemptAt,
-        leaseExpiresAt = state.leaseExpiresAt,
         version = state.version,
         createdAt = createdAt,
         updatedAt = updatedAt,

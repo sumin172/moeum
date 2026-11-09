@@ -68,7 +68,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class WorkerRoleIsolationIntegrationTest {
     @Test
-    fun `일기 워커 지연과 종료 중에도 API와 대화가 진행되고 재기동 후 만료 리스를 회수한다`() {
+    fun `일기 워커 지연과 종료 중에도 API와 대화가 진행되고 재기동 후 만료 리스를 FAILED로 정리한다`() {
         PostgreSQLContainer(DockerImageName.parse("postgres:17-alpine")).use { postgres ->
             postgres.start()
             val provider = BlockingJournalProvider()
@@ -141,13 +141,20 @@ class WorkerRoleIsolationIntegrationTest {
                 await { completedResponses() == 3 }
 
                 // 프로세스가 강제 종료되어 실패 기록을 남기지 못한 상태를 재현한다.
-                // DB 리스 시각만 당겨 5분의 실제 대기 없이 같은 회수 조건을 검증한다.
+                // 선점 시각만 당겨 2분의 실제 대기 없이 같은 만료 조건을 검증한다.
                 jdbc.update(
-                    "UPDATE journal.generation_jobs SET status = 'PROCESSING', lease_expires_at = now() - interval '1 second' WHERE id = ?",
+                    "UPDATE journal.generation_jobs SET status = 'PROCESSING', updated_at = now() - interval '3 minutes' WHERE id = ?",
                     job.id.value,
                 )
                 provider.blockJournal.set(false)
                 start("journal-worker")
+                // 만료 작업은 자동으로 다시 실행하지 않고 FAILED로 정리한다.
+                await {
+                    jdbc.queryForObject<String>("SELECT status FROM journal.generation_jobs WHERE id = ?", job.id.value) == "FAILED"
+                }
+                assertThat(provider.journalInputs).hasSize(1)
+                // 사용자 재요청과 같은 상태 전이로 다시 실행한다.
+                jdbc.update("UPDATE journal.generation_jobs SET status = 'PENDING', next_attempt_at = now() WHERE id = ?", job.id.value)
                 await {
                     jdbc.queryForObject<String>("SELECT status FROM journal.generation_jobs WHERE id = ?", job.id.value) == "COMPLETED"
                 }

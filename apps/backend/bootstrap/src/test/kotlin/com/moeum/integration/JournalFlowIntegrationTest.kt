@@ -8,6 +8,7 @@ import com.moeum.conversation.interfaces.dto.SaveMessageRequest
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.integration.support.insertPremiumSubscription
 import com.moeum.journal.application.command.GenerationExecutor
+import com.moeum.integration.support.executeNext
 import com.moeum.journal.application.command.RecordDeliveryWorker
 import com.moeum.journal.interfaces.dto.*
 import com.moeum.platform.security.jwt.JwtProvider

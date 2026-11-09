@@ -20,7 +20,7 @@ class JobStateTest {
 
     // claim이 하는 일(시도 횟수 증가, PROCESSING 전이)을 흉내 낸다
     private fun JobState.claimed(): JobState =
-        copy(status = JobStatus.PROCESSING, attemptCount = attemptCount + 1, leaseExpiresAt = policy.leaseExpiresAt(now), version = version + 1)
+        copy(status = JobStatus.PROCESSING, attemptCount = attemptCount + 1, version = version + 1)
 
     @Test
     fun `실패하면 재시도가 남은 동안 backoff 뒤로 다시 예약되고, 소진되면 최종 실패한다`() {
@@ -36,7 +36,6 @@ class JobStateTest {
         val third = second.claimed().failed(policy, now, JobFailure(JobFailureKind.TRANSIENT))
         assertThat(third.status).isEqualTo(JobStatus.FAILED)
         assertThat(third.attemptCount).isEqualTo(3)
-        assertThat(third.leaseExpiresAt).isNull()
     }
 
     @Test
@@ -49,10 +48,8 @@ class JobStateTest {
     }
 
     @Test
-    fun `리스 만료로 다시 잡혀 시도 횟수가 상한을 넘으면 소진된 것으로 본다`() {
-        assertThat(policy.isExhausted(3)).isFalse()
-        assertThat(policy.isExhausted(5)).isFalse()
-        assertThat(policy.isExhausted(6)).isTrue()
+    fun `리스 기준 시각보다 앞서 선점된 PROCESSING이 만료 대상이다`() {
+        assertThat(policy.leaseExpiredBefore(now)).isEqualTo(now.minus(Duration.ofMinutes(2)))
     }
 
     @Test
@@ -88,17 +85,15 @@ class JobStateTest {
     }
 
     @Test
-    fun `출력 오류는 한 번만 자동 재시도하고 수동 재시도는 누적 횟수로 제한한다`() {
+    fun `출력 오류는 한 번만 자동 재시도한다`() {
         val invalid = JobFailure(JobFailureKind.INVALID_OUTPUT)
         val first = JobState.pending(now).claimed().failed(policy, now, invalid)
         assertThat(first.status).isEqualTo(JobStatus.PENDING)
         assertThat(first.claimed().failed(policy, now, invalid).status).isEqualTo(JobStatus.FAILED)
-        assertThat(policy.manualRetryExhausted(4)).isFalse()
-        assertThat(policy.manualRetryExhausted(5)).isTrue()
     }
 
     @Test
-    fun `재개 가능 시각은 일반 backoff·수동 대기·공급자 대기 중 가장 늦은 시각이다`() {
+    fun `재개 가능 시각은 일반 backoff·최소 대기·공급자 대기 중 가장 늦은 시각이다`() {
         val slowBackoff = policy.copy(backoff = listOf(Duration.ofMinutes(3)))
         assertThat(policy.reopenAt(1, now, JobFailure(JobFailureKind.PERMANENT))).isEqualTo(now.plus(Duration.ofMinutes(1)))
         assertThat(slowBackoff.reopenAt(1, now, JobFailure(JobFailureKind.TRANSIENT))).isEqualTo(now.plus(Duration.ofMinutes(3)))

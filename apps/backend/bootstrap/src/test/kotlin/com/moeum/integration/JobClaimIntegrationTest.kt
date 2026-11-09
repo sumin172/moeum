@@ -1,11 +1,12 @@
 package com.moeum.integration
 
 import com.moeum.integration.support.AbstractIntegrationTest
+import com.moeum.journal.application.command.MarkGenerationFailedService
 import com.moeum.journal.domain.GenerationJobRepository
 import com.moeum.journal.domain.model.GenerationJobId
-import com.moeum.journal.domain.model.failedPermanently
 import com.moeum.kernel.RecordDayId
 import com.moeum.kernel.UserId
+import com.moeum.platform.job.JobStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -27,6 +28,9 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
     @Autowired
     lateinit var generationJobRepository: GenerationJobRepository
 
+    @Autowired
+    lateinit var markGenerationFailedService: MarkGenerationFailedService
+
     private val farFuture = Instant.now().plus(Duration.ofDays(365))
 
     private fun createJobs(count: Int): Set<GenerationJobId> =
@@ -45,7 +49,8 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
         val claimedPerWorker = workers.invokeAll(
             (1..8).map {
                 Callable {
-                    generateSequence { generationJobRepository.claimNext(claimAt, claimAt.plus(Duration.ofMinutes(5))) }
+                    generateSequence { generationJobRepository.claimBatch(claimAt, 3).takeIf { it.isNotEmpty() } }
+                        .flatten()
                         .map { it.id }
                         .toList()
                 }
@@ -59,22 +64,35 @@ class JobClaimIntegrationTest : AbstractIntegrationTest() {
     }
 
     @Test
-    fun `리스가 만료된 작업은 다시 선점되고, 리스를 잃은 워커의 늦은 저장은 거부된다`() {
+    fun `리스가 만료된 작업은 다시 선점되지 않고 FAILED로 정리되며, 재요청 뒤에도 이전 시도의 늦은 저장은 거부된다`() {
         createJobs(1)
         val firstAt = farFuture.plus(Duration.ofDays(1))
-        val first = generateSequence { generationJobRepository.claimNext(firstAt, firstAt.plus(Duration.ofMinutes(5))) }
+        val first = generateSequence { generationJobRepository.claimBatch(firstAt, 1).singleOrNull() }
             .first { it.state.attemptCount == 1 }
 
-        // 리스(5분)가 지난 뒤 다른 워커가 같은 작업을 다시 잡는다
-        val secondAt = firstAt.plus(Duration.ofMinutes(6))
-        val second = generateSequence { generationJobRepository.claimNext(secondAt, secondAt.plus(Duration.ofMinutes(5))) }
+        // 리스(2분)가 지나도 선점 SQL은 만료 작업을 다시 잡지 않는다
+        val expiredAt = firstAt.plus(Duration.ofMinutes(3))
+        val claimedAfterExpiry = generateSequence { generationJobRepository.claimBatch(expiredAt, 1).singleOrNull() }
+            .map { it.id }.toList()
+        assertThat(claimedAfterExpiry).doesNotContain(first.id)
+
+        generateSequence { markGenerationFailedService.failExpired(expiredAt, 100) }.flatten().first { it.id == first.id }
+        // version은 커밋 시 오르므로 저장된 상태를 다시 읽는다
+        val failed = generationJobRepository.findByUserIdAndRecordDayId(first.userId, first.recordDayId)!!
+        assertThat(failed.state.status).isEqualTo(JobStatus.FAILED)
+        assertThat(failed.state.attemptCount).isEqualTo(1)
+        assertThat(failed.state.version).isGreaterThan(first.state.version)
+        assertThatThrownBy { generationJobRepository.save(first.completed(expiredAt)) }
+            .isInstanceOf(OptimisticLockingFailureException::class.java)
+
+        // 사용자 재요청 뒤 새 시도만 저장할 수 있다
+        val retryAt = expiredAt.plusSeconds(1)
+        generationJobRepository.save(failed.restarted(retryAt))
+        val second = generateSequence { generationJobRepository.claimBatch(retryAt, 1).singleOrNull() }
             .first { it.id == first.id }
         assertThat(second.state.attemptCount).isEqualTo(2)
-        assertThat(second.state.version).isGreaterThan(first.state.version)
-
-        assertThatThrownBy { generationJobRepository.save(first.failedPermanently(secondAt)) }
+        assertThatThrownBy { generationJobRepository.save(first.completed(retryAt)) }
             .isInstanceOf(OptimisticLockingFailureException::class.java)
-        // 현재 리스를 가진 워커의 저장은 성공한다
-        generationJobRepository.save(second.failedPermanently(secondAt))
+        generationJobRepository.save(second.completed(retryAt))
     }
 }

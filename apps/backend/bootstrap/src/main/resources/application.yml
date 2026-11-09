@@ -112,13 +112,17 @@ moeum:
       backoff: 10s, 60s
       lease: 2m
       poll-interval: PT1S
+      # 리스가 만료된 PROCESSING 작업을 FAILED로 정리하는 주기
+      lease-check-interval: PT10S
   journal:
     # 일기 생성 작업 재시도/리스 정책 (기본값은 GenerationJobProperties 참고)
     generation-job:
       max-attempts: 5
       backoff: 1m, 5m, 30m, 2h
-      lease: 5m
+      lease: 2m
       poll-interval: PT1S
+      # 리스가 만료된 PROCESSING 작업을 FAILED로 정리하는 주기
+      lease-check-interval: PT10S
   cloudflare:
     account-id: ${CLOUDFLARE_ACCOUNT_ID:}
     api-token: ${CLOUDFLARE_API_TOKEN:}

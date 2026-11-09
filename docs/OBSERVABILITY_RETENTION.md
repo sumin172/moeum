@@ -82,8 +82,8 @@ PENDING/PROCESSING과 열린 기록의 작업은 정리하지 않는다. 열린 
 결과 유일키가 재전달의 중복 등록을 차단하며 이미 완성된 일기의 재시도는 409다.
 현재 일기·수정본·USER·ASSISTANT 메시지는 보관한다.
 FAILED 대화 작업은 최근 실패부터, FAILED 일기 작업은 작업 생성부터 기본 30일간 보관한다.
-정리 전에도 만료된 실패 작업의 수동 재시도와 retryable 표시는 중단한다.
-대화에는 누적 시도 상한과 저장된 재개 가능 시각을 적용한다. 일기 수동 재개에는 횟수·대기 제한이 없으며 생성 기준 기한은 재실패해도 연장되지 않는다.
+정리 전에도 기한이 지난 일기 실패 작업의 수동 재개와 retryable 표시는 중단한다.
+일기 수동 재개에는 횟수·대기 제한이 없으며 생성 기준 기한은 재실패해도 연장되지 않는다. 대화 응답에는 수동 재시도가 없다.
 원본 대화의 최종 보관 기간은 미확정이다.
 정리 이후 클라이언트에 보이는 응답은 [대화](CONVERSATION.md)와 [일기](JOURNAL.md) 계약을 따른다.
 
@@ -92,4 +92,4 @@ FAILED 대화 작업은 최근 실패부터, FAILED 일기 작업은 작업 생�
 LlmTelemetryTest와 NonBlockingConsoleAppenderTest는 수집 실패·포화·종료·유실을 검사한다.
 LlmTelemetryIntegrationTest는 JSON 출력·JMX·작업 문맥·원문 보호를 검사한다.
 LlmTelemetryIsolationIntegrationTest는 관측 전송 정체 중 업무 진행을 검사한다.
-TerminalJobRetentionIntegrationTest는 정리 조건·재시도 판단·재전달 멱등성과 원본·수정본 보존을 검사한다.
+TerminalJobRetentionIntegrationTest는 정리 조건·일기 재시도 판단·재전달 멱등성과 원본·수정본 보존을 검사한다.

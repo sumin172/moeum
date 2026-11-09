@@ -29,14 +29,13 @@ data class MessageResponse(
 
 // 기록의 AI 응답 상태. sourceSequence가 answeredSourceRevision보다 큰 USER가 아직 답하지 않은 입력이다.
 data class ResponseStateResponse(
-    // PENDING | PROCESSING | COMPLETED | FAILED, 정리된 작업이면 null — 자동 재시도 대기 중이면 PENDING
+    // PENDING | PROCESSING | COMPLETED | FAILED, 정리된 작업이면 null — 자동 재시도 대기 중이면 PENDING.
+    // FAILED는 다음 메시지가 접수되면 실패한 입력까지 함께 답하는 새 실행으로 재개된다.
     val status: String?,
-    // true면 POST /api/conversations/records/{recordDayId}/response-attempts로 다시 요청할 수 있다
-    val retryable: Boolean,
     val answeredSourceRevision: Long,
 ) {
     companion object {
         fun from(state: ResponseState) =
-            ResponseStateResponse(state.job?.state?.status?.name, state.retryable, state.answeredSourceRevision)
+            ResponseStateResponse(state.job?.state?.status?.name, state.answeredSourceRevision)
     }
 }

@@ -49,7 +49,6 @@ class ResponseJobExecutorTest {
         conversationResponder = responder,
         saveGeneratedResponseService = SaveGeneratedResponseService(messageRepository, repository, timeProvider, records),
         markResponseFailedService = MarkResponseFailedService(repository, records, testResponseJobProperties, timeProvider),
-        responseJobProperties = testResponseJobProperties,
         timeProvider = timeProvider,
         limits = limits,
     )
@@ -73,26 +72,6 @@ class ResponseJobExecutorTest {
         val claimed = claim(1).singleOrNull() ?: return false
         execute(claimed)
         return true
-    }
-
-    @Test
-    fun `빈 큐는 다음 poll까지 반복 조회하지 않는다`() {
-        val probes = AtomicInteger()
-        val repository = object : ResponseJobRepository by jobRepository {
-            override fun claimBatch(now: Instant, leaseExpiresAt: Instant, limit: Int): List<ResponseJob> {
-                probes.incrementAndGet()
-                return jobRepository.claimBatch(now, leaseExpiresAt, limit)
-            }
-        }
-        val runner = executor(ScriptedResponder(ArrayDeque(listOf(answer()))), repository)
-        repeat(32) { assertThat(runner.executeNext()).isFalse() }
-        assertThat(probes.get()).isEqualTo(1)
-        accept()
-        assertThat(runner.canPoll()).isFalse()
-        timeProvider.fixedNow = start.plusMillis(500)
-        assertThat(runner.canPoll()).isTrue()
-        assertThat(runner.executeNext()).isTrue()
-        assertThat(assistantMessages()).hasSize(1)
     }
 
     @Test
@@ -185,7 +164,6 @@ class ResponseJobExecutorTest {
 
         assertThat(job().state.status).isEqualTo(JobStatus.FAILED)
         assertThat(job().state.nextAttemptAt).isEqualTo(policy.reopenAt(1, start, null))
-        assertThat(job().retryable(policy, start, Duration.ofDays(30))).isTrue()
         advance(Duration.ofHours(1))
         assertThat(runner.executeNext()).isFalse()
     }
@@ -224,7 +202,7 @@ class ResponseJobExecutorTest {
 
     @Test
     fun `429 최종 실패의 재개 가능 시각은 공급자 Retry-After를 지킨다`() {
-        val properties = testResponseJobProperties.copy(maxAttempts = 1, maxTotalAttempts = 3)
+        val properties = testResponseJobProperties.copy(maxAttempts = 1)
         accept()
         val runner = ResponseJobExecutor(jobRepository, messageRepository,
             ScriptedResponder(ArrayDeque(listOf {
@@ -235,7 +213,7 @@ class ResponseJobExecutorTest {
                 )
             })),
             SaveGeneratedResponseService(messageRepository, jobRepository, timeProvider, records),
-            MarkResponseFailedService(jobRepository, records, properties, timeProvider), properties, timeProvider, ConversationLimitProperties())
+            MarkResponseFailedService(jobRepository, records, properties, timeProvider), timeProvider, ConversationLimitProperties())
 
         runner.executeNext()
 
@@ -295,49 +273,66 @@ class ResponseJobExecutorTest {
     }
 
     @Test
-    fun `리스를 뺏긴 워커의 늦은 결과와 실패는 버려지고 회수한 워커는 같은 범위를 유지한다`() {
+    fun `리스 만료로 정리된 뒤 도착한 늦은 결과와 실패는 버려지고 FAILED가 유지된다`() {
         accept("첫 번째")
-        // LLM 호출이 리스(2분)보다 오래 걸리는 사이 새 입력이 오고 다른 워커가 같은 작업을 다시 잡는 상황
-        val slowThenReclaimed = { reclaimAt: Instant, ok: Boolean ->
+        // LLM 호출이 리스(2분)보다 오래 걸리는 사이 정리 트랜잭션이 작업을 FAILED로 바꾸는 상황
+        lateinit var runner: ResponseJobExecutor
+        val slowThenExpired = { ok: Boolean ->
             {
-                accept("늦게 온 입력")
-                timeProvider.fixedNow = reclaimAt
-                jobRepository.claimBatch(reclaimAt, reclaimAt.plus(Duration.ofMinutes(2)), 1)
+                advance(Duration.ofMinutes(3))
+                runner.failExpiredLeases()
                 if (ok) answer("늦은 응답").invoke() else throw LlmException("늦은 실패")
             }
         }
 
-        executor(ScriptedResponder(ArrayDeque(listOf(slowThenReclaimed(start.plus(Duration.ofMinutes(3)), true))))).executeNext()
+        runner = executor(ScriptedResponder(ArrayDeque(listOf(slowThenExpired(true)))))
+        runner.executeNext()
         assertThat(assistantMessages()).isEmpty()
-        assertThat(job().state.status).isEqualTo(JobStatus.PROCESSING)
-        assertThat(job().state.attemptCount).isEqualTo(2)
-        assertThat(job().observedSourceRevision).isEqualTo(1)
+        assertThat(job().state.status).isEqualTo(JobStatus.FAILED)
 
-        timeProvider.fixedNow = start.plus(Duration.ofMinutes(6))
-        executor(ScriptedResponder(ArrayDeque(listOf(slowThenReclaimed(start.plus(Duration.ofMinutes(9)), false))))).executeNext()
-        assertThat(job().state.status).isEqualTo(JobStatus.PROCESSING)
-        assertThat(job().state.attemptCount).isEqualTo(4)
-        assertThat(job().observedSourceRevision).isEqualTo(1)
+        // 새 메시지로 재개한 실행도 같은 방식으로 멈추면 늦은 실패 기록이 FAILED를 덮지 않는다
+        accept("두 번째")
+        advance(policy.reopenCooldown)
+        runner = executor(ScriptedResponder(ArrayDeque(listOf(slowThenExpired(false)))))
+        runner.executeNext()
+        assertThat(job().state.status).isEqualTo(JobStatus.FAILED)
+        assertThat(job().state.attemptCount).isEqualTo(1)
+        assertThat(job().observedSourceRevision).isEqualTo(2)
     }
 
     @Test
-    fun `리스 회수로 누적 상한을 넘긴 작업은 호출 없이 끝내고 그 사이 접수가 있으면 재개한다`() {
+    fun `리스가 만료된 작업은 다시 실행하지 않고 FAILED로 정리하며 멈춘 동안 접수가 있으면 새 실행 주기를 연다`() {
         accept("첫 번째")
-        jobRepository.jobs[recordDayId] = job().copy(observedSourceRevision = 1,
-            state = job().state.copy(status = JobStatus.PROCESSING, attemptCount = 5, leaseExpiresAt = start.minusSeconds(1)))
-        val responder = ScriptedResponder(ArrayDeque())
+        val responder = ScriptedResponder(ArrayDeque(listOf(answer())))
+        val runner = executor(responder)
+        jobRepository.claimBatch(start, 1).single()
 
-        executor(responder).executeNext()
-        assertThat(responder.requests).isEmpty()
+        advance(policy.lease.minusSeconds(1))
+        runner.failExpiredLeases()
+        assertThat(job().state.status).isEqualTo(JobStatus.PROCESSING)
+
+        advance(Duration.ofSeconds(1))
+        runner.failExpiredLeases()
         assertThat(job().state.status).isEqualTo(JobStatus.FAILED)
-
-        accept("두 번째")
-        jobRepository.jobs[recordDayId] = job().copy(observedSourceRevision = 1,
-            state = job().state.copy(status = JobStatus.PROCESSING, attemptCount = 5, leaseExpiresAt = start.minusSeconds(1)))
-        executor(responder).executeNext()
+        assertThat(job().state.attemptCount).isEqualTo(1)
+        advance(Duration.ofHours(1))
+        assertThat(runner.executeNext()).isFalse()
         assertThat(responder.requests).isEmpty()
+
+        // 새 메시지로 재개한 실행이 다시 멈추고, 그 사이 또 새 입력이 접수된 경우
+        accept("두 번째")
+        assertThat(job().state.status).isEqualTo(JobStatus.PENDING)
+        jobRepository.claimBatch(timeProvider.fixedNow, 1).single()
+        accept("세 번째")
+        advance(policy.lease)
+        runner.failExpiredLeases()
         assertThat(job().state.status).isEqualTo(JobStatus.PENDING)
         assertThat(job().state.attemptCount).isZero()
+
+        advance(Duration.ofMinutes(2))
+        assertThat(runner.executeNext()).isTrue()
+        assertThat(responder.requests.single().second.map { it.content }).containsExactly("첫 번째", "두 번째", "세 번째")
+        assertThat(job().state.status).isEqualTo(JobStatus.COMPLETED)
     }
 
     @Test
@@ -367,6 +362,6 @@ class ResponseJobExecutorTest {
 
         // 새 입력에 의한 재개는 다음 실행 주기의 선점에서 관측 상한을 전진시킨다
         assertThat(observed).containsExactly(1L, 2L, 3L)
-        assertThat(calls.get()).isLessThanOrEqualTo((2 * inputs + 1) * testResponseJobProperties.maxTotalAttempts)
+        assertThat(calls.get()).isLessThanOrEqualTo((2 * inputs + 1) * testResponseJobProperties.maxAttempts)
     }
 }

@@ -53,7 +53,6 @@ class CapacityProcess(
             "--moeum.runtime.journal-concurrency=${settings.journalSlots}",
             "--moeum.runtime.shutdown-timeout=2s",
             "--moeum.conversation.response-job.poll-interval=PT0.05S",
-            "--moeum.conversation.response-job.claim-batch-size=${settings.conversationBatchSize}",
             "--moeum.journal.generation-job.poll-interval=PT0.1S",
             "--moeum.conversation.response-job.backoff=1s,2s",
             "--moeum.conversation.response-job.rate-limit-backoff=2s",

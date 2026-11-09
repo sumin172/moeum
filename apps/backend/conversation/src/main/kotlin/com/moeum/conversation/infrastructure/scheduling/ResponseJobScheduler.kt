@@ -21,7 +21,14 @@ class ResponseJobScheduler(
         initialDelayString = $$"${moeum.conversation.response-job.initial-delay:PT0S}",
     )
     fun pollDueJobs() {
-        if (!responseJobExecutor.canPoll()) return
-        pool.submitBatch(responseJobExecutor.claimBatchSize,responseJobExecutor::claim,responseJobExecutor::execute)
+        pool.submitBatch(responseJobExecutor::claim, responseJobExecutor::execute)
     }
+
+    // 실행 슬롯이 모두 차 있어도 정리되도록 워커 풀 밖의 스케줄러 스레드에서 실행한다.
+    @Scheduled(
+        scheduler = "conversationPollScheduler",
+        fixedDelayString = $$"${moeum.conversation.response-job.lease-check-interval:PT10S}",
+        initialDelayString = $$"${moeum.conversation.response-job.initial-delay:PT0S}",
+    )
+    fun failExpiredLeases() = responseJobExecutor.failExpiredLeases()
 }

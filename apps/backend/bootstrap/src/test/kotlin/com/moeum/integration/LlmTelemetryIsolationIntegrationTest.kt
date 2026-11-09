@@ -5,6 +5,7 @@ import com.moeum.conversation.application.command.SaveMessageService
 import com.moeum.conversation.application.publicapi.RecordDayOperations
 import com.moeum.integration.support.AbstractIntegrationTest
 import com.moeum.journal.application.command.GenerationExecutor
+import com.moeum.integration.support.executeNext
 import com.moeum.journal.application.command.RecordDeliveryWorker
 import com.moeum.journal.domain.JournalRepository
 import com.moeum.kernel.UserId

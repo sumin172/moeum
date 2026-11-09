@@ -51,7 +51,6 @@ object CapacityRoleMain {
                 "dbActive" to pool.hikariPoolMXBean.activeConnections,
                 "dbTotal" to pool.hikariPoolMXBean.totalConnections,
                 "dbPending" to pool.hikariPoolMXBean.threadsAwaitingConnection,
-                "configuredClaimBatchSize" to if(role=="conversation-worker") context.getBean<com.moeum.conversation.infrastructure.config.ResponseJobProperties>().claimBatchSize else 0,
                 "providerActive" to fake.active.get(), "providerPeak" to fake.peak.get(),
                 "providerCalls" to fake.calls.get(), "providerFailures" to fake.failures.get(),
                 "sampleCount" to fake.sampleCount(), "waitSamplesDropped" to fake.waitSamplesDropped.get(),

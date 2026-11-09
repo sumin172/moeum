@@ -44,7 +44,7 @@ API는 servlet, 워커는 none web application type이다.
 
 | 역할                | 실행 경로                          | DB pool 최대/최소 | 실행 슬롯 | provider별 동시 호출 상한 |
 |---------------------|------------------------------------|------------------:|----------:|--------------------------:|
-| API                 | HTTP 저장·조회·재시도 접수         |            10 / 2 | 해당 없음 |                 해당 없음 |
+| API                 | HTTP 저장·조회·일기 재시도 접수    |            10 / 2 | 해당 없음 |                 해당 없음 |
 | conversation-worker | 대화 응답·종료 작업 정리           |             4 / 1 |         8 |                         8 |
 | journal-worker      | 마감·전달·일기 생성·종료 작업 정리 |             2 / 1 |         2 |                         2 |
 
@@ -77,15 +77,13 @@ WorkerRoleIsolationIntegrationTest는 각 역할을 기동해 역할별 필수 �
 ## 작업 실행
 
 실행 풀은 가상 스레드를 사용하고 슬롯 수로 동시 작업을 제한한다.
-대화는 남은 슬롯을 먼저 예약하고 한 트랜잭션에서 최대 claim-batch-size(기본 32, 상한 64)개를 선점한다.
-인스턴스별 선점 트랜잭션은 하나이며 기록마다 한 작업을 포함한다.
-기록 잠금 후 새 READ COMMITTED 문장에서 작업 상태와 기록의 원본 순번을 다시 읽어 선점 여부와 관측 상한을 정한다.
-실제 AI 실행은 예약 슬롯의 스레드에서 병렬로 진행한다.
-
-일기는 슬롯 안에서 한 작업씩 선점한다.
+대화·일기 모두 poll마다 남은 슬롯을 먼저 예약하고 한 트랜잭션에서 최대 32개(풀 공통 상한)를 선점한다.
+인스턴스·역할별 선점 트랜잭션은 하나다. 실제 AI 실행은 예약 슬롯의 스레드에서 병렬로 진행한다.
 선점 실패·빈 결과·종료 시 사용하지 않은 슬롯을 반환한다.
-커밋 후 실행 인계 전에 종료된 작업은 리스 만료로 회수한다.
-대화 빈 큐는 poll 간격의 절반 동안 재탐색을 생략한다.
+
+대화 선점은 기록마다 한 작업을 포함한다.
+기록 잠금 후 새 READ COMMITTED 문장에서 작업 상태와 기록의 원본 순번을 다시 읽어 선점 여부와 관측 상한을 정한다.
+커밋 후 실행 인계 전에 종료된 작업은 리스 만료 후 FAILED로 정리된다.
 대화·일기의 기본 poll 간격은 각각 1초다.
 
 마감·전달은 별도 journalDeliveryScheduler에서 기본 5초 간격으로 처리한다.
@@ -101,7 +99,6 @@ WorkerRoleIsolationIntegrationTest는 각 역할을 기동해 역할별 필수 �
 | CONVERSATION_DB_POOL_SIZE        | 대화 인스턴스 최대 DB 연결                                                              |
 | JOURNAL_DB_POOL_SIZE             | 일기 인스턴스 최대 DB 연결                                                              |
 | CONVERSATION_WORKER_CONCURRENCY  | 대화 실행 슬롯                                                                          |
-| CONVERSATION_CLAIM_BATCH_SIZE    | 대화 배치 선점 상한                                                                     |
 | JOURNAL_WORKER_CONCURRENCY       | 일기 실행 슬롯                                                                          |
 | CONVERSATION_LLM_CONCURRENCY     | 대화 프로세스 provider별 동시 호출                                                      |
 | JOURNAL_LLM_CONCURRENCY          | 일기 프로세스 provider별 동시 호출                                                      |
@@ -124,6 +121,10 @@ provider 동시 호출 = Σ(해당 provider를 쓰는 역할별 최대 replica �
 종료 시 scheduler가 멈추고 실행 풀은 새 작업을 받지 않는다.
 기존 실행은 moeum.runtime.shutdown-timeout(기본 10초) 동안 기다린 뒤 interrupt한다.
 JPA 종료 전에 실행 풀의 완료 대기가 수행된다.
-저장하지 못한 PROCESSING 작업은 리스 만료 후 회수한다.
+저장하지 못한 PROCESSING 작업은 리스 만료 후 FAILED로 정리되고 자동으로 다시 실행하지 않는다.
 version이 다른 이전 워커의 결과는 저장 시 거절한다.
+
+리스 만료는 워커 중단에만 발생해야 한다. 배포 종료가 실행 중 작업을 끊으면 그 작업은 사용자에게 실패로 보인다.
+운영 배포 전에 종료 대기(moeum.runtime.shutdown-timeout, Spring 종료 단계 시간, 컨테이너 유예 시간)를
+실행 한 번의 외부 호출 상한(약 70초)보다 길게 맞춘다. 현재 기본값 10초는 이 조건을 충족하지 않는다.
 오류별 재시도 계약은 [대화](CONVERSATION.md)와 [일기](JOURNAL.md)에 있다.
