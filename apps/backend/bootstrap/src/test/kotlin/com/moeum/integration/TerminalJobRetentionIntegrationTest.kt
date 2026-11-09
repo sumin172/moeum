@@ -14,6 +14,7 @@ import com.moeum.journal.domain.model.*
 import com.moeum.journal.infrastructure.scheduling.TerminalGenerationJobCleaner
 import com.moeum.kernel.*
 import com.moeum.platform.job.JobRetentionProperties
+import com.moeum.platform.job.JobStatus
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -173,16 +174,15 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
         val processing = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), old))
         jdbc.update("UPDATE journal.generation_jobs SET status='PROCESSING' WHERE id=?", processing.id.value)
         val recent = generations.save(TestGenerationJobs.pending(user, RecordDayId.generate(), now.plus(Duration.ofDays(10)), now))
-        assertThat(generationCleaner().cleanBatch()).isEqualTo(2)
+        assertThat(generationCleaner().cleanBatch()).isEqualTo(1)
         assertThat(journals.findByUserIdAndRecordDayId(user, day)).isEqualTo(edited)
         assertThat(generations.findByUserIdAndRecordDayId(user, day)).isNull()
         assertThat(registration.register(RecordDelivery(day, user, old, 1))).isFalse()
         assertThatThrownBy { retry.retry(user, day) }.isInstanceOf(JournalGenerationNotRetryableException::class.java)
-        assertThat(generations.findByUserIdAndRecordDayId(user, failed.recordDayId)).isNull()
-        listOf(processing, recent).forEach { assertThat(generations.findByUserIdAndRecordDayId(user, it.recordDayId)).isNotNull() }
+        listOf(failed, processing, recent).forEach { assertThat(generations.findByUserIdAndRecordDayId(user, it.recordDayId)).isNotNull() }
     }
 
-    @Test fun `30일 지난 실패 작업은 원본을 보존하고 정리한다`() {
+    @Test fun `30일 지난 대화 실패 작업은 원본을 보존하고 정리하며 일기 실패 작업은 기한 없이 재시도하도록 보존한다`() {
         val saved = input(user())
         jdbc.update("UPDATE conversation.response_jobs SET status='FAILED',updated_at=? WHERE record_day_id=?",
             Timestamp.from(old), saved.record.id.value)
@@ -190,9 +190,9 @@ class TerminalJobRetentionIntegrationTest : AbstractIntegrationTest() {
         val generation = generations.save(TestGenerationJobs.pending(owner, RecordDayId.generate(), now, old).failedPermanently(old))
 
         assertThat(responseCleaner().cleanBatch()).isEqualTo(1)
-        assertThat(generationCleaner().cleanBatch()).isEqualTo(1)
+        assertThat(generationCleaner().cleanBatch()).isZero()
         assertThat(responses.findByRecord(saved.message.userId, saved.record.id)).isNull()
         assertThat(jdbc.queryForObject<String>("SELECT content FROM conversation.messages WHERE id=?", saved.message.id.value)).isEqualTo("원본")
-        assertThat(generations.findByUserIdAndRecordDayId(owner, generation.recordDayId)).isNull()
+        assertThat(retry.retry(owner, generation.recordDayId).state.status).isEqualTo(JobStatus.PENDING)
     }
 }

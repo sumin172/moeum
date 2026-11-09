@@ -17,11 +17,13 @@ LLM 이벤트는 bounded queue에 offer하고 전용 daemon 스레드가 메트�
 수집 경로는 SLF4J key-value → 비차단 콘솔 버퍼 → Spring Boot Logstash JSON stdout이다.
 외부 수집 계정·에이전트 연결과 보관 기간은 배포 구성 항목이다.
 
-| 이벤트        | 주요 필드                                                                                                     |
-|---------------|---------------------------------------------------------------------------------------------------------------|
-| llm.call      | purpose, provider, model, promptVersion, generationId, latencyMs, succeeded, errorCode, finishReason, 토큰 수 |
-| job.completed | 작업 문맥과 generationId                                                                                      |
-| job.failed    | 작업 문맥, 발급된 generationId, errorCode, 코드 위치                                                          |
+| 이벤트            | 주요 필드                                                                                                     |
+|-------------------|---------------------------------------------------------------------------------------------------------------|
+| llm.call          | purpose, provider, model, promptVersion, generationId, latencyMs, succeeded, errorCode, finishReason, 토큰 수 |
+| job.completed     | 작업 문맥과 generationId                                                                                      |
+| job.failed        | 작업 문맥, 발급된 generationId, errorCode, 코드 위치                                                          |
+| job.lease_expired | 작업 식별자, 정리 결과 상태(대화) 또는 시도 횟수(일기)                                                        |
+| job.input_merged  | 대화 기록 ID, 직전 상태·시도 횟수, 합친 시점(intake·failure)                                                  |
 
 원문·프롬프트·인증 토큰·응답 본문은 로그 이벤트에 포함하지 않는다.
 오류는 안전한 분류와 코드 위치로 기록한다.
@@ -62,12 +64,12 @@ LLM 큐와 콘솔 큐는 종료 시 각각 최대 2초 기다린다.
 
 ## 종료 작업 정리
 
-| 설정                              | 기본값                                                              |
-|-----------------------------------|---------------------------------------------------------------------|
-| moeum.jobs.retention.terminal-age | 기본 30일. 완료·대화 실패는 updated_at, 일기 실패는 created_at 기준 |
-| batch-size                        | 100                                                                 |
-| interval                          | 10초                                                                |
-| initial-delay                     | 1분                                                                 |
+| 설정                              | 기본값                                             |
+|-----------------------------------|----------------------------------------------------|
+| moeum.jobs.retention.terminal-age | 기본 30일. 마지막 완료·실패 전이의 updated_at 기준 |
+| batch-size                        | 100                                                |
+| interval                          | 10초                                               |
+| initial-delay                     | 1분                                                |
 
 역할별 독립 스케줄러가 작은 배치를 실행한다.
 실행당 최대 10배치이며 2초가 지나면 다음 배치를 시작하지 않는다.
@@ -78,12 +80,11 @@ LLM 큐와 콘솔 큐는 종료 시 각각 최대 2초 기다린다.
 COMPLETED는 마지막 완료 전이, FAILED는 마지막 실패 전이의 updated_at부터 기간을 계산한다.
 PENDING/PROCESSING과 열린 기록의 작업은 정리하지 않는다. 열린 기록의 행은 이후 접수가 다시 사용한다.
 
-일기 작업은 COMPLETED 또는 FAILED와 보존 기간 경과 조건으로 정리한다.
+일기 작업은 COMPLETED와 보존 기간 경과 조건으로 정리한다. FAILED는 기한 없이 재시도할 수 있으므로 정리하지 않는다.
 결과 유일키가 재전달의 중복 등록을 차단하며 이미 완성된 일기의 재시도는 409다.
 현재 일기·수정본·USER·ASSISTANT 메시지는 보관한다.
-FAILED 대화 작업은 최근 실패부터, FAILED 일기 작업은 작업 생성부터 기본 30일간 보관한다.
-정리 전에도 기한이 지난 일기 실패 작업의 수동 재개와 retryable 표시는 중단한다.
-일기 수동 재개에는 횟수·대기 제한이 없으며 생성 기준 기한은 재실패해도 연장되지 않는다. 대화 응답에는 수동 재시도가 없다.
+FAILED 대화 작업은 최근 실패부터 기본 30일간 보관한다. FAILED 일기 작업은 일기가 생성되지 않은 날의 목록으로 남는다.
+일기 수동 재개에는 횟수·대기·기한 제한이 없다. 대화 응답에는 수동 재시도가 없다.
 원본 대화의 최종 보관 기간은 미확정이다.
 정리 이후 클라이언트에 보이는 응답은 [대화](CONVERSATION.md)와 [일기](JOURNAL.md) 계약을 따른다.
 

@@ -25,11 +25,11 @@ class TerminalGenerationJobCleaner(
         return jdbc.update("""
         WITH candidates AS (
             SELECT id FROM journal.generation_jobs
-            WHERE (status='COMPLETED' AND updated_at<=?) OR (status='FAILED' AND created_at<=?)
+            WHERE status='COMPLETED' AND updated_at<=?
             ORDER BY updated_at,id LIMIT ? FOR UPDATE SKIP LOCKED
         )
         DELETE FROM journal.generation_jobs WHERE id IN (SELECT id FROM candidates)
-        """.trimIndent(), cutoff, cutoff, properties.batchSize)
+        """.trimIndent(), cutoff, properties.batchSize)
     }
 
     @Scheduled(scheduler = "journalRetentionScheduler", fixedDelayString = $$"${moeum.jobs.retention.interval:PT10S}", initialDelayString = $$"${moeum.jobs.retention.initial-delay:PT1M}")

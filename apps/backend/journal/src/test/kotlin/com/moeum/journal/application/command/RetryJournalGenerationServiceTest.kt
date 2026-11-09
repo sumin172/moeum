@@ -24,31 +24,19 @@ class RetryJournalGenerationServiceTest {
     private val clock = MutableTimeProvider(now)
     private val journals = com.moeum.journal.support.InMemoryJournalRepository()
     private val query = com.moeum.journal.application.query.GetJournalService(journals, jobs,
-        org.mockito.Mockito.mock(com.moeum.identity.application.publicapi.FeatureAccessQuery::class.java),
-        clock, com.moeum.platform.job.JobRetentionProperties())
-    private val service = RetryJournalGenerationService(jobs, clock, journals,
-        com.moeum.platform.job.JobRetentionProperties())
+        org.mockito.Mockito.mock(com.moeum.identity.application.publicapi.FeatureAccessQuery::class.java))
+    private val service = RetryJournalGenerationService(jobs, clock, journals)
 
     private fun job(transform: (GenerationJob) -> GenerationJob) =
         jobs.save(transform(com.moeum.journal.domain.model.TestGenerationJobs.pending(userId, day, now.minusSeconds(3600), now.minusSeconds(7200))))
 
     @Test
-    fun `조회와 실행은 생성 시각의 30일 경계를 공유하고 재실패해도 연장되지 않는다`() {
-        val failed = job { it.copy(createdAt = now.minus(Duration.ofDays(30)).plusSeconds(1),
-            state = it.state.copy(attemptCount = 20)).failedPermanently(now) }
+    fun `최종 실패한 생성은 기한 없이 재시도할 수 있고 조회도 같은 판단을 쓴다`() {
+        job { it.copy(createdAt = now.minus(Duration.ofDays(400))).failedPermanently(now) }
         assertThat(query.getDay(userId, day).generationRetryable).isTrue()
         val restarted = service.retry(userId, day)
-        jobs.save(restarted.failedPermanently(now))
-        clock.now = now.plusSeconds(1)
+        assertThat(restarted.state.status).isEqualTo(JobStatus.PENDING)
         assertThat(query.getDay(userId, day).generationRetryable).isFalse()
-        assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalNotFoundException::class.java)
-        assertThat(jobs.jobs.getValue(failed.id).createdAt).isEqualTo(failed.createdAt)
-    }
-
-    @Test
-    fun `작업 생성 후 30일이면 최근 실패라도 재시도하지 않는다`() {
-        job { it.copy(createdAt = now.minus(Duration.ofDays(30))).failedPermanently(now) }
-        assertThatThrownBy { service.retry(userId, day) }.isInstanceOf(JournalNotFoundException::class.java)
     }
 
     @Test

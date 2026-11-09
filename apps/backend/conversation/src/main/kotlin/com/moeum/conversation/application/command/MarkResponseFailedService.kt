@@ -5,6 +5,7 @@ import com.moeum.conversation.domain.model.ResponseJob
 import com.moeum.conversation.infrastructure.config.ResponseJobProperties
 import com.moeum.kernel.TimeProvider
 import com.moeum.platform.job.JobFailure
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -18,12 +19,21 @@ class MarkResponseFailedService(
     private val timeProvider: TimeProvider,
 ) {
     private val policy = responseJobProperties.toPolicy()
+    private val log = LoggerFactory.getLogger(MarkResponseFailedService::class.java)
 
-    // 재시도가 남았으면 다음 시도를 예약하고, 소진됐으면 최종 실패로 둔다.
+    // 재시도가 남았으면 다음 시도를 예약하고, 소진됐으면 최종 실패로 둔다. 실행 중 접수된 입력이 있으면 합쳐 새 주기를 연다.
     @Transactional
     fun markFailed(job: ResponseJob, failure: JobFailure) {
         val record = records.find(job.userId, job.recordDayId, lock = true) ?: error("응답 기록이 없습니다")
-        responseJobRepository.save(job.failed(policy, timeProvider.now(), failure, record.sourceRevision))
+        val saved = responseJobRepository.save(job.failed(policy, timeProvider.now(), failure, record.sourceRevision))
+        if (saved.mergedInputFrom(job)) {
+            log.atInfo().addKeyValue("event", "job.input_merged")
+                .addKeyValue("recordDayId", job.recordDayId.value)
+                .addKeyValue("previousStatus", job.state.status.name)
+                .addKeyValue("previousAttempts", job.state.attemptCount)
+                .addKeyValue("at", "failure")
+                .log("실패한 시도에 실행 중 접수된 입력을 합쳐 새 실행 주기를 엶")
+        }
     }
 
     // 리스가 만료된 작업을 정리한다. 버전이 올라가므로 중단됐던 워커의 늦은 저장은 거부된다.

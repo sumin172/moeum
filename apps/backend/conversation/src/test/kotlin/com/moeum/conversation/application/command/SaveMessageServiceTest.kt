@@ -223,6 +223,18 @@ class SaveMessageServiceTest {
     }
 
     @Test
+    fun `재시도 대기 중인 작업에 입력이 접수되면 예약 시각을 지키며 새 실행 주기로 합친다`() {
+        val first = service.save(userId, command("2026-08-02T03:00:00Z")).responseJob!!
+        val retryAt = now.plusSeconds(10)
+        responseJobRepository.save(first.copy(state = first.state.copy(attemptCount = 2, nextAttemptAt = retryAt)))
+
+        val merged = service.save(userId, command("2026-08-02T03:01:00Z")).responseJob!!
+        assertThat(merged.state.status).isEqualTo(JobStatus.PENDING)
+        assertThat(merged.state.attemptCount).isZero()
+        assertThat(merged.state.nextAttemptAt).isEqualTo(retryAt)
+    }
+
+    @Test
     fun `한도 소진 시 새 원본과 응답 작업을 남기지 않는다`() {
         val service = newService(quotaLimit=1)
         val first = service.save(userId,command("2026-08-02T03:00:00Z"))
