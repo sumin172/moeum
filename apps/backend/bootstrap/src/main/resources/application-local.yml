@@ -10,6 +10,13 @@ spring:
       idle-timeout: 30000
       max-lifetime: 1800000
       connection-timeout: 10000
+  # 개발용 테스트 콘솔(tools/test-console)을 저장소 파일에서 직접 제공한다. jar에는 포함되지 않는다.
+  # 실행 위치가 저장소 루트(IntelliJ)이거나 apps/backend/bootstrap(Gradle bootRun)인 경우를 모두 찾는다.
+  web:
+    resources:
+      static-locations: file:tools/test-console/, file:../../../tools/test-console/
+  mvc:
+    static-path-pattern: /test-console/**
 
 moeum:
   auth:
