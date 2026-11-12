@@ -73,6 +73,7 @@ class ResponseJobExecutor(
     // resultStatus가 PENDING이면 멈춘 동안 접수된 입력에 대한 새 실행 주기가 열린 것이다.
     private fun logLeaseExpired(job: ResponseJob) {
         log.atWarn().addKeyValue("event", "job.lease_expired")
+            .addKeyValue("jobId", job.recordDayId.value)
             .addKeyValue("recordDayId", job.recordDayId.value)
             .addKeyValue("resultStatus", job.state.status.name)
             .log("리스가 만료된 응답 작업을 정리")

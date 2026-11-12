@@ -22,7 +22,7 @@ LLM 이벤트는 bounded queue에 offer하고 전용 daemon 스레드가 메트�
 | llm.call          | purpose, provider, model, promptVersion, generationId, latencyMs, succeeded, errorCode, finishReason, 토큰 수 |
 | job.completed     | 작업 문맥과 generationId                                                                                      |
 | job.failed        | 작업 문맥, 발급된 generationId, errorCode, 코드 위치                                                          |
-| job.lease_expired | 작업 식별자, 정리 결과 상태(대화) 또는 시도 횟수(일기)                                                        |
+| job.lease_expired | jobId, recordDayId, 정리 결과 상태 resultStatus(대화) 또는 시도 횟수 attempt(일기)                            |
 | job.input_merged  | 대화 기록 ID, 직전 상태·시도 횟수, 합친 시점(intake·failure)                                                  |
 
 원문·프롬프트·인증 토큰·응답 본문은 로그 이벤트에 포함하지 않는다.
