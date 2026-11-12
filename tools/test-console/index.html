@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모음 테스트 콘솔</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --bg:#f6f6f4; --panel:#fff; --line:#e3e3df; --text:#222; --muted:#777; --me:#2f6fed; --ai:#eceae6; --err:#c0392b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:720px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:12px; height:100vh; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .spread { justify-content:space-between; }
+  .gap-top { margin-top:8px; }
+  input, button { font:inherit; }
+  input[type=text] { flex:1; min-width:0; padding:8px; border:1px solid var(--line); border-radius:6px; }
+  button { padding:8px 12px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; }
+  button.primary { background:var(--me); color:#fff; border-color:var(--me); }
+  button:disabled { opacity:.5; cursor:default; }
+  .muted { color:var(--muted); font-size:13px; }
+  .err { color:var(--err); font-size:13px; white-space:pre-wrap; }
+  #chat { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; }
+  /* 메시지·상태 표시는 JS가 data 속성으로 지정한다. */
+  [data-role] { max-width:80%; padding:8px 12px; border-radius:14px; white-space:pre-wrap; line-height:1.45; }
+  [data-role="USER"] { align-self:flex-end; background:var(--me); color:#fff; border-bottom-right-radius:4px; }
+  [data-role="ASSISTANT"] { align-self:flex-start; background:var(--ai); border-bottom-left-radius:4px; }
+  [data-pending] { opacity:.6; }
+  #status { font-size:12px; padding:2px 8px; border-radius:10px; background:var(--ai); }
+  #status[data-status="FAILED"] { background:#f8d7d3; color:var(--err); }
+  #status[data-status="COMPLETED"] { background:#d8efdc; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <div class="row spread">
+      <strong>모음 테스트 콘솔</strong>
+      <span class="muted" id="who">로그인 필요</span>
+    </div>
+    <div class="row gap-top">
+      <div id="googleButton"></div>
+      <button id="logout" hidden>로그아웃</button>
+    </div>
+    <div class="err" id="authError"></div>
+  </div>
+
+  <div class="panel row spread">
+    <span class="muted" id="recordInfo">기록 없음</span>
+    <span id="status">-</span>
+  </div>
+
+  <div class="panel" id="chat"></div>
+
+  <div class="panel">
+    <form class="row" id="sendForm">
+      <label for="input"></label><input type="text" id="input" placeholder="메시지를 입력하세요" autocomplete="off" disabled>
+      <button class="primary" id="send" disabled>보내기</button>
+    </form>
+    <div class="err" id="sendError"></div>
+  </div>
+</div>
+
+<script>
+// 로컬 개발 전용. application-local.yml의 기본 Google Client ID와 같다.
+const GOOGLE_CLIENT_ID = "116753834711-vn81v2sooa2q45d4tdg444l26mmcbeam.apps.googleusercontent.com";
+const POLL_MS = 1500;
+const PAGE_SIZE = 200;
+const DONE = new Set(["COMPLETED", "FAILED", null]);
+
+// 백엔드 응답 형태. identity·conversation 모듈의 interfaces/dto와 이름을 맞춘다.
+/**
+ * @typedef {Object} AuthTokens
+ * @property {string} accessToken
+ * @property {string} refreshToken
+ */
+/**
+ * @typedef {Object} ErrorResponse
+ * @property {string} code
+ * @property {string} message
+ */
+/**
+ * @typedef {Object} ConversationMessage
+ * @property {string} id
+ * @property {string} role
+ * @property {string} content
+ * @property {string} occurredAt
+ * @property {number} streamSequence
+ * @property {number} sourceSequence
+ */
+/**
+ * @typedef {Object} RecordSummary
+ * @property {string} recordDayId
+ * @property {string} displayDate
+ * @property {string} startAt
+ * @property {string} closeAt
+ * @property {?string} closedAt
+ */
+/**
+ * @typedef {Object} RecordConversation
+ * @property {RecordSummary} record
+ * @property {{status: ?string, answeredSourceRevision: number}} response
+ * @property {ConversationMessage[]} messages
+ * @property {?number} nextCursor
+ */
+/**
+ * @typedef {Object} SaveMessageResult
+ * @property {string} recordDayId
+ * @property {ConversationMessage} message
+ * @property {?string} responseStatus
+ */
+/**
+ * Google Identity Services 로그인 콜백 인자
+ * @typedef {Object} GoogleCredentialResponse
+ * @property {string} credential
+ */
+/**
+ * gsi/client 스크립트가 만드는 전역 객체 중 이 페이지가 쓰는 부분
+ * @typedef {Object} GoogleIdentity
+ * @property {function({client_id: string, callback: function(GoogleCredentialResponse)}): void} initialize
+ * @property {function(HTMLElement, Object): void} renderButton
+ */
+/**
+ * @typedef {Object} GoogleGlobal
+ * @property {{id: GoogleIdentity}} accounts
+ */
+
+const byId = (id) => document.getElementById(id);
+const ui = {
+  who: byId("who"),
+  logout: /** @type {HTMLButtonElement} */ (byId("logout")),
+  googleButton: byId("googleButton"),
+  authError: byId("authError"),
+  recordInfo: byId("recordInfo"),
+  status: byId("status"),
+  chat: byId("chat"),
+  sendForm: /** @type {HTMLFormElement} */ (byId("sendForm")),
+  input: /** @type {HTMLInputElement} */ (byId("input")),
+  send: /** @type {HTMLButtonElement} */ (byId("send")),
+  sendError: byId("sendError"),
+};
+
+const store = {
+  get(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  },
+  set(key, value) {
+    try {
+      if (value == null) localStorage.removeItem(key); else localStorage.setItem(key, value);
+    } catch {
+      // 저장소를 쓸 수 없으면 새로고침 시 다시 로그인한다.
+    }
+  },
+};
+
+const state = {
+  access: store.get("accessToken"), refresh: store.get("refreshToken"),
+  recordId: null, lastSeq: 0, polling: false,
+};
+const deviceId = store.get("deviceId") || crypto.randomUUID();
+store.set("deviceId", deviceId);
+
+function saveTokens(access, refresh) {
+  state.access = access;
+  state.refresh = refresh ?? null;
+  store.set("accessToken", access);
+  store.set("refreshToken", state.refresh);
+  renderAuth();
+}
+
+function subjectOf(token) {
+  try { return JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).sub; } catch { return null; }
+}
+
+function renderAuth() {
+  const signedIn = Boolean(state.access);
+  ui.who.textContent = signedIn ? `로그인됨 (user ${subjectOf(state.access) ?? "?"})` : "로그인 필요";
+  ui.logout.hidden = !signedIn;
+  ui.googleButton.hidden = signedIn;
+  ui.input.disabled = !signedIn;
+  ui.send.disabled = !signedIn;
+}
+
+/** 응답 JSON을 반환한다. 호출부가 @type으로 응답 형태를 지정한다. */
+async function api(path, { method = "GET", body, auth = true, retried = false } = {}) {
+  const headers = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (auth && state.access) headers.Authorization = `Bearer ${state.access}`;
+  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (res.status === 401 && auth && !retried && state.refresh && await refreshTokens()) {
+    return api(path, { method, body, auth, retried: true });
+  }
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    /** @type {?ErrorResponse} */
+    const error = data;
+    throw new Error(`${res.status} ${error?.code ?? ""} ${error?.message ?? text}`.trim());
+  }
+  return data;
+}
+
+async function refreshTokens() {
+  try {
+    /** @type {AuthTokens} */
+    const tokens = await api("/api/auth/refresh", { method: "POST", body: { refreshToken: state.refresh }, auth: false });
+    saveTokens(tokens.accessToken, tokens.refreshToken);
+    return true;
+  } catch (e) {
+    saveTokens(null, null);
+    ui.authError.textContent = `세션 만료: ${e.message}`;
+    return false;
+  }
+}
+
+/** @param {GoogleCredentialResponse} response */
+async function onGoogleCredential(response) {
+  ui.authError.textContent = "";
+  try {
+    /** @type {AuthTokens} */
+    const tokens = await api("/api/auth/google", { method: "POST", body: { idToken: response.credential, deviceId }, auth: false });
+    saveTokens(tokens.accessToken, tokens.refreshToken);
+    await loadLatestRecord();
+  } catch (e) {
+    ui.authError.textContent = `로그인 실패: ${e.message}`;
+  }
+}
+
+function initGoogle() {
+  /** @type {GoogleGlobal|undefined} */
+  const gis = window["google"];
+  const identity = gis?.accounts?.id;
+  if (!identity) {
+    setTimeout(initGoogle, 300);
+    return;
+  }
+  identity.initialize({ client_id: GOOGLE_CLIENT_ID, callback: onGoogleCredential });
+  identity.renderButton(ui.googleButton, { theme: "outline", size: "large", text: "signin_with" });
+}
+
+/**
+ * @param {{role: string, content: string}} message
+ * @param {boolean} [pending]
+ */
+function addMessage(message, pending = false) {
+  const bubble = document.createElement("div");
+  bubble.dataset.role = message.role;
+  if (pending) bubble.dataset.pending = "";
+  bubble.textContent = message.content;
+  ui.chat.appendChild(bubble);
+  ui.chat.scrollTop = ui.chat.scrollHeight;
+  return bubble;
+}
+
+function setStatus(status) {
+  ui.status.textContent = status ?? "응답 없음";
+  ui.status.dataset.status = status ?? "";
+}
+
+function resetChat() {
+  ui.chat.replaceChildren();
+  state.recordId = null;
+  state.lastSeq = 0;
+  ui.recordInfo.textContent = "기록 없음";
+  setStatus(undefined);
+}
+
+async function fetchRecord(recordId) {
+  if (state.recordId !== recordId) {
+    ui.chat.replaceChildren();
+    state.lastSeq = 0;
+  }
+  state.recordId = recordId;
+  /** @type {RecordConversation} */
+  let data;
+  // nextCursor는 페이지의 마지막 순번(빈 페이지면 요청 커서)이라 끝 판정에 쓸 수 없다. 꽉 찬 페이지일 때만 이어 읽는다.
+  do {
+    data = await api(`/api/conversations/records/${recordId}?after=${state.lastSeq}&limit=${PAGE_SIZE}`);
+    for (const message of data.messages) {
+      addMessage(message);
+      state.lastSeq = Math.max(state.lastSeq, message.streamSequence);
+    }
+  } while (data.messages.length === PAGE_SIZE);
+  const closeAt = new Date(data.record.closeAt).toLocaleString();
+  ui.recordInfo.textContent = `기록 ${data.record.displayDate} · ${recordId.slice(0, 8)}… · 마감 ${closeAt}`;
+  setStatus(data.response.status);
+  return data.response.status;
+}
+
+async function poll() {
+  if (state.polling) return;
+  state.polling = true;
+  try {
+    while (state.recordId) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      if (DONE.has(await fetchRecord(state.recordId))) break;
+    }
+  } catch (e) {
+    ui.sendError.textContent = `조회 실패: ${e.message}`;
+  } finally {
+    state.polling = false;
+  }
+}
+
+async function loadLatestRecord() {
+  resetChat();
+  /** @type {RecordSummary[]} */
+  const records = await api("/api/conversations/records?limit=1");
+  const open = records.find((record) => !record.closedAt);
+  if (open && !DONE.has(await fetchRecord(open.recordDayId))) await poll();
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+  const content = ui.input.value.trim();
+  if (!content) return;
+  ui.sendError.textContent = "";
+  ui.input.value = "";
+  const pendingBubble = addMessage({ role: "USER", content }, true);
+  try {
+    /** @type {SaveMessageResult} */
+    const saved = await api("/api/conversations/messages", {
+      method: "POST",
+      body: {
+        clientMessageId: crypto.randomUUID(), content, occurredAt: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+    });
+    pendingBubble.remove();
+    if (state.recordId !== saved.recordDayId) resetChat();
+    await fetchRecord(saved.recordDayId);
+    await poll();
+  } catch (e) {
+    pendingBubble.remove();
+    ui.input.value = content;
+    ui.sendError.textContent = `전송 실패: ${e.message}`;
+  }
+}
+
+async function logout() {
+  if (state.refresh) {
+    try {
+      await api("/api/auth/logout", { method: "POST", body: { refreshToken: state.refresh }, auth: false });
+    } catch {
+      // 서버 세션 정리 실패와 관계없이 화면에서는 로그아웃한다.
+    }
+  }
+  saveTokens(null, null);
+  resetChat();
+}
+
+ui.sendForm.addEventListener("submit", sendMessage);
+ui.logout.addEventListener("click", logout);
+renderAuth();
+initGoogle();
+if (state.access) loadLatestRecord().catch((e) => { ui.authError.textContent = e.message; });
+</script>
+</body>
+</html>

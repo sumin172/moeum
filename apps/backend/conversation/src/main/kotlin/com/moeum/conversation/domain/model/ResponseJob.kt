@@ -45,9 +45,11 @@ data class ResponseJob(
         return copy(state = state.copy(status = JobStatus.PENDING, nextAttemptAt = next), updatedAt = now)
     }
 
-    // 실패한 시도가 있는 주기에 새 입력이 합쳐져 새 실행 주기가 열렸는가(진단 로그용)
+    // 실패한 시도가 있는 주기에 새 입력이 합쳐져 새 실행 주기가 열렸는가(진단 로그용).
+    // 완료한 주기도 시도 횟수가 남지만, 그 뒤의 새 실행 주기는 합친 것이 아니므로 제외한다.
     fun mergedInputFrom(previous: ResponseJob): Boolean =
-        previous.state.attemptCount > 0 && state.status == JobStatus.PENDING && state.attemptCount == 0
+        previous.state.status != JobStatus.COMPLETED && previous.state.attemptCount > 0 &&
+            state.status == JobStatus.PENDING && state.attemptCount == 0
 
     // 리스가 만료된(워커가 중단된) 실행은 다시 실행하지 않는다. 이 실행 주기 뒤에 접수된 입력이 없으면 FAILED로 두고,
     // 있으면 다른 최종 실패와 같이 그 입력에 대한 새 실행 주기를 연다.

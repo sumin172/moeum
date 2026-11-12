@@ -23,7 +23,8 @@ class SecurityConfig(
 
     companion object {
         // 인증 없이 열어야 하는 경로. 로그인처럼 "토큰을 아직 못 받은 상태"에서 호출돼야 하는 API만 여기 추가한다.
-        private val PUBLIC_PATHS = arrayOf("/api/auth/**")
+        // /test-console/**은 local 프로필만 제공하는 개발용 정적 페이지다. 다른 프로필에는 해당 리소스가 없다.
+        private val PUBLIC_PATHS = arrayOf("/api/auth/**", "/test-console/**")
     }
 
     @Bean

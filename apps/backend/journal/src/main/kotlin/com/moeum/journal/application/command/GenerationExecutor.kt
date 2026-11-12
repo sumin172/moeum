@@ -66,7 +66,7 @@ class GenerationExecutor(
         log.atWarn().addKeyValue("event", "job.lease_expired")
             .addKeyValue("jobId", job.id.value)
             .addKeyValue("recordDayId", job.recordDayId.value)
-            .addKeyValue("attemptCount", job.state.attemptCount)
+            .addKeyValue("attempt", job.state.attemptCount)
             .log("리스가 만료된 일기 생성 작업을 실패로 정리")
     }
 

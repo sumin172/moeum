@@ -27,11 +27,17 @@ Claude 공급자는 등록돼 있고 라우트 설정으로 선택할 수 있지
 라우트가 없거나 선택된 공급자의 필수 설정이 비어 있으면 기동을 거부하고, 오류에는 설정 이름만 남긴다.
 대화 워커는 대화 라우트, 일기 워커는 일기 라우트를 검사하며 local-all은 둘 다 검사한다.
 
-| 공급자     | 필수 설정                                                   |
-|------------|-------------------------------------------------------------|
-| gemini     | `moeum.gemini.api-key`                                      |
-| cloudflare | `moeum.cloudflare.account-id`, `moeum.cloudflare.api-token` |
-| claude     | `moeum.claude.api-key`                                      |
+| 공급자     | 필수 설정                                                   | 환경변수                                                    |
+|------------|-------------------------------------------------------------|-------------------------------------------------------------|
+| gemini     | `moeum.gemini.api-key`                                      | `MOEUM_GEMINI_API_KEY`                                      |
+| cloudflare | `moeum.cloudflare.account-id`, `moeum.cloudflare.api-token` | `MOEUM_CLOUDFLARE_ACCOUNT_ID`, `MOEUM_CLOUDFLARE_API_TOKEN` |
+| claude     | `moeum.claude.api-key`                                      | `MOEUM_CLAUDE_API_KEY`                                      |
+
+공급자 인증 값은 yml에 적지 않고 환경변수로만 주입한다. 로컬과 운영이 같은 환경변수 이름을 쓴다.
+설정 키와 환경변수를 잇는 매핑은 코드나 yml에 없다. Spring Boot가 기동 시 `@ConfigurationProperties`의 설정 키(예: `moeum.cloudflare.api-token`)를
+환경변수 이름으로 변환해 찾는다. 변환 규칙은 대문자화와 점·대시의 `_` 치환이다(대시를 제거한 `MOEUM_CLOUDFLARE_APITOKEN`도 같은 키로 인식한다).
+이 규칙과 다른 이름(예: `CLOUDFLARE_API_TOKEN`)은 연결되지 않으며, 값이 비면 기동 검사가 설정 키 이름으로 실패를 보고한다.
+로컬은 gitignore 대상인 `apps/backend/.env`를 실행 구성 또는 셸에서 불러온다.
 
 새 공급자는 `LlmProvider.missingSettings()`로 필수 설정을 선언한다. 시험은 실제 공급자의 더미 키 대신 fake 공급자로 라우트를 지정한다.
 

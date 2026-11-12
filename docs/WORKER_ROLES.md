@@ -5,16 +5,8 @@
 ## Cloudflare 대화 연결
 
 대화 기본 경로는 `@cf/qwen/qwen3-30b-a3b-fp8`, 일기는 Gemini다. 자동 공급자 폴백은 없다.
-대화 워커를 실행하는 PowerShell 또는 배포 환경에 다음 값을 지정한다. API Token은 해당 계정의 Workers AI 실행 권한이 필요하다.
-
-```powershell
-$env:CLOUDFLARE_ACCOUNT_ID = "계정 ID"
-$env:CLOUDFLARE_API_TOKEN = "API Token"
-```
-
-설정 경로는 `moeum.cloudflare.account-id`, `moeum.cloudflare.api-token`이다.
-로컬에서도 환경변수로 주입한다. `application-local.yml`은 저장소가 추적하는 파일이므로 `${CLOUDFLARE_ACCOUNT_ID:}`·`${CLOUDFLARE_API_TOKEN:}`의 콜론 뒤 기본값에 실제 값을 넣지 않는다.
-키를 저장소에 기록하지 않는다. 대화 워커는 대화 라우트가 선택한 공급자의 필수 설정이 없으면 기동하지 않는다. 규칙은 [AI 공급자](LLM.md#공급자-설정과-기동-검사)를 따른다.
+대화 워커를 실행하는 환경에 `MOEUM_CLOUDFLARE_ACCOUNT_ID`, `MOEUM_CLOUDFLARE_API_TOKEN`을 지정한다. API Token은 해당 계정의 Workers AI 실행 권한이 필요하다.
+키를 저장소에 기록하지 않는다. 대화 워커는 대화 라우트가 선택한 공급자의 필수 설정이 없으면 기동하지 않는다. 주입 방식과 규칙은 [AI 공급자](LLM.md#공급자-설정과-기동-검사)를 따른다.
 연결·읽기 제한은 각각 기본 3초·60초이며 `moeum.cloudflare.connection-timeout-ms`, `read-timeout-ms`로 조정한다.
 `thinking-budget: 0`은 마지막 사용자 메시지에 `/no_think`를 추가하는 소프트 제어다. 강제 비활성화를 보장하지 않는다.
 완결된 선두 추론 블록은 응답에서 제거하고, 미완결 추론·출력 잘림·비정상 종료는 저장하지 않는다.
@@ -123,5 +115,5 @@ version이 다른 이전 워커의 결과는 저장 시 거절한다.
 
 리스 만료는 워커 중단에만 발생해야 한다. 배포 종료가 실행 중 작업을 끊으면 그 작업은 사용자에게 실패로 보인다.
 운영 배포 전에 종료 대기(moeum.runtime.shutdown-timeout, Spring 종료 단계 시간, 컨테이너 유예 시간)를
-실행 한 번의 외부 호출 상한(약 70초)보다 길게 맞춘다. 현재 기본값 10초는 이 조건을 충족하지 않는다.
+실행 한 번의 외부 호출 상한(약 1분)보다 길게 맞춘다. 현재 기본값 10초는 이 조건을 충족하지 않는다.
 오류별 재시도 계약은 [대화](CONVERSATION.md)와 [일기](JOURNAL.md)에 있다.
